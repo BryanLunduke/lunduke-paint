@@ -2,8 +2,6 @@
 
 #include "tools/tool.hpp"
 
-#include "tools/tool_options_ui.hpp"
-
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
@@ -49,14 +47,20 @@ private:
 
 Gtk::Widget* PencilTool::options_widget() {
   if (!options_) {
-    options_ = tool_options_ui::make_column();
-    size_spin_ = tool_options_ui::make_spin(1, 64, 1, host_ != nullptr ? host_->stroke_size() : 1);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    auto* label = Gtk::manage(new Gtk::Label("Size"));
+    size_spin_ = Gtk::manage(new Gtk::SpinButton());
+    size_spin_->set_range(1, 64);
+    size_spin_->set_increments(1, 4);
+    size_spin_->set_digits(0);
+    size_spin_->set_value(host_ != nullptr ? host_->stroke_size() : 1);
     size_spin_->signal_value_changed().connect([this]() {
       if (host_ != nullptr) {
         host_->set_stroke_size(size_spin_->get_value_as_int());
       }
     });
-    tool_options_ui::pack_labeled(*options_, "Size", "Pencil size", *size_spin_);
+    options_->pack_start(*label, Gtk::PACK_SHRINK);
+    options_->pack_start(*size_spin_, Gtk::PACK_SHRINK);
     options_->show_all();
   }
   return options_.get();

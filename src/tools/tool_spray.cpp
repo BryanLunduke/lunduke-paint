@@ -2,8 +2,6 @@
 
 #include "tools/tool.hpp"
 
-#include "tools/tool_options_ui.hpp"
-
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
@@ -48,14 +46,26 @@ private:
 
 Gtk::Widget* SprayTool::options_widget() {
   if (!options_) {
-    options_ = tool_options_ui::make_column();
-    auto* rspin = tool_options_ui::make_spin(1, 64, 1, radius_);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    auto* rlabel = Gtk::manage(new Gtk::Label("Radius"));
+    auto* rspin = Gtk::manage(new Gtk::SpinButton());
+    rspin->set_range(1, 64);
+    rspin->set_increments(1, 4);
+    rspin->set_digits(0);
+    rspin->set_value(radius_);
     rspin->signal_value_changed().connect([this, rspin]() { radius_ = rspin->get_value_as_int(); });
-    tool_options_ui::pack_labeled(*options_, "Rad", "Spray radius", *rspin);
-    auto* dspin = tool_options_ui::make_spin(1, 100, 1, density_, 10);
+    auto* dlabel = Gtk::manage(new Gtk::Label("Density"));
+    auto* dspin = Gtk::manage(new Gtk::SpinButton());
+    dspin->set_range(1, 100);
+    dspin->set_increments(1, 10);
+    dspin->set_digits(0);
+    dspin->set_value(density_);
     dspin->set_tooltip_text("Dots per stamp (1 = sparse, 100 = heavy)");
     dspin->signal_value_changed().connect([this, dspin]() { density_ = dspin->get_value_as_int(); });
-    tool_options_ui::pack_labeled(*options_, "Dens", "Spray density", *dspin);
+    options_->pack_start(*rlabel, Gtk::PACK_SHRINK);
+    options_->pack_start(*rspin, Gtk::PACK_SHRINK);
+    options_->pack_start(*dlabel, Gtk::PACK_SHRINK);
+    options_->pack_start(*dspin, Gtk::PACK_SHRINK);
     options_->show_all();
   }
   return options_.get();

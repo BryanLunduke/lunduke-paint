@@ -19,7 +19,7 @@ user layers.
 
 ## 0.4
 
-Tool options sit at the bottom of the left toolbox (vertical, narrow-column controls). Keeps the 0.3 toolbox chrome and the 0.2 feature set. (Howdy intro sources retained but launch-gated off by default.)
+Tool options sit in a horizontal strip under the canvas (above the status bar), with the 0.3-style left toolbox (tools + FG/BG only). Keeps the 0.2 feature set. (Howdy intro sources retained but launch-gated off by default.)
 
 ## 0.2
 

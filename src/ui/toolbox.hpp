@@ -25,8 +25,6 @@ public:
   void add_tool_button(const std::string& id, const std::string& tooltip, const std::string& icon_name);
   void set_active_tool(const std::string& id);
   void set_colors(Color fg, Color bg);
-  // Host the per-tool options strip at the bottom of this panel (does not widen).
-  void attach_tool_options(Gtk::Widget& options);
 
   const std::string& active_tool_id() const { return selection_.active_id(); }
   // True when the button for id currently carries the selected-tool highlight.

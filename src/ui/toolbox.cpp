@@ -129,23 +129,6 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
 
 }
 
-
-void Toolbox::attach_tool_options(Gtk::Widget& options) {
-  if (options.get_parent() == this) {
-    return;
-  }
-  if (options.get_parent() != nullptr) {
-    options.get_parent()->remove(options);
-  }
-  options.set_hexpand(false);
-  options.set_halign(Gtk::ALIGN_FILL);
-  options.set_valign(Gtk::ALIGN_START);
-  options.set_margin_start(kSideAir);
-  options.set_margin_end(kSideAir);
-  options.set_margin_top(4);
-  pack_start(options, Gtk::PACK_SHRINK);
-}
-
 void Toolbox::add_tool_button(const std::string& id, const std::string& tooltip,
                               const std::string& icon_name) {
   auto* button = Gtk::manage(new Gtk::Button());

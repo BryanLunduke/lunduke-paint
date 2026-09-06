@@ -283,7 +283,6 @@ void MainWindow::build_ui() {
 
   auto* left_sep = Gtk::make_managed<Gtk::Separator>(Gtk::ORIENTATION_VERTICAL);
 
-  toolbox_.attach_tool_options(tool_options_bar_);
   work_area_.pack_start(toolbox_, Gtk::PACK_SHRINK);
   work_area_.pack_start(*left_sep, Gtk::PACK_SHRINK);
   work_area_.pack_start(canvas_, Gtk::PACK_EXPAND_WIDGET);
@@ -309,6 +308,7 @@ void MainWindow::build_ui() {
   root_.pack_start(toolbar_, Gtk::PACK_SHRINK);
   root_.pack_start(tab_bar_, Gtk::PACK_SHRINK);
   root_.pack_start(work_area_, Gtk::PACK_EXPAND_WIDGET);
+  root_.pack_start(tool_options_bar_, Gtk::PACK_SHRINK);
   root_.pack_start(status_bar_, Gtk::PACK_SHRINK);
 
   canvas_.signal_pointer_moved().connect(

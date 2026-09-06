@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "tools/tool.hpp"
-
-#include "tools/tool_options_ui.hpp"
 #include "tools/selection_xform.hpp"
 
 #include "doc/document.hpp"
@@ -42,8 +40,13 @@ private:
 
 Gtk::Widget* MagicWandTool::options_widget() {
   if (!options_) {
-    options_ = tool_options_ui::make_column();
-    auto* spin = tool_options_ui::make_spin(0, 255, 1, tolerance_, 16);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    auto* label = Gtk::manage(new Gtk::Label("Similarity"));
+    auto* spin = Gtk::manage(new Gtk::SpinButton());
+    spin->set_range(0, 255);
+    spin->set_increments(1, 16);
+    spin->set_digits(0);
+    spin->set_value(tolerance_);
     spin->set_tooltip_text("0 = exact color, 255 = select every connected pixel");
     spin->signal_value_changed().connect([this, spin]() {
       tolerance_ = spin->get_value_as_int();
@@ -51,7 +54,8 @@ Gtk::Widget* MagicWandTool::options_widget() {
         host_->set_fill_tolerance(tolerance_);
       }
     });
-    tool_options_ui::pack_labeled(*options_, "Sim", "Selection similarity / tolerance", *spin);
+    options_->pack_start(*label, Gtk::PACK_SHRINK);
+    options_->pack_start(*spin, Gtk::PACK_SHRINK);
     options_->show_all();
   }
   return options_.get();

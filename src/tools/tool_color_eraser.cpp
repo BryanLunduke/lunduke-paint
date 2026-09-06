@@ -2,8 +2,6 @@
 
 #include "tools/tool.hpp"
 
-#include "tools/tool_options_ui.hpp"
-
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
@@ -51,14 +49,26 @@ private:
 
 Gtk::Widget* ColorEraserTool::options_widget() {
   if (!options_) {
-    options_ = tool_options_ui::make_column();
-    auto* sspin = tool_options_ui::make_spin(1, 64, 1, size_);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    auto* slabel = Gtk::manage(new Gtk::Label("Size"));
+    auto* sspin = Gtk::manage(new Gtk::SpinButton());
+    sspin->set_range(1, 64);
+    sspin->set_increments(1, 4);
+    sspin->set_digits(0);
+    sspin->set_value(size_);
     sspin->signal_value_changed().connect([this, sspin]() { size_ = sspin->get_value_as_int(); });
-    tool_options_ui::pack_labeled(*options_, "Size", "Color eraser size", *sspin);
-    auto* tspin = tool_options_ui::make_spin(0, 255, 1, tolerance_, 16);
+    auto* tlabel = Gtk::manage(new Gtk::Label("Similarity"));
+    auto* tspin = Gtk::manage(new Gtk::SpinButton());
+    tspin->set_range(0, 255);
+    tspin->set_increments(1, 16);
+    tspin->set_digits(0);
+    tspin->set_value(tolerance_);
     tspin->set_tooltip_text("0 = exact FG color, 255 = erase everything in the stroke");
     tspin->signal_value_changed().connect([this, tspin]() { tolerance_ = tspin->get_value_as_int(); });
-    tool_options_ui::pack_labeled(*options_, "Sim", "Color similarity", *tspin);
+    options_->pack_start(*slabel, Gtk::PACK_SHRINK);
+    options_->pack_start(*sspin, Gtk::PACK_SHRINK);
+    options_->pack_start(*tlabel, Gtk::PACK_SHRINK);
+    options_->pack_start(*tspin, Gtk::PACK_SHRINK);
     options_->show_all();
   }
   return options_.get();

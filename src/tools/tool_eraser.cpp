@@ -2,8 +2,6 @@
 
 #include "tools/tool.hpp"
 
-#include "tools/tool_options_ui.hpp"
-
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
@@ -47,10 +45,16 @@ private:
 
 Gtk::Widget* EraserTool::options_widget() {
   if (!options_) {
-    options_ = tool_options_ui::make_column();
-    auto* spin = tool_options_ui::make_spin(1, 64, 1, size_);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    auto* label = Gtk::manage(new Gtk::Label("Size"));
+    auto* spin = Gtk::manage(new Gtk::SpinButton());
+    spin->set_range(1, 64);
+    spin->set_increments(1, 4);
+    spin->set_digits(0);
+    spin->set_value(size_);
     spin->signal_value_changed().connect([this, spin]() { size_ = spin->get_value_as_int(); });
-    tool_options_ui::pack_labeled(*options_, "Size", "Eraser size", *spin);
+    options_->pack_start(*label, Gtk::PACK_SHRINK);
+    options_->pack_start(*spin, Gtk::PACK_SHRINK);
     options_->show_all();
   }
   return options_.get();

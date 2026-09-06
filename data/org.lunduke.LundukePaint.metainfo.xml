@@ -39,7 +39,7 @@
   <releases>
     <release version="0.4" date="2026-09-05">
       <description>
-        <p>Lunduke Paint 0.4: tool options move to the bottom of the left toolbox; compact narrow-column controls.</p>
+        <p>Lunduke Paint 0.4: horizontal tool options under the canvas (above the status bar); left toolbox keeps tools and 0.3-style FG/BG only.</p>
       </description>
     </release>
     <release version="0.3" date="2026-09-03">

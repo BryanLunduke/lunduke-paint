@@ -2,8 +2,6 @@
 
 #include "tools/tool.hpp"
 
-#include "tools/tool_options_ui.hpp"
-
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
@@ -157,7 +155,8 @@ private:
 
 Gtk::Widget* TextTool::options_widget() {
   if (!options_) {
-    options_ = tool_options_ui::make_column();
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    auto* flabel = Gtk::manage(new Gtk::Label("Font"));
     auto* font = Gtk::manage(new Gtk::ComboBoxText());
     PangoFontMap* map = pango_cairo_font_map_get_default();
     PangoFontFamily** families = nullptr;
@@ -187,15 +186,23 @@ Gtk::Widget* TextTool::options_widget() {
       family_ = font->get_active_text();
     }
     font->signal_changed().connect([this, font]() { family_ = font->get_active_text(); });
-    tool_options_ui::constrain_combo(*font);
-    tool_options_ui::pack_labeled(*options_, "Font", "Font family", *font);
-    auto* spin = tool_options_ui::make_spin(6, 128, 1, size_pt_, 8);
+    auto* slabel = Gtk::manage(new Gtk::Label("Size"));
+    auto* spin = Gtk::manage(new Gtk::SpinButton());
+    spin->set_range(6, 128);
+    spin->set_increments(1, 8);
+    spin->set_digits(0);
+    spin->set_value(size_pt_);
     spin->signal_value_changed().connect([this, spin]() { size_pt_ = spin->get_value_as_int(); });
-    tool_options_ui::pack_labeled(*options_, "Size", "Font size (pt)", *spin);
-    auto* bold = tool_options_ui::make_check("Bold", "Bold", bold_);
+    auto* bold = Gtk::manage(new Gtk::CheckButton("Bold"));
+    bold->set_active(bold_);
     bold->signal_toggled().connect([this, bold]() { bold_ = bold->get_active(); });
-    auto* italic = tool_options_ui::make_check("Italic", "Italic", italic_);
+    auto* italic = Gtk::manage(new Gtk::CheckButton("Italic"));
+    italic->set_active(italic_);
     italic->signal_toggled().connect([this, italic]() { italic_ = italic->get_active(); });
+    options_->pack_start(*flabel, Gtk::PACK_SHRINK);
+    options_->pack_start(*font, Gtk::PACK_SHRINK);
+    options_->pack_start(*slabel, Gtk::PACK_SHRINK);
+    options_->pack_start(*spin, Gtk::PACK_SHRINK);
     options_->pack_start(*bold, Gtk::PACK_SHRINK);
     options_->pack_start(*italic, Gtk::PACK_SHRINK);
     options_->show_all();

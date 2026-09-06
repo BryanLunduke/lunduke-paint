@@ -2,8 +2,6 @@
 
 #include "tools/tool.hpp"
 
-#include "tools/tool_options_ui.hpp"
-
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
@@ -59,14 +57,13 @@ private:
 
 Gtk::Widget* PolygonTool::options_widget() {
   if (!options_) {
-    options_ = tool_options_ui::make_column();
-
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    auto* mlabel = Gtk::manage(new Gtk::Label("Mode"));
     auto* combo = Gtk::manage(new Gtk::ComboBoxText());
     combo->append("stroke", "Stroke");
     combo->append("fill", "Fill");
-    combo->append("both", "Both");
+    combo->append("both", "Stroke and fill");
     combo->set_active(0);
-    tool_options_ui::constrain_combo(*combo);
     combo->signal_changed().connect([this, combo]() {
       const Glib::ustring id = combo->get_active_id();
       if (id == "fill") {
@@ -77,13 +74,20 @@ Gtk::Widget* PolygonTool::options_widget() {
         fill_mode_ = ShapeFillMode::Stroke;
       }
     });
-    tool_options_ui::pack_labeled(*options_, "Mode", "Stroke / Fill / Both", *combo);
-
-    auto* spin = tool_options_ui::make_spin(1, 64, 1, thickness_);
+    auto* tlabel = Gtk::manage(new Gtk::Label("Thickness"));
+    auto* spin = Gtk::manage(new Gtk::SpinButton());
+    spin->set_range(1, 64);
+    spin->set_increments(1, 4);
+    spin->set_digits(0);
+    spin->set_value(thickness_);
     spin->signal_value_changed().connect([this, spin]() { thickness_ = spin->get_value_as_int(); });
-    tool_options_ui::pack_labeled(*options_, "Thk", "Stroke thickness", *spin);
-    auto* aa = tool_options_ui::make_check("AA", "Anti-alias", antialias_);
+    auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
+    aa->set_active(antialias_);
     aa->signal_toggled().connect([this, aa]() { antialias_ = aa->get_active(); });
+    options_->pack_start(*mlabel, Gtk::PACK_SHRINK);
+    options_->pack_start(*combo, Gtk::PACK_SHRINK);
+    options_->pack_start(*tlabel, Gtk::PACK_SHRINK);
+    options_->pack_start(*spin, Gtk::PACK_SHRINK);
     options_->pack_start(*aa, Gtk::PACK_SHRINK);
     options_->show_all();
   }
