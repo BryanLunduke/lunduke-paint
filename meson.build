@@ -85,7 +85,6 @@ lunduke_paint_sources = files(
   'src/tools/tool_line.cpp',
   'src/tools/tool_rectangle.cpp',
   'src/tools/tool_ellipse.cpp',
-  'src/tools/tool_color_eraser.cpp',
   'src/tools/tool_spray.cpp',
   'src/tools/tool_rounded_rect.cpp',
   'src/tools/tool_polyline.cpp',

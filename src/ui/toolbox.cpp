@@ -4,6 +4,7 @@
 
 #include <gdkmm/screen.h>
 #include <gtkmm/image.h>
+#include <gdkmm/pixbuf.h>
 #include <gtkmm/stylecontext.h>
 
 #include <cmath>
@@ -135,8 +136,14 @@ void Toolbox::add_tool_button(const std::string& id, const std::string& tooltip,
   const std::string resource =
       "/org/lunduke/LundukePaint/icons/scalable/actions/" + icon_name + ".svg";
   auto* image = Gtk::manage(new Gtk::Image());
-  image->set_from_resource(resource);
-  image->set_pixel_size(18);
+  // Force an 18×18 raster so oversized SVG viewBoxes cannot spill the button.
+  try {
+    auto pixbuf = Gdk::Pixbuf::create_from_resource(resource, 18, 18, true);
+    image->set(pixbuf);
+  } catch (const Glib::Error&) {
+    image->set_from_resource(resource);
+    image->set_pixel_size(18);
+  }
   button->set_image(*image);
   button->set_tooltip_text(tooltip);
   button->set_relief(Gtk::RELIEF_NONE);

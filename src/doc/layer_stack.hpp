@@ -55,7 +55,7 @@ public:
   void composite_rect(std::uint8_t* dest, int dest_stride, Rect view,
                       const Layer* tool_override = nullptr, int tool_index = -1) const;
   Color composite_pixel(int x, int y, const Layer* tool_override = nullptr,
-                        int tool_index = -1) const;
+                        int tool_index = -1, int skip_index = -1) const;
 
   // Merge layer[index] onto layer[index-1] using the upper layer's blend/opacity.
   bool merge_down(int index);

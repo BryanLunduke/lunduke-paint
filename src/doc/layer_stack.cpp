@@ -223,9 +223,13 @@ void LayerStack::composite_rect(std::uint8_t* dest, int dest_stride, Rect view,
   }
 }
 
-Color LayerStack::composite_pixel(int x, int y, const Layer* tool_override, int tool_index) const {
+Color LayerStack::composite_pixel(int x, int y, const Layer* tool_override, int tool_index,
+                                  int skip_index) const {
   std::uint8_t dest[4] = {0, 0, 0, 0};
   for (int i = 0; i < count(); ++i) {
+    if (i == skip_index) {
+      continue;
+    }
     const Layer& meta = at(i);
     if (!meta.visible()) {
       continue;

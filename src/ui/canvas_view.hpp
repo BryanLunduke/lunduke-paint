@@ -30,6 +30,9 @@ public:
   void invalidate_rect(Rect rect);
   void invalidate_all();
   void refresh_size();
+  // Re-center the document in the viewport after the pane size changes
+  // (e.g. right dock shown/hidden).
+  void recenter_in_viewport();
 
   // Give the drawing area keyboard focus so the single-letter tool shortcuts
   // reach MainWindow::on_key_press instead of the Size entry.

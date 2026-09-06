@@ -21,6 +21,8 @@ user layers.
 
 Tool options sit in a horizontal strip under the canvas (above the status bar), with the 0.3-style left toolbox (tools + FG/BG only). Keeps the 0.2 feature set. (Howdy intro sources retained but launch-gated off by default.)
 
+0.4-3: dock show/hide re-centers the canvas; Save Image dialog sized + live type/extension sync; About tagline; wand/freeform toolbox icons sized to peers; selection move no longer flashes a bogus transparency checker; Color Eraser tool removed.
+
 ## 0.2
 
 What works:

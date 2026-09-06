@@ -6,6 +6,7 @@
 #include "doc/layer.hpp"
 #include "doc/layer_stack.hpp"
 #include "doc/selection.hpp"
+#include "raster/blend.hpp"
 #include "tools/selection_xform.hpp"
 #include "ui/intro_howdy.hpp"
 
@@ -35,6 +36,50 @@ void write_argb32(std::uint8_t* dst, Color c) {
   dst[1] = static_cast<std::uint8_t>((static_cast<int>(c.g) * a + 127) / 255);
   dst[2] = static_cast<std::uint8_t>((static_cast<int>(c.r) * a + 127) / 255);
   dst[3] = c.a;
+}
+
+
+// Preview floating selection without wiping the canvas to the transparency
+// checker. Cut-holes hide only the active layer; float pixels are alpha-
+// composited (transparent-move keeps empty float pixels see-through;
+// opaque-move fills empty float pixels with the BG well color).
+Color apply_floating_overlay(const Document* document, Color c, int x, int y) {
+  if (document == nullptr) {
+    return c;
+  }
+  const Selection& sel = document->selection();
+  if (!sel.floating()) {
+    return c;
+  }
+  if (!sel.copy_mode() && sel.origin_rect().contains(x, y)) {
+    // Cut-hole preview: hide the active layer, keep layers below; never fall
+    // through to the transparency checker on an otherwise opaque canvas.
+    Color below = document->layers().composite_pixel(x, y, nullptr, -1,
+                                                     document->layers().active_index());
+    if (below.a != 0) {
+      c = below;
+    } else {
+      Color bg = document->canvas_background();
+      c = (bg.a != 0) ? bg : Color::white();
+    }
+  }
+  if (sel.float_rect().contains(x, y)) {
+    const Color f = sel.float_pixel(x - sel.float_x(), y - sel.float_y());
+    if (f.a == 0) {
+      if (!sel.transparent_move()) {
+        c = document->background();
+      }
+      // transparent_move: leave underlying c
+    } else if (f.a == 255) {
+      c = f;
+    } else {
+      std::uint8_t dest[4] = {c.r, c.g, c.b, c.a};
+      const std::uint8_t src[4] = {f.r, f.g, f.b, f.a};
+      blend_pixel(dest, src, BlendMode::Normal, 1.0f);
+      c = Color{dest[0], dest[1], dest[2], dest[3]};
+    }
+  }
+  return c;
 }
 
 void draw_checker(const Cairo::RefPtr<Cairo::Context>& cr, int x, int y, int w, int h, Color light,
@@ -141,6 +186,23 @@ void CanvasView::refresh_size() {
   update_area_size();
 }
 
+void CanvasView::recenter_in_viewport() {
+  update_area_size();
+  if (const auto hadj = get_hadjustment()) {
+    const double upper = hadj->get_upper();
+    const double page = hadj->get_page_size();
+    const double target = upper > page ? (upper - page) * 0.5 : 0.0;
+    hadj->set_value(std::clamp(target, hadj->get_lower(), std::max(hadj->get_lower(), upper - page)));
+  }
+  if (const auto vadj = get_vadjustment()) {
+    const double upper = vadj->get_upper();
+    const double page = vadj->get_page_size();
+    const double target = upper > page ? (upper - page) * 0.5 : 0.0;
+    vadj->set_value(std::clamp(target, vadj->get_lower(), std::max(vadj->get_lower(), upper - page)));
+  }
+  invalidate_all();
+}
+
 void CanvasView::visible_center(double& x, double& y) const {
   const auto hadj = get_hadjustment();
   const auto vadj = get_vadjustment();
@@ -238,20 +300,7 @@ Color CanvasView::sample_pixel(int canvas_x, int canvas_y) const {
   const Layer* tool = stroking ? &document_->layers().tool_layer() : nullptr;
   const int tool_i = stroking ? document_->layers().active_index() : -1;
   Color c = document_->layers().composite_pixel(canvas_x, canvas_y, tool, tool_i);
-  const Selection& sel = document_->selection();
-  if (!sel.floating()) {
-    return c;
-  }
-  if (!sel.copy_mode() && sel.origin_rect().contains(canvas_x, canvas_y)) {
-    c = Color::transparent();
-  }
-  if (sel.float_rect().contains(canvas_x, canvas_y)) {
-    const Color f = sel.float_pixel(canvas_x - sel.float_x(), canvas_y - sel.float_y());
-    if (!sel.transparent_move() || f.a != 0) {
-      c = f;
-    }
-  }
-  return c;
+  return apply_floating_overlay(document_, c, canvas_x, canvas_y);
 }
 
 void CanvasView::widget_to_canvas(double widget_x, double widget_y, double& canvas_x,
@@ -713,23 +762,7 @@ bool CanvasView::on_area_scroll(GdkEventScroll* event) {
 
 
 Color CanvasView::display_pixel(Color c, int x, int y) const {
-  if (document_ == nullptr) {
-    return c;
-  }
-  const Selection& sel = document_->selection();
-  if (!sel.floating()) {
-    return c;
-  }
-  if (!sel.copy_mode() && sel.origin_rect().contains(x, y)) {
-    c = Color::transparent();
-  }
-  if (sel.float_rect().contains(x, y)) {
-    const Color f = sel.float_pixel(x - sel.float_x(), y - sel.float_y());
-    if (!sel.transparent_move() || f.a != 0) {
-      c = f;
-    }
-  }
-  return c;
+  return apply_floating_overlay(document_, c, x, y);
 }
 
 void CanvasView::set_grid_visible(bool visible) {

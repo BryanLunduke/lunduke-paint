@@ -149,7 +149,6 @@ MainWindow::MainWindow() {
   tools_.emplace_back(create_line_tool());
   tools_.emplace_back(create_rectangle_tool());
   tools_.emplace_back(create_ellipse_tool());
-  tools_.emplace_back(create_color_eraser_tool());
   tools_.emplace_back(create_spray_tool());
   tools_.emplace_back(create_rounded_rect_tool());
   tools_.emplace_back(create_polyline_tool());
@@ -229,7 +228,6 @@ void MainWindow::build_ui() {
   toolbox_.add_tool_button("line", "Line (L)", "tool-line-symbolic");
   toolbox_.add_tool_button("rectangle", "Rectangle (R)", "tool-rectangle-symbolic");
   toolbox_.add_tool_button("ellipse", "Ellipse (E)", "tool-ellipse-symbolic");
-  toolbox_.add_tool_button("color-eraser", "Color eraser (O)", "tool-recolor-symbolic");
   toolbox_.add_tool_button("spray", "Spraycan (Y)", "tool-spray-symbolic");
   toolbox_.add_tool_button("rounded-rect", "Rounded rectangle (U)", "tool-rectangle-rounded-symbolic");
   toolbox_.add_tool_button("polyline", "Polyline (N)", "tool-polyline-symbolic");
@@ -683,6 +681,12 @@ bool MainWindow::on_key_release(GdkEventKey* event) {
 
 void MainWindow::on_toggle_right_dock() {
   right_sidebar_.set_visible(!right_sidebar_.get_visible());
+  // Dock show/hide changes the canvas pane size; force a resize pass then re-center.
+  queue_resize();
+  Glib::signal_idle().connect([this]() {
+    canvas_.recenter_in_viewport();
+    return false;
+  });
 }
 
 void MainWindow::action_new() {
@@ -1045,6 +1049,9 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
   dialog.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
   dialog.add_button("_Save", Gtk::RESPONSE_ACCEPT);
   dialog.set_do_overwrite_confirmation(true);
+  // Default GTK file chooser mirrors the parent size on many themes — pin it.
+  dialog.set_default_size(620, 400);
+  dialog.signal_map().connect([&dialog]() { dialog.resize(620, 400); });
   auto ora = Gtk::FileFilter::create();
   ora->set_name("OpenRaster project (*.ora)");
   ora->add_pattern("*.ora");
@@ -1067,6 +1074,43 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
   } else {
     dialog.set_current_name("untitled.ora");
   }
+  auto sync_extension = [&dialog]() {
+    auto filter = dialog.get_filter();
+    if (!filter) {
+      return;
+    }
+    const Glib::ustring name = filter->get_name();
+    const char* ext = ".ora";
+    if (name.find("JPEG") != Glib::ustring::npos) {
+      ext = ".jpg";
+    } else if (name.find("BMP") != Glib::ustring::npos) {
+      ext = ".bmp";
+    } else if (name.find("PNG") != Glib::ustring::npos) {
+      ext = ".png";
+    } else if (name.find("OpenRaster") != Glib::ustring::npos) {
+      ext = ".ora";
+    } else {
+      return;
+    }
+    std::string cur = dialog.get_current_name();
+    if (cur.empty()) {
+      const std::string full = dialog.get_filename();
+      if (!full.empty()) {
+        const auto slash = full.find_last_of('/');
+        cur = slash == std::string::npos ? full : full.substr(slash + 1);
+      }
+    }
+    if (cur.empty()) {
+      cur = "untitled";
+    }
+    auto dot = cur.find_last_of('.');
+    if (dot != std::string::npos) {
+      cur = cur.substr(0, dot);
+    }
+    cur += ext;
+    dialog.set_current_name(cur);
+  };
+  dialog.property_filter().signal_changed().connect(sync_extension);
   Gtk::Box extra(Gtk::ORIENTATION_HORIZONTAL, 8);
   extra.set_border_width(4);
   auto* qlabel = Gtk::manage(new Gtk::Label("JPEG quality"));
@@ -1837,7 +1881,6 @@ void MainWindow::action_shortcuts() {
       {"Line / Rectangle / Ellipse", "L / R / E"},
       {"Text / Curve / Polygon", "T / V / G"},
       {"Spray / Rounded rect / Polyline", "Y / U / N"},
-      {"Color eraser", "O"},
   };
   const int nrows = static_cast<int>(sizeof(rows) / sizeof(rows[0]));
   for (int i = 0; i < nrows; ++i) {
@@ -1856,8 +1899,7 @@ void MainWindow::action_about() {
   dialog.set_transient_for(*this);
   dialog.set_program_name(actions::kProductName);
   dialog.set_version(actions::kVersion);
-  dialog.set_comments("A traditional X11 paint program.\nApplication id: " +
-                      Glib::ustring(actions::kAppId));
+  dialog.set_comments("Graphic design software inspired by the greats.");
   dialog.set_copyright("Copyright © 2026 The Lunduke Journal");
   dialog.set_license_type(Gtk::LICENSE_GPL_3_0);
   dialog.set_wrap_license(true);

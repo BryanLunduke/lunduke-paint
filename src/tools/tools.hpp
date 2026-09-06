@@ -15,7 +15,6 @@ Tool* create_rect_select_tool();
 Tool* create_line_tool();
 Tool* create_rectangle_tool();
 Tool* create_ellipse_tool();
-Tool* create_color_eraser_tool();
 Tool* create_spray_tool();
 Tool* create_rounded_rect_tool();
 Tool* create_polyline_tool();
