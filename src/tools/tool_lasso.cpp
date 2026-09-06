@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "tools/tool.hpp"
+
+#include "tools/tool_options_ui.hpp"
 #include "tools/selection_xform.hpp"
 
 #include "doc/document.hpp"
@@ -54,9 +56,8 @@ private:
 
 Gtk::Widget* LassoTool::options_widget() {
   if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
-    transparent_ = Gtk::manage(new Gtk::CheckButton("Transparent move"));
-    transparent_->set_active(false);
+    options_ = tool_options_ui::make_column();
+    transparent_ = tool_options_ui::make_check("Trans", "Transparent move", false);
     transparent_->signal_toggled().connect([this]() { apply_transparent_option(); });
     options_->pack_start(*transparent_, Gtk::PACK_SHRINK);
     options_->show_all();

@@ -14,12 +14,12 @@ user layers.
   decorations, no HeaderBar as main chrome)
 - Theme: follows the active GTK3 theme; the app is not skinned
 - Native project file: OpenRaster `.ora` (libarchive + pugixml)
-- Version: 0.3
+- Version: 0.4
 - Config: `$XDG_CONFIG_HOME/lunduke-paint/lunduke-paint.ini` via GKeyFile
 
-## 0.3
+## 0.4
 
-Foreground/Background well labels, equal-width tool columns. Keeps the 0.2 feature set. (Howdy intro sources retained but launch-gated off by default.)
+Tool options sit at the bottom of the left toolbox (vertical, narrow-column controls). Keeps the 0.3 toolbox chrome and the 0.2 feature set. (Howdy intro sources retained but launch-gated off by default.)
 
 ## 0.2
 

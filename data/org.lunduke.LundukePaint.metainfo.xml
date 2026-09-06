@@ -37,6 +37,11 @@
     <category>RasterGraphics</category>
   </categories>
   <releases>
+    <release version="0.4" date="2026-09-05">
+      <description>
+        <p>Lunduke Paint 0.4: tool options move to the bottom of the left toolbox; compact narrow-column controls.</p>
+      </description>
+    </release>
     <release version="0.3" date="2026-09-03">
       <description>
         <p>Lunduke Paint 0.3: Foreground/Background well labels, equal-width tool columns. Howdy intro sources retained but not shown on launch by default.</p>
