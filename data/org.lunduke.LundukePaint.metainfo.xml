@@ -37,6 +37,11 @@
     <category>RasterGraphics</category>
   </categories>
   <releases>
+    <release version="0.5" date="2026-09-09">
+      <description>
+        <p>Lunduke Paint 0.5 for LCOS 0.5: identity bump; same feature set as 0.4-3.</p>
+      </description>
+    </release>
     <release version="0.4" date="2026-09-06">
       <description>
         <p>Lunduke Paint 0.4-3: dock recenter, Save dialog sizing/extension sync, About tagline, wand/freeform icon sizing, selection-move checker fix, Color Eraser removed.</p>
