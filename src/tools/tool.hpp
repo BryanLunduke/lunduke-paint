@@ -71,6 +71,11 @@ public:
 
   virtual Gtk::Widget* options_widget() { return nullptr; }
   virtual bool is_stroking() const { return false; }
+  // When is_stroking() is true, CanvasView may composite tool_layer in place of
+  // the active layer. Selection tools set is_stroking for pointer capture only
+  // and must return false here so an empty tool_layer does not flash the
+  // transparency checker over opaque canvas content (R-F03).
+  virtual bool uses_tool_layer() const { return is_stroking(); }
   virtual bool captures_keys() const { return false; }
 
   void set_host(ToolHost* host) { host_ = host; }

@@ -42,7 +42,7 @@ void write_argb32(std::uint8_t* dst, Color c) {
 // Preview floating selection without wiping the canvas to the transparency
 // checker. Cut-holes hide only the active layer; float pixels are alpha-
 // composited (transparent-move keeps empty float pixels see-through;
-// opaque-move fills empty float pixels with the BG well color).
+// opaque-move keeps underlying / canvas BG so empty float pixels stay opaque).
 Color apply_floating_overlay(const Document* document, Color c, int x, int y) {
   if (document == nullptr) {
     return c;
@@ -67,7 +67,17 @@ Color apply_floating_overlay(const Document* document, Color c, int x, int y) {
     const Color f = sel.float_pixel(x - sel.float_x(), y - sel.float_y());
     if (f.a == 0) {
       if (!sel.transparent_move()) {
-        c = document->background();
+        // Opaque-move stamp: keep underlying (post cut-hole) when opaque;
+        // otherwise canvas BG / BG well / white — never the checker (R-F03).
+        if (c.a == 0) {
+          Color bg = document->canvas_background();
+          if (bg.a != 0) {
+            c = bg;
+          } else {
+            Color well = document->background();
+            c = (well.a != 0) ? well : Color::white();
+          }
+        }
       }
       // transparent_move: leave underlying c
     } else if (f.a == 255) {
@@ -296,9 +306,10 @@ Color CanvasView::sample_pixel(int canvas_x, int canvas_y) const {
   if (document_ == nullptr) {
     return Color::transparent();
   }
-  const bool stroking = tool_ != nullptr && tool_->is_stroking();
-  const Layer* tool = stroking ? &document_->layers().tool_layer() : nullptr;
-  const int tool_i = stroking ? document_->layers().active_index() : -1;
+  const bool tool_preview =
+      tool_ != nullptr && tool_->is_stroking() && tool_->uses_tool_layer();
+  const Layer* tool = tool_preview ? &document_->layers().tool_layer() : nullptr;
+  const int tool_i = tool_preview ? document_->layers().active_index() : -1;
   Color c = document_->layers().composite_pixel(canvas_x, canvas_y, tool, tool_i);
   return apply_floating_overlay(document_, c, canvas_x, canvas_y);
 }
@@ -563,9 +574,10 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
     return true;
   }
 
-  const bool stroking = tool_ != nullptr && tool_->is_stroking();
-  const Layer* tool_override = stroking ? &document_->layers().tool_layer() : nullptr;
-  const int tool_index = stroking ? document_->layers().active_index() : -1;
+  const bool tool_preview =
+      tool_ != nullptr && tool_->is_stroking() && tool_->uses_tool_layer();
+  const Layer* tool_override = tool_preview ? &document_->layers().tool_layer() : nullptr;
+  const int tool_index = tool_preview ? document_->layers().active_index() : -1;
   const int sw = vis_x1 - vis_x0;
   const int sh = vis_y1 - vis_y0;
   std::vector<std::uint8_t> flat(static_cast<std::size_t>(sw) * static_cast<std::size_t>(sh) * 4, 0);

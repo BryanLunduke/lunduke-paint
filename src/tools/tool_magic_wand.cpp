@@ -25,6 +25,7 @@ public:
     return "Magic wand: click a color; drag a handle to scale/rotate";
   }
   bool is_stroking() const override { return xform_.active(); }
+  bool uses_tool_layer() const override { return false; }
   Gtk::Widget* options_widget() override;
 
   void on_press(CanvasEvent event) override;

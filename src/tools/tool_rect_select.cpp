@@ -23,6 +23,7 @@ public:
     return "Select: drag a rectangle; drag inside to move; Ctrl copies";
   }
   bool is_stroking() const override { return dragging_ || moving_ || xform_.active(); }
+  bool uses_tool_layer() const override { return false; }
   Gtk::Widget* options_widget() override;
 
   void on_press(CanvasEvent event) override;

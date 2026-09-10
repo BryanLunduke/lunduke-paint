@@ -25,6 +25,7 @@ public:
     return "Ellipse select: drag; Shift makes a circle; drag inside to move";
   }
   bool is_stroking() const override { return dragging_ || moving_ || xform_.active(); }
+  bool uses_tool_layer() const override { return false; }
   Gtk::Widget* options_widget() override;
 
   void on_press(CanvasEvent event) override;
