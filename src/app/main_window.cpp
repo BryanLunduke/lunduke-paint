@@ -258,14 +258,6 @@ void MainWindow::build_ui() {
   toolbox_.set_spray_radius(spray_radius_);
 
   pattern_strip_.on_pattern_chosen = [this](int index) { set_pattern_index(index); };
-  pattern_strip_.on_well_clicked = [this](bool background) { choose_color(background); };
-  pattern_strip_.on_transparent = [this](bool background) {
-    if (background) {
-      document().set_background(Color::transparent());
-    } else {
-      document().set_foreground(Color::transparent());
-    }
-  };
   colors_panel_.on_swatch = [this](Color color, bool background) {
     if (background) {
       document().set_background(color);
