@@ -19,13 +19,15 @@ user layers.
 
 ## 0.5
 
-LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-4); howdy launch-gated off.
+LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-5); howdy launch-gated off.
 
 0.5-2: selection move/rubber-band no longer substitutes the empty tool layer for the active layer during is_stroking capture (R-F03 false checkerboard flash); opaque-move empty float pixels keep underlying/canvas BG instead of punching the checker.
 
 0.5-3: MacPaint-inspired single-window layout — left tool grid + line-width selector, pattern strip under the canvas (with FG/BG wells), right rail stacked Layers / History / Colors (not tabbed). Toolbox is the MacPaint tool set (hollow+filled shapes, hand/pan, freeform); 0.4 SVG icons kept. Menus remain File/Edit/View/Image/Layers/Adjustments/Effects/Help.
 
 0.5-4: Two-row MacPaint pattern strip; remove under-canvas ToolOptionsBar; MacPaint brush/stroke pickers live under the left tool grid (line width / brush tips / spray radius). Layers panel grows above History, drops the blend dropdown for icon-only Delete/Rename/Add (right-justified), and supports drag-and-drop reorder.
+
+0.5-5: Hairline separator + air between the left tool grid and stroke/brush pickers; Layers row thumbnail sits on the same row as visibility + lock (with a little horizontal spacing).
 
 ## 0.4
 

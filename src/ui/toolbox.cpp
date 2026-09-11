@@ -7,6 +7,7 @@
 #include <gdkmm/pixbuf.h>
 #include <gdkmm/screen.h>
 #include <gtkmm/image.h>
+#include <gtkmm/separator.h>
 #include <gtkmm/stylecontext.h>
 
 #include <cmath>
@@ -71,10 +72,18 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
                    -1);
   grid_.signal_size_allocate().connect(sigc::mem_fun(*this, &Toolbox::on_grid_size_allocate));
 
+  // Little air + hairline between the tool grid and the stroke/brush pickers.
+  auto* rail_sep = Gtk::manage(new Gtk::Separator(Gtk::ORIENTATION_HORIZONTAL));
+  rail_sep->set_margin_start(kSideAir);
+  rail_sep->set_margin_end(kSideAir);
+  rail_sep->set_margin_top(6);
+  rail_sep->set_margin_bottom(6);
+  pack_start(*rail_sep, Gtk::PACK_SHRINK);
+
   options_stack_.set_transition_type(Gtk::STACK_TRANSITION_TYPE_NONE);
   options_stack_.set_margin_start(kSideAir);
   options_stack_.set_margin_end(kSideAir);
-  options_stack_.set_margin_top(4);
+  options_stack_.set_margin_top(0);
   options_stack_.set_hexpand(false);
   options_stack_.set_halign(Gtk::ALIGN_START);
 

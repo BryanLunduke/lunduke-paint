@@ -265,6 +265,7 @@ void LayersPanel::add_row(int stack_index) {
   auto full = thumb_pixbuf(layer);
   image->set(full->scale_simple(24, 18, Gdk::INTERP_NEAREST));
   image->set_halign(Gtk::ALIGN_START);
+  image->set_valign(Gtk::ALIGN_CENTER);
 
   auto* name = Gtk::manage(new Gtk::Label(layer.name()));
   name->set_xalign(0.0f);
@@ -295,13 +296,15 @@ void LayersPanel::add_row(int stack_index) {
     document_->set_layer_locked(stack_index, lock->get_active());
   });
 
-  auto* toggles = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 1));
-  toggles->pack_start(*eye, Gtk::PACK_SHRINK);
-  toggles->pack_start(*lock, Gtk::PACK_SHRINK);
+  // Thumbnail sits on the same row as visibility + lock (not above the name).
+  auto* icons = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 4));
+  icons->set_halign(Gtk::ALIGN_START);
+  icons->pack_start(*image, Gtk::PACK_SHRINK);
+  icons->pack_start(*eye, Gtk::PACK_SHRINK);
+  icons->pack_start(*lock, Gtk::PACK_SHRINK);
 
-  box->pack_start(*image, Gtk::PACK_SHRINK);
   box->pack_start(*name, Gtk::PACK_SHRINK);
-  box->pack_start(*toggles, Gtk::PACK_SHRINK);
+  box->pack_start(*icons, Gtk::PACK_SHRINK);
   row->add(*box);
   row->add_events(Gdk::BUTTON_PRESS_MASK);
   row->signal_button_press_event().connect(
