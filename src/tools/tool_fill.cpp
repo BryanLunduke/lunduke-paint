@@ -6,6 +6,7 @@
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
 #include "raster/fill.hpp"
+#include "raster/pattern.hpp"
 
 #include <gtkmm/box.h>
 #include <gtkmm/label.h>
@@ -13,6 +14,7 @@
 
 #include <cmath>
 #include <memory>
+#include <vector>
 
 namespace lundukepaint {
 
@@ -71,8 +73,20 @@ void FillTool::on_press(CanvasEvent event) {
   const int x = static_cast<int>(std::floor(event.x));
   const int y = static_cast<int>(std::floor(event.y));
   Rect dirty{};
-  flood_fill(tool.pixels(), tool.width(), tool.height(), tool.stride(), x, y,
-             stroke_color(event.button), tolerance_, &dirty);
+  const Color paint = stroke_color(event.button);
+  const Color other = (event.button == 3) ? doc.foreground() : doc.background();
+  // Solid black pattern (index 0): classic solid flood. Else tile the pattern.
+  if (host_->pattern_index() == 0) {
+    flood_fill(tool.pixels(), tool.width(), tool.height(), tool.stride(), x, y, paint, tolerance_,
+               &dirty);
+  } else {
+    std::vector<std::uint8_t> mask;
+    Rect bounds{};
+    flood_mask(tool.pixels(), tool.width(), tool.height(), tool.stride(), x, y, tolerance_, mask,
+               &bounds);
+    apply_pattern_mask(tool.pixels(), tool.width(), tool.height(), tool.stride(), mask.data(),
+                       host_->active_pattern(), paint, other, &dirty);
+  }
   clip_rect_to_selection(tool, doc.layers().active_layer(), dirty, doc.selection());
   auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), tool, dirty, "Flood fill",
                                             doc.layers().active_index());

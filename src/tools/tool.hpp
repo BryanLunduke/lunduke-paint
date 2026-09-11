@@ -3,6 +3,8 @@
 #define LUNDUKEPAINT_TOOLS_TOOL_HPP
 
 #include "raster/types.hpp"
+#include "raster/shapes.hpp"
+#include "raster/pattern.hpp"
 
 namespace Gtk {
 class Widget;
@@ -50,7 +52,11 @@ public:
   virtual double canvas_zoom() const { return 1.0; }
   // Toplevel to parent transient popups on (the text tool's entry).
   virtual Gtk::Window* host_window() { return nullptr; }
+  virtual int pattern_index() const { return 0; }
+  virtual void set_pattern_index(int /*index*/) {}
+  virtual const Pattern& active_pattern() const { return pattern_at(0); }
 };
+
 
 class Tool {
 public:
@@ -77,6 +83,8 @@ public:
   // transparency checker over opaque canvas content (R-F03).
   virtual bool uses_tool_layer() const { return is_stroking(); }
   virtual bool captures_keys() const { return false; }
+  // Shape tools: hollow vs filled toolbox buttons call this.
+  virtual void set_shape_fill_mode(ShapeFillMode /*mode*/) {}
 
   void set_host(ToolHost* host) { host_ = host; }
 

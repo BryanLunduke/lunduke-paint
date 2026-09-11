@@ -137,24 +137,32 @@ MainWindow::MainWindow() {
     rebuild_recent_menu();
   });
 
-  tools_.emplace_back(create_rect_select_tool());
+  // MacPaint toolbox set (+ keep ellipse-select/wand/picker/polyline/curve for shortcuts).
   tools_.emplace_back(create_lasso_tool());
+  tools_.emplace_back(create_rect_select_tool());
+  tools_.emplace_back(create_hand_tool());
+  tools_.emplace_back(create_text_tool());
+  tools_.emplace_back(create_fill_tool());
+  tools_.emplace_back(create_spray_tool());
+  tools_.emplace_back(create_brush_tool());
+  tools_.emplace_back(create_pencil_tool());
+  tools_.emplace_back(create_line_tool());
+  tools_.emplace_back(create_eraser_tool());
+  tools_.emplace_back(create_rectangle_tool());
+  tools_.emplace_back(create_rectangle_fill_tool());
+  tools_.emplace_back(create_rounded_rect_tool());
+  tools_.emplace_back(create_rounded_rect_fill_tool());
+  tools_.emplace_back(create_ellipse_tool());
+  tools_.emplace_back(create_ellipse_fill_tool());
+  tools_.emplace_back(create_freeform_tool());
+  tools_.emplace_back(create_freeform_fill_tool());
+  tools_.emplace_back(create_polygon_tool());
+  tools_.emplace_back(create_polygon_fill_tool());
   tools_.emplace_back(create_ellipse_select_tool());
   tools_.emplace_back(create_magic_wand_tool());
-  tools_.emplace_back(create_pencil_tool());
-  tools_.emplace_back(create_brush_tool());
-  tools_.emplace_back(create_eraser_tool());
-  tools_.emplace_back(create_fill_tool());
   tools_.emplace_back(create_picker_tool());
-  tools_.emplace_back(create_line_tool());
-  tools_.emplace_back(create_rectangle_tool());
-  tools_.emplace_back(create_ellipse_tool());
-  tools_.emplace_back(create_spray_tool());
-  tools_.emplace_back(create_rounded_rect_tool());
   tools_.emplace_back(create_polyline_tool());
-  tools_.emplace_back(create_polygon_tool());
   tools_.emplace_back(create_curve_tool());
-  tools_.emplace_back(create_text_tool());
   for (auto& tool : tools_) {
     tool->set_host(this);
   }
@@ -216,32 +224,38 @@ void MainWindow::build_ui() {
   canvas_.set_hexpand(true);
   canvas_.set_vexpand(true);
 
-  toolbox_.add_tool_button("rect-select", "Rectangle select (S)", "tool-select-rectangle-symbolic");
+  // MacPaint order: 2×10 tool grid (lasso/marquee, hand/text, bucket/spray,
+  // brush/pencil, line/eraser, then hollow+filled shapes).
   toolbox_.add_tool_button("lasso", "Freeform select (M)", "tool-select-lasso-freeform-symbolic");
-  toolbox_.add_tool_button("ellipse-select", "Ellipse select (I)", "tool-select-ellipse-symbolic");
-  toolbox_.add_tool_button("magic-wand", "Magic wand (W)", "tool-magicwand-symbolic");
-  toolbox_.add_tool_button("pencil", "Pencil (P)", "tool-pencil-symbolic");
-  toolbox_.add_tool_button("brush", "Brush (B)", "tool-paintbrush-symbolic");
-  toolbox_.add_tool_button("eraser", "Eraser (A)", "tool-eraser-symbolic");
-  toolbox_.add_tool_button("fill", "Flood fill (F)", "tool-paintbucket-symbolic");
-  toolbox_.add_tool_button("picker", "Color picker (C)", "tool-colorpicker-symbolic");
-  toolbox_.add_tool_button("line", "Line (L)", "tool-line-symbolic");
-  toolbox_.add_tool_button("rectangle", "Rectangle (R)", "tool-rectangle-symbolic");
-  toolbox_.add_tool_button("ellipse", "Ellipse (E)", "tool-ellipse-symbolic");
-  toolbox_.add_tool_button("spray", "Spraycan (Y)", "tool-spray-symbolic");
-  toolbox_.add_tool_button("rounded-rect", "Rounded rectangle (U)", "tool-rectangle-rounded-symbolic");
-  toolbox_.add_tool_button("polyline", "Polyline (N)", "tool-polyline-symbolic");
-  toolbox_.add_tool_button("polygon", "Polygon (G)", "tool-select-lasso-polygon-symbolic");
-  toolbox_.add_tool_button("curve", "Curve (V)", "tool-curve-symbolic");
+  toolbox_.add_tool_button("rect-select", "Rectangle select (S)", "tool-select-rectangle-symbolic");
+  toolbox_.add_tool_button("hand", "Hand / pan (H)", "tool-hand-symbolic");
   toolbox_.add_tool_button("text", "Text (T)", "tool-text-symbolic");
+  toolbox_.add_tool_button("fill", "Flood fill (F)", "tool-paintbucket-symbolic");
+  toolbox_.add_tool_button("spray", "Spraycan (Y)", "tool-spray-symbolic");
+  toolbox_.add_tool_button("brush", "Brush (B)", "tool-paintbrush-symbolic");
+  toolbox_.add_tool_button("pencil", "Pencil (P)", "tool-pencil-symbolic");
+  toolbox_.add_tool_button("line", "Line (L)", "tool-line-symbolic");
+  toolbox_.add_tool_button("eraser", "Eraser (A)", "tool-eraser-symbolic");
+  toolbox_.add_tool_button("rectangle", "Rectangle outline (R)", "tool-rectangle-symbolic");
+  toolbox_.add_tool_button("rectangle-fill", "Rectangle filled", "tool-rectangle-filled-symbolic");
+  toolbox_.add_tool_button("rounded-rect", "Rounded rectangle outline (U)", "tool-rectangle-rounded-symbolic");
+  toolbox_.add_tool_button("rounded-rect-fill", "Rounded rectangle filled", "tool-rectangle-rounded-filled-symbolic");
+  toolbox_.add_tool_button("ellipse", "Ellipse outline (E)", "tool-ellipse-symbolic");
+  toolbox_.add_tool_button("ellipse-fill", "Ellipse filled", "tool-ellipse-filled-symbolic");
+  toolbox_.add_tool_button("freeform", "Freeform outline (D)", "tool-freeformshape-symbolic");
+  toolbox_.add_tool_button("freeform-fill", "Freeform filled", "tool-freeformshape-filled-symbolic");
+  toolbox_.add_tool_button("polygon", "Polygon outline (G)", "tool-select-lasso-polygon-symbolic");
+  toolbox_.add_tool_button("polygon-fill", "Polygon filled", "tool-polygon-filled-symbolic");
   toolbox_.on_tool_chosen = [this](const std::string& id) {
     set_active_tool(id);
-    // Clicking a tool should leave the keyboard on the canvas, so the letter
-    // shortcuts keep working afterwards.
     canvas_.focus_canvas();
   };
-  toolbox_.on_well_clicked = [this](bool background) { choose_color(background); };
-  toolbox_.on_transparent = [this](bool background) {
+  toolbox_.on_line_width_chosen = [this](int width) { set_stroke_size(width); };
+  toolbox_.set_line_width(stroke_size_);
+
+  pattern_strip_.on_pattern_chosen = [this](int index) { set_pattern_index(index); };
+  pattern_strip_.on_well_clicked = [this](bool background) { choose_color(background); };
+  pattern_strip_.on_transparent = [this](bool background) {
     if (background) {
       document().set_background(Color::transparent());
     } else {
@@ -256,34 +270,48 @@ void MainWindow::build_ui() {
     }
   };
 
-  auto* layers_tab = Gtk::make_managed<Gtk::Label>("Layers");
-  auto* history_tab = Gtk::make_managed<Gtk::Label>("History");
-  right_dock_.append_page(layers_panel_, *layers_tab);
-  right_dock_.append_page(history_panel_, *history_tab);
-  right_dock_.set_scrollable(false);
-  right_dock_.set_hexpand(true);
-  right_dock_.set_vexpand(true);
-
+  constexpr int kRightDockWidth = 240;
+  layers_frame_.set_shadow_type(Gtk::SHADOW_IN);
+  history_frame_.set_shadow_type(Gtk::SHADOW_IN);
+  colors_frame_.set_shadow_type(Gtk::SHADOW_IN);
+  layers_frame_.add(layers_panel_);
+  history_frame_.add(history_panel_);
+  colors_frame_.add(colors_panel_);
+  layers_panel_.set_hexpand(true);
+  layers_panel_.set_vexpand(true);
+  history_panel_.set_hexpand(true);
+  history_panel_.set_vexpand(true);
   colors_panel_.set_hexpand(true);
   colors_panel_.set_valign(Gtk::ALIGN_END);
 
-  // Wide enough for the "Layers" and "History" tab labels, and no wider.
-  constexpr int kRightDockWidth = 240;
   right_sidebar_.set_size_request(kRightDockWidth, -1);
-  right_dock_.set_size_request(kRightDockWidth, -1);
-  colors_panel_.set_size_request(kRightDockWidth, -1);
+  layers_frame_.set_size_request(kRightDockWidth, -1);
+  history_frame_.set_size_request(kRightDockWidth, -1);
+  colors_frame_.set_size_request(kRightDockWidth, -1);
 
-  right_sidebar_.set_spacing(0);
+  right_sidebar_.set_spacing(2);
   right_sidebar_.set_hexpand(false);
   right_sidebar_.set_halign(Gtk::ALIGN_FILL);
-  right_sidebar_.pack_start(right_dock_, Gtk::PACK_EXPAND_WIDGET);
-  right_sidebar_.pack_start(colors_panel_, Gtk::PACK_SHRINK);
+  // Top Layers / middle History / bottom Colors (not a notebook).
+  right_sidebar_.pack_start(layers_frame_, Gtk::PACK_EXPAND_WIDGET);
+  right_sidebar_.pack_start(history_frame_, Gtk::PACK_EXPAND_WIDGET);
+  right_sidebar_.pack_start(colors_frame_, Gtk::PACK_SHRINK);
+
+  center_column_.set_spacing(0);
+  center_column_.set_hexpand(true);
+  center_column_.set_vexpand(true);
+  canvas_.set_hexpand(true);
+  canvas_.set_vexpand(true);
+  pattern_strip_.set_hexpand(true);
+  // Pattern strip spans under the canvas only (not under the right rail).
+  center_column_.pack_start(canvas_, Gtk::PACK_EXPAND_WIDGET);
+  center_column_.pack_start(pattern_strip_, Gtk::PACK_SHRINK);
 
   auto* left_sep = Gtk::make_managed<Gtk::Separator>(Gtk::ORIENTATION_VERTICAL);
 
   work_area_.pack_start(toolbox_, Gtk::PACK_SHRINK);
   work_area_.pack_start(*left_sep, Gtk::PACK_SHRINK);
-  work_area_.pack_start(canvas_, Gtk::PACK_EXPAND_WIDGET);
+  work_area_.pack_start(center_column_, Gtk::PACK_EXPAND_WIDGET);
   work_area_.pack_start(right_sidebar_, Gtk::PACK_SHRINK);
   work_area_.set_hexpand(true);
   work_area_.set_vexpand(true);
@@ -395,7 +423,7 @@ void MainWindow::attach_active_document() {
   };
   document().set_on_changed([this]() { update_chrome(); });
   document().set_on_invalidated([this](Rect rect) { canvas_.invalidate_rect(rect); });
-  toolbox_.set_colors(document().foreground(), document().background());
+  pattern_strip_.set_colors(document().foreground(), document().background());
   update_chrome();
 }
 
@@ -484,6 +512,16 @@ void MainWindow::set_stroke_size(int size) {
     size = 1;
   }
   stroke_size_ = size;
+  toolbox_.set_line_width(stroke_size_);
+}
+
+void MainWindow::set_pattern_index(int index) {
+  pattern_index_ = clamp_pattern_index(index);
+  pattern_strip_.set_pattern_index(pattern_index_);
+}
+
+const Pattern& MainWindow::active_pattern() const {
+  return pattern_at(pattern_index_);
 }
 
 void MainWindow::set_brush_antialias(bool enabled) {
@@ -566,7 +604,8 @@ void MainWindow::update_chrome() {
   if (active_tool_ != nullptr) {
     status_bar_.set_hint(active_tool_->hint());
   }
-  toolbox_.set_colors(document().foreground(), document().background());
+  pattern_strip_.set_colors(document().foreground(), document().background());
+  colors_panel_.set_colors(document().foreground(), document().background());
   canvas_.refresh_size();
   layers_panel_.refresh();
   history_panel_.refresh();
@@ -1538,7 +1577,6 @@ void MainWindow::action_layer_new() {
     }
   }
   document().add_layer();
-  right_dock_.set_current_page(0);
   show_status("Added layer");
 }
 

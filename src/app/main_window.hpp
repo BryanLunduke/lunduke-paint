@@ -14,6 +14,7 @@
 #include "ui/layers_panel.hpp"
 #include "ui/status_bar.hpp"
 #include "ui/tool_options_bar.hpp"
+#include "ui/pattern_strip.hpp"
 #include "ui/toolbox.hpp"
 
 #include <cstdint>
@@ -27,6 +28,7 @@
 #include <glibmm/ustring.h>
 #include <gtkmm/applicationwindow.h>
 #include <gtkmm/box.h>
+#include <gtkmm/frame.h>
 #include <gtkmm/notebook.h>
 #include <gtkmm/menu.h>
 #include <gtkmm/menuitem.h>
@@ -68,6 +70,9 @@ public:
   void set_brush_antialias(bool enabled) override;
   int fill_tolerance() const override { return fill_tolerance_; }
   void set_fill_tolerance(int tolerance) override;
+  int pattern_index() const override { return pattern_index_; }
+  void set_pattern_index(int index) override;
+  const Pattern& active_pattern() const override;
   void invalidate_canvas(Rect rect) override;
   void return_to_previous_tool() override;
   Color sample_canvas(int x, int y) const override;
@@ -180,8 +185,12 @@ private:
   Gtk::Box work_area_{Gtk::ORIENTATION_HORIZONTAL};
   Toolbox toolbox_;
   CanvasView canvas_;
+  Gtk::Box center_column_{Gtk::ORIENTATION_VERTICAL};
+  PatternStrip pattern_strip_;
   Gtk::Box right_sidebar_{Gtk::ORIENTATION_VERTICAL};
-  Gtk::Notebook right_dock_;
+  Gtk::Frame layers_frame_{"Layers"};
+  Gtk::Frame history_frame_{"History"};
+  Gtk::Frame colors_frame_{"Colors"};
   ColorsPanel colors_panel_;
   LayersPanel layers_panel_;
   HistoryPanel history_panel_;
@@ -195,6 +204,7 @@ private:
   int stroke_size_{1};
   bool brush_aa_{true};
   int fill_tolerance_{0};
+  int pattern_index_{0};
   int jpeg_quality_{90};
   bool intro_played_{false};
   Glib::RefPtr<Gio::SimpleAction> undo_action_;

@@ -100,10 +100,7 @@ int main(int argc, char** argv) {
     expect(toolbox.tool_columns_equal_width(), "the two tool columns have equal width");
     expect(toolbox.width_tracks_tool_grid(),
            "toolbox width hugs tool grid (allocated <= grid + ~36px of pad/air)");
-    expect(toolbox.fg_label_right_of_well(), "FG label sits to the right of the FG well");
-    expect(toolbox.bg_label_left_of_well(), "BG label sits beside the BG well");
-    expect(toolbox.bg_well_right_justified(), "BG well stays within the narrow toolbox");
-    expect(toolbox.bg_well_below_fg(), "BG well sits below the FG well");
+    // FG/BG wells live on the MacPaint-style pattern strip (0.5-3), not the toolbox.
     window.hide();
     pump(50);
   }

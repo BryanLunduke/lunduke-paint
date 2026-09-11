@@ -37,7 +37,7 @@
     <category>RasterGraphics</category>
   </categories>
   <releases>
-    <release version="0.5" date="2026-09-10">
+    <release version="0.5" date="2026-09-11">
       <description>
         <p>Lunduke Paint 0.5 for LCOS 0.5. 0.5-2: fix false checkerboard flash while dragging an opaque selection (R-F03).</p>
       </description>

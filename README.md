@@ -23,6 +23,8 @@ LCOS 0.5 identity. Same feature set as 0.4-3 (tool-options strip under the canva
 
 0.5-2: selection move/rubber-band no longer substitutes the empty tool layer for the active layer during is_stroking capture (R-F03 false checkerboard flash); opaque-move empty float pixels keep underlying/canvas BG instead of punching the checker.
 
+0.5-3: MacPaint-inspired single-window layout — left tool grid + line-width selector, pattern strip under the canvas (with FG/BG wells), right rail stacked Layers / History / Colors (not tabbed). Toolbox is the MacPaint tool set (hollow+filled shapes, hand/pan, freeform); 0.4 SVG icons kept. Menus remain File/Edit/View/Image/Layers/Adjustments/Effects/Help.
+
 ## 0.4
 
 Tool options sit in a horizontal strip under the canvas (above the status bar), with the 0.3-style left toolbox (tools + FG/BG only). Keeps the 0.2 feature set. (Howdy intro sources retained but launch-gated off by default.)

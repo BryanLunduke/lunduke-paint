@@ -20,12 +20,23 @@ namespace lundukepaint {
 
 class EllipseTool : public Tool {
 public:
-  const char* id() const override { return "ellipse"; }
-  const char* name() const override { return "Ellipse"; }
+  explicit EllipseTool(ShapeFillMode mode = ShapeFillMode::Stroke, const char* tool_id = "ellipse",
+                       const char* tool_name = "Ellipse")
+      : fill_mode_(mode), id_(tool_id), name_(tool_name) {}
+  const char* id() const override { return id_; }
+  const char* name() const override { return name_; }
   char shortcut() const override { return 'E'; }
   const char* hint() const override { return "Ellipse: drag; Shift makes a circle; right uses BG"; }
   bool is_stroking() const override { return drawing_; }
   Gtk::Widget* options_widget() override;
+  void set_shape_fill_mode(ShapeFillMode mode) override {
+    fill_mode_ = mode;
+    if (mode_combo_ != nullptr) {
+      if (mode == ShapeFillMode::Fill) mode_combo_->set_active_id("fill");
+      else if (mode == ShapeFillMode::Both) mode_combo_->set_active_id("both");
+      else mode_combo_->set_active_id("stroke");
+    }
+  }
 
   void on_press(CanvasEvent event) override;
   void on_motion(CanvasEvent event) override;
@@ -47,6 +58,8 @@ private:
   bool antialias_ = false;
   ShapeFillMode fill_mode_ = ShapeFillMode::Stroke;
   Rect dirty_{};
+  const char* id_ = "ellipse";
+  const char* name_ = "Ellipse";
   std::unique_ptr<Gtk::Box> options_;
   Gtk::ComboBoxText* mode_combo_{nullptr};
 };
@@ -60,7 +73,9 @@ Gtk::Widget* EllipseTool::options_widget() {
       mode_combo_->append("stroke", "Stroke");
       mode_combo_->append("fill", "Fill");
       mode_combo_->append("both", "Stroke and fill");
-      mode_combo_->set_active(0);
+      if (fill_mode_ == ShapeFillMode::Fill) mode_combo_->set_active_id("fill");
+      else if (fill_mode_ == ShapeFillMode::Both) mode_combo_->set_active_id("both");
+      else mode_combo_->set_active_id("stroke");
       mode_combo_->signal_changed().connect([this]() {
         const Glib::ustring id = mode_combo_->get_active_id();
         if (id == "fill") {
@@ -181,7 +196,11 @@ void EllipseTool::finish() {
 }
 
 Tool* create_ellipse_tool() {
-  return new EllipseTool();
+  return new EllipseTool(ShapeFillMode::Stroke, "ellipse", "Ellipse");
+}
+
+Tool* create_ellipse_fill_tool() {
+  return new EllipseTool(ShapeFillMode::Fill, "ellipse-fill", "Ellipse fill");
 }
 
 }  // namespace lundukepaint

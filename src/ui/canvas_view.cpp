@@ -2,6 +2,8 @@
 
 #include "ui/canvas_view.hpp"
 
+#include <string>
+
 #include "doc/document.hpp"
 #include "doc/layer.hpp"
 #include "doc/layer_stack.hpp"
@@ -709,7 +711,10 @@ bool CanvasView::on_area_button_press(GdkEventButton* event) {
   }
   cancel_intro();
   area_.grab_focus();
-  if (event->button == 2 || (event->button == 1 && space_down_)) {
+  const bool hand_tool = tool_ != nullptr && tool_->id() != nullptr &&
+                         std::string(tool_->id()) == "hand";
+  if (event->button == 2 || (event->button == 1 && space_down_) ||
+      (event->button == 1 && hand_tool)) {
     begin_pan(event->x, event->y);
     return true;
   }

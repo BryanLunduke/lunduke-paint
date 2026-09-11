@@ -32,3 +32,8 @@ SVGs are original Lunduke Paint artwork (public domain / BSD):
 
 New / Open / Save / Cut / Copy / Paste / Undo / Redo / Zoom use standard
 freedesktop GTK theme icon names.
+
+## 0.5-3 MacPaint layout icons
+
+- `tool-hand-symbolic.svg` — original Lunduke Paint (public domain / BSD)
+- `tool-*-filled-symbolic.svg` — solid variants of existing toolbox icons (original)

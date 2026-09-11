@@ -20,14 +20,19 @@ namespace lundukepaint {
 
 class RoundedRectTool : public Tool {
 public:
-  const char* id() const override { return "rounded-rect"; }
-  const char* name() const override { return "Rounded rectangle"; }
+  explicit RoundedRectTool(ShapeFillMode mode = ShapeFillMode::Stroke,
+                           const char* tool_id = "rounded-rect",
+                           const char* tool_name = "Rounded rectangle")
+      : fill_mode_(mode), id_(tool_id), name_(tool_name) {}
+  const char* id() const override { return id_; }
+  const char* name() const override { return name_; }
   char shortcut() const override { return 'U'; }
   const char* hint() const override {
     return "Rounded rect: drag; Shift makes a square; right uses BG";
   }
   bool is_stroking() const override { return drawing_; }
   Gtk::Widget* options_widget() override;
+  void set_shape_fill_mode(ShapeFillMode mode) override { fill_mode_ = mode; }
 
   void on_press(CanvasEvent event) override;
   void on_motion(CanvasEvent event) override;
@@ -48,21 +53,26 @@ private:
   int radius_ = 12;
   bool antialias_ = false;
   ShapeFillMode fill_mode_ = ShapeFillMode::Stroke;
+  const char* id_ = "rounded-rect";
+  const char* name_ = "Rounded rectangle";
   Rect dirty_{};
   std::unique_ptr<Gtk::Box> options_;
+  Gtk::ComboBoxText* mode_combo_{nullptr};
 };
 
 Gtk::Widget* RoundedRectTool::options_widget() {
   if (!options_) {
     options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
     auto* mlabel = Gtk::manage(new Gtk::Label("Mode"));
-    auto* combo = Gtk::manage(new Gtk::ComboBoxText());
-    combo->append("stroke", "Stroke");
-    combo->append("fill", "Fill");
-    combo->append("both", "Stroke and fill");
-    combo->set_active(0);
-    combo->signal_changed().connect([this, combo]() {
-      const Glib::ustring id = combo->get_active_id();
+    mode_combo_ = Gtk::manage(new Gtk::ComboBoxText());
+    mode_combo_->append("stroke", "Stroke");
+    mode_combo_->append("fill", "Fill");
+    mode_combo_->append("both", "Stroke and fill");
+    if (fill_mode_ == ShapeFillMode::Fill) mode_combo_->set_active_id("fill");
+    else if (fill_mode_ == ShapeFillMode::Both) mode_combo_->set_active_id("both");
+    else mode_combo_->set_active_id("stroke");
+    mode_combo_->signal_changed().connect([this]() {
+      const Glib::ustring id = mode_combo_->get_active_id();
       if (id == "fill") {
         fill_mode_ = ShapeFillMode::Fill;
       } else if (id == "both") {
@@ -90,7 +100,7 @@ Gtk::Widget* RoundedRectTool::options_widget() {
     aa->set_active(antialias_);
     aa->signal_toggled().connect([this, aa]() { antialias_ = aa->get_active(); });
     options_->pack_start(*mlabel, Gtk::PACK_SHRINK);
-    options_->pack_start(*combo, Gtk::PACK_SHRINK);
+    options_->pack_start(*mode_combo_, Gtk::PACK_SHRINK);
     options_->pack_start(*tlabel, Gtk::PACK_SHRINK);
     options_->pack_start(*tspin, Gtk::PACK_SHRINK);
     options_->pack_start(*rlabel, Gtk::PACK_SHRINK);
@@ -185,7 +195,11 @@ void RoundedRectTool::finish() {
 }
 
 Tool* create_rounded_rect_tool() {
-  return new RoundedRectTool();
+  return new RoundedRectTool(ShapeFillMode::Stroke, "rounded-rect", "Rounded rectangle");
+}
+
+Tool* create_rounded_rect_fill_tool() {
+  return new RoundedRectTool(ShapeFillMode::Fill, "rounded-rect-fill", "Rounded rectangle fill");
 }
 
 }  // namespace lundukepaint

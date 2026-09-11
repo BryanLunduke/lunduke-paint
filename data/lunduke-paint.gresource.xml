@@ -23,5 +23,11 @@
     <file alias="scalable/actions/tool-curve-symbolic.svg">icons/hicolor/scalable/actions/tool-curve-symbolic.svg</file>
     <file alias="scalable/actions/tool-text-symbolic.svg">icons/hicolor/scalable/actions/tool-text-symbolic.svg</file>
     <file alias="scalable/actions/tool-freeformshape-symbolic.svg">icons/hicolor/scalable/actions/tool-freeformshape-symbolic.svg</file>
+    <file alias="scalable/actions/tool-hand-symbolic.svg">icons/hicolor/scalable/actions/tool-hand-symbolic.svg</file>
+    <file alias="scalable/actions/tool-rectangle-filled-symbolic.svg">icons/hicolor/scalable/actions/tool-rectangle-filled-symbolic.svg</file>
+    <file alias="scalable/actions/tool-ellipse-filled-symbolic.svg">icons/hicolor/scalable/actions/tool-ellipse-filled-symbolic.svg</file>
+    <file alias="scalable/actions/tool-rectangle-rounded-filled-symbolic.svg">icons/hicolor/scalable/actions/tool-rectangle-rounded-filled-symbolic.svg</file>
+    <file alias="scalable/actions/tool-freeformshape-filled-symbolic.svg">icons/hicolor/scalable/actions/tool-freeformshape-filled-symbolic.svg</file>
+    <file alias="scalable/actions/tool-polygon-filled-symbolic.svg">icons/hicolor/scalable/actions/tool-polygon-filled-symbolic.svg</file>
   </gresource>
 </gresources>
