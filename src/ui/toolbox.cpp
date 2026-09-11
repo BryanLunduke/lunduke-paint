@@ -303,10 +303,6 @@ bool Toolbox::on_line_width_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   cr->set_source_rgb(0.92, 0.92, 0.92);
   cr->rectangle(0, 0, w, h);
   cr->fill();
-  cr->set_source_rgb(0.2, 0.2, 0.2);
-  cr->rectangle(0.5, 0.5, w - 1.0, h - 1.0);
-  cr->set_line_width(1.0);
-  cr->stroke();
 
   int best = 0;
   int bestd = 999;
@@ -365,10 +361,6 @@ bool Toolbox::on_brush_tips_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   cr->set_source_rgb(0.92, 0.92, 0.92);
   cr->rectangle(0, 0, w, h);
   cr->fill();
-  cr->set_source_rgb(0.2, 0.2, 0.2);
-  cr->rectangle(0.5, 0.5, w - 1.0, h - 1.0);
-  cr->set_line_width(1.0);
-  cr->stroke();
 
   const double cell_w = w / static_cast<double>(kBrushCols);
   const double cell_h = h / static_cast<double>(kBrushRows);
@@ -460,10 +452,6 @@ bool Toolbox::on_spray_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   cr->set_source_rgb(0.92, 0.92, 0.92);
   cr->rectangle(0, 0, w, h);
   cr->fill();
-  cr->set_source_rgb(0.2, 0.2, 0.2);
-  cr->rectangle(0.5, 0.5, w - 1.0, h - 1.0);
-  cr->set_line_width(1.0);
-  cr->stroke();
 
   int best = 0;
   int bestd = 999;
