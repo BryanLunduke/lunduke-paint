@@ -39,7 +39,7 @@
   <releases>
     <release version="0.5" date="2026-09-11">
       <description>
-        <p>Lunduke Paint 0.5 for LCOS 0.5. 0.5-5: separator under left tool grid; Layers thumbnail beside visibility/lock. 0.5-4: two-row patterns, left-rail brush/stroke options (no under-canvas tool strip), Layers grow + icon Delete/Rename/Add + DnD reorder. 0.5-2: R-F03 selection-move checker fix.</p>
+        <p>Lunduke Paint 0.5 for LCOS 0.5. 0.5-6: Colors panel shade-columns + Custom "+"; drop duplicate Colors label. 0.5-5: separator under left tool grid; Layers thumbnail beside visibility/lock. 0.5-4: two-row patterns, left-rail brush/stroke options (no under-canvas tool strip), Layers grow + icon Delete/Rename/Add + DnD reorder. 0.5-2: R-F03 selection-move checker fix.</p>
       </description>
     </release>
     <release version="0.4" date="2026-09-06">
