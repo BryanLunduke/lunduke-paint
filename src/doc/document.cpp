@@ -332,6 +332,15 @@ bool Document::lower_layer() {
   return true;
 }
 
+bool Document::move_layer(int from, int to) {
+  commit_floating();
+  if (from < 0 || to < 0 || from >= layers_.count() || to >= layers_.count() || from == to) {
+    return false;
+  }
+  commit(std::make_unique<MoveLayerCommand>(from, to, "Reorder layer"));
+  return true;
+}
+
 bool Document::merge_down() {
   commit_floating();
   const int idx = layers_.active_index();

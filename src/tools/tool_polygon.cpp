@@ -132,11 +132,11 @@ void PolygonTool::preview(bool closed) {
   dirty_ = {};
   if (closed && xs.size() >= 3) {
     draw_polygon(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
-                 static_cast<int>(xs.size()), thickness_, stroke_color(button_), fill_mode_,
+                 static_cast<int>(xs.size()), (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), fill_mode_,
                  antialias_, &dirty_);
   } else {
     draw_polyline(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
-                  static_cast<int>(xs.size()), thickness_, stroke_color(button_), antialias_,
+                  static_cast<int>(xs.size()), (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), antialias_,
                   &dirty_);
   }
   clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());

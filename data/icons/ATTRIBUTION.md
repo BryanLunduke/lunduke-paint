@@ -37,3 +37,7 @@ freedesktop GTK theme icon names.
 
 - `tool-hand-symbolic.svg` — original Lunduke Paint (public domain / BSD)
 - `tool-*-filled-symbolic.svg` — solid variants of existing toolbox icons (original)
+
+## 0.5-4 layer toolbar icons
+
+- `layer-add-symbolic.svg`, `layer-delete-symbolic.svg`, `layer-rename-symbolic.svg` — original Lunduke Paint (public domain / BSD)

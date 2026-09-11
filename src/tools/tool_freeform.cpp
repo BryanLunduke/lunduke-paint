@@ -156,7 +156,7 @@ void FreeformShapeTool::preview() {
   Layer& tool = doc.layers().tool_layer();
   dirty_ = {};
   draw_polygon(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs_.data(), ys_.data(),
-               static_cast<int>(xs_.size()), thickness_, stroke_color(button_), fill_mode_, false,
+               static_cast<int>(xs_.size()), (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), fill_mode_, false,
                &dirty_);
   host_->invalidate_canvas(dirty_);
 }

@@ -7,12 +7,7 @@
 #include "doc/selection.hpp"
 #include "raster/stroke.hpp"
 
-#include <gtkmm/box.h>
-#include <gtkmm/label.h>
-#include <gtkmm/spinbutton.h>
-
 #include <cstdint>
-#include <memory>
 
 namespace lundukepaint {
 
@@ -23,7 +18,8 @@ public:
   char shortcut() const override { return 'Y'; }
   const char* hint() const override { return "Spraycan: drag; right uses BG"; }
   bool is_stroking() const override { return drawing_; }
-  Gtk::Widget* options_widget() override;
+  // Options live in the MacPaint left-rail spray picker (0.5-4).
+  Gtk::Widget* options_widget() override { return nullptr; }
 
   void on_press(CanvasEvent event) override;
   void on_motion(CanvasEvent event) override;
@@ -41,35 +37,7 @@ private:
   int density_ = 40;
   std::uint32_t rng_ = 0xA5A5A5A5u;
   Rect dirty_{};
-  std::unique_ptr<Gtk::Box> options_;
 };
-
-Gtk::Widget* SprayTool::options_widget() {
-  if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
-    auto* rlabel = Gtk::manage(new Gtk::Label("Radius"));
-    auto* rspin = Gtk::manage(new Gtk::SpinButton());
-    rspin->set_range(1, 64);
-    rspin->set_increments(1, 4);
-    rspin->set_digits(0);
-    rspin->set_value(radius_);
-    rspin->signal_value_changed().connect([this, rspin]() { radius_ = rspin->get_value_as_int(); });
-    auto* dlabel = Gtk::manage(new Gtk::Label("Density"));
-    auto* dspin = Gtk::manage(new Gtk::SpinButton());
-    dspin->set_range(1, 100);
-    dspin->set_increments(1, 10);
-    dspin->set_digits(0);
-    dspin->set_value(density_);
-    dspin->set_tooltip_text("Dots per stamp (1 = sparse, 100 = heavy)");
-    dspin->signal_value_changed().connect([this, dspin]() { density_ = dspin->get_value_as_int(); });
-    options_->pack_start(*rlabel, Gtk::PACK_SHRINK);
-    options_->pack_start(*rspin, Gtk::PACK_SHRINK);
-    options_->pack_start(*dlabel, Gtk::PACK_SHRINK);
-    options_->pack_start(*dspin, Gtk::PACK_SHRINK);
-    options_->show_all();
-  }
-  return options_.get();
-}
 
 void SprayTool::on_press(CanvasEvent event) {
   if (event.button != 1 && event.button != 3) {
@@ -121,7 +89,8 @@ void SprayTool::stamp_to(double x, double y) {
   }
   Document& doc = host_->document();
   Layer& tool = doc.layers().tool_layer();
-  spray_dots(tool.pixels(), tool.width(), tool.height(), tool.stride(), x, y, radius_, density_,
+  const int radius = host_ != nullptr ? host_->spray_radius() : radius_;
+  spray_dots(tool.pixels(), tool.width(), tool.height(), tool.stride(), x, y, radius, density_,
              stroke_color(button_), &rng_, &dirty_);
   clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());
   host_->invalidate_canvas(dirty_);

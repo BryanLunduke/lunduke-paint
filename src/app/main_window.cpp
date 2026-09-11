@@ -11,6 +11,7 @@
 #include "io/image_io.hpp"
 #include "io/ora.hpp"
 #include "io/crash_recovery.hpp"
+#include "raster/brush_tip.hpp"
 #include "raster/effects.hpp"
 #include "raster/transform.hpp"
 #include "ui/dialogs_adjust.hpp"
@@ -177,9 +178,8 @@ MainWindow::MainWindow() {
   bind_document();
   set_active_tool("pencil");
   show_all();
-  // Without this the Size spin button in the tool options bar owns the initial
-  // keyboard focus, focus_is_editable() is true and every single-letter tool
-  // shortcut is eaten by that entry (so the toolbox highlight never moved).
+  // Keep initial focus on the canvas so single-letter tool shortcuts work
+  // (editable widgets in docks must not steal first focus).
   canvas_.focus_canvas();
   rebuild_tabs();
   update_chrome();
@@ -252,6 +252,10 @@ void MainWindow::build_ui() {
   };
   toolbox_.on_line_width_chosen = [this](int width) { set_stroke_size(width); };
   toolbox_.set_line_width(stroke_size_);
+  toolbox_.on_brush_tip_chosen = [this](int index) { set_brush_tip(index); };
+  toolbox_.set_brush_tip(brush_tip_);
+  toolbox_.on_spray_radius_chosen = [this](int radius) { set_spray_radius(radius); };
+  toolbox_.set_spray_radius(spray_radius_);
 
   pattern_strip_.on_pattern_chosen = [this](int index) { set_pattern_index(index); };
   pattern_strip_.on_well_clicked = [this](bool background) { choose_color(background); };
@@ -286,15 +290,15 @@ void MainWindow::build_ui() {
 
   right_sidebar_.set_size_request(kRightDockWidth, -1);
   layers_frame_.set_size_request(kRightDockWidth, -1);
-  history_frame_.set_size_request(kRightDockWidth, -1);
+  history_frame_.set_size_request(kRightDockWidth, 140);
   colors_frame_.set_size_request(kRightDockWidth, -1);
 
   right_sidebar_.set_spacing(2);
   right_sidebar_.set_hexpand(false);
   right_sidebar_.set_halign(Gtk::ALIGN_FILL);
-  // Top Layers / middle History / bottom Colors (not a notebook).
+  // Top Layers (grows) / middle History / bottom Colors (not a notebook).
   right_sidebar_.pack_start(layers_frame_, Gtk::PACK_EXPAND_WIDGET);
-  right_sidebar_.pack_start(history_frame_, Gtk::PACK_EXPAND_WIDGET);
+  right_sidebar_.pack_start(history_frame_, Gtk::PACK_SHRINK);
   right_sidebar_.pack_start(colors_frame_, Gtk::PACK_SHRINK);
 
   center_column_.set_spacing(0);
@@ -334,7 +338,6 @@ void MainWindow::build_ui() {
   root_.pack_start(toolbar_, Gtk::PACK_SHRINK);
   root_.pack_start(tab_bar_, Gtk::PACK_SHRINK);
   root_.pack_start(work_area_, Gtk::PACK_EXPAND_WIDGET);
-  root_.pack_start(tool_options_bar_, Gtk::PACK_SHRINK);
   root_.pack_start(status_bar_, Gtk::PACK_SHRINK);
 
   canvas_.signal_pointer_moved().connect(
@@ -489,7 +492,6 @@ void MainWindow::set_active_tool(const std::string& id) {
   if (found == nullptr || found == active_tool_) {
     if (found != nullptr) {
       toolbox_.set_active_tool(id);
-      tool_options_bar_.show_tool(found);
     }
     return;
   }
@@ -503,7 +505,6 @@ void MainWindow::set_active_tool(const std::string& id) {
   active_tool_ = found;
   canvas_.set_tool(active_tool_);
   toolbox_.set_active_tool(id);
-  tool_options_bar_.show_tool(active_tool_);
   status_bar_.set_hint(active_tool_->hint());
 }
 
@@ -522,6 +523,22 @@ void MainWindow::set_pattern_index(int index) {
 
 const Pattern& MainWindow::active_pattern() const {
   return pattern_at(pattern_index_);
+}
+
+void MainWindow::set_brush_tip(int index) {
+  brush_tip_ = clamp_brush_tip_index(index);
+  toolbox_.set_brush_tip(brush_tip_);
+  // Sync stroke size to the tip's extent so pencil/line width stays coherent.
+  const BrushTip tip = brush_tip_at(brush_tip_);
+  set_stroke_size(std::max(1, tip.size));
+}
+
+void MainWindow::set_spray_radius(int radius) {
+  if (radius < 1) {
+    radius = 1;
+  }
+  spray_radius_ = radius;
+  toolbox_.set_spray_radius(spray_radius_);
 }
 
 void MainWindow::set_brush_antialias(bool enabled) {

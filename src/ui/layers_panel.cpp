@@ -6,8 +6,8 @@
 #include "raster/blend.hpp"
 
 #include <gdkmm/pixbuf.h>
+#include <gtkmm/comboboxtext.h>
 #include <gtkmm/entry.h>
-#include <gtkmm/eventbox.h>
 #include <gtkmm/image.h>
 #include <gtkmm/label.h>
 #include <gtkmm/menu.h>
@@ -15,18 +15,21 @@
 #include <gtkmm/messagedialog.h>
 #include <gtkmm/separatormenuitem.h>
 #include <gtkmm/spinbutton.h>
+#include <gtkmm/targetentry.h>
 #include <gtkmm/togglebutton.h>
 #include <gtkmm/window.h>
 
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 #include <gtk/gtk.h>
-#include <gtkmm/cellrenderertext.h>
 
 namespace lundukepaint {
 namespace {
+
+constexpr const char* kLayerDnD = "application/x-lunduke-layer-index";
 
 Glib::RefPtr<Gdk::Pixbuf> thumb_pixbuf(const Layer& layer) {
   const int w = layer.thumbnail_width();
@@ -59,107 +62,93 @@ public:
 
 }  // namespace
 
+void LayersPanel::style_icon_button(Gtk::Button& button, const std::string& icon_name,
+                                    const char* tip) {
+  const std::string resource =
+      "/org/lunduke/LundukePaint/icons/scalable/actions/" + icon_name + ".svg";
+  auto* image = Gtk::manage(new Gtk::Image());
+  try {
+    auto pixbuf = Gdk::Pixbuf::create_from_resource(resource, 18, 18, true);
+    image->set(pixbuf);
+  } catch (const Glib::Error&) {
+    image->set_from_resource(resource);
+    image->set_pixel_size(18);
+  }
+  button.set_image(*image);
+  button.set_tooltip_text(tip);
+  button.set_can_focus(false);
+  button.set_relief(Gtk::RELIEF_NONE);
+  button.set_size_request(28, 28);
+}
+
 LayersPanel::LayersPanel() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   set_border_width(3);
+  set_vexpand(true);
   list_.set_selection_mode(Gtk::SELECTION_SINGLE);
   list_.set_activate_on_single_click(true);
   list_.signal_row_selected().connect(sigc::mem_fun(*this, &LayersPanel::on_row_selected));
   scroll_.set_policy(Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
-  scroll_.set_min_content_height(120);
+  scroll_.set_min_content_height(160);
+  scroll_.set_vexpand(true);
   scroll_.add(list_);
 
-  for (int i = 0; i < kBlendModeCount; ++i) {
-    const BlendMode mode = blend_mode_from_index(i);
-    blend_.append(blend_mode_label(mode));
-  }
-  blend_.set_active(0);
-  blend_.set_tooltip_text("Blend");
-  blend_.set_size_request(76, -1);
-  blend_.set_hexpand(false);
-  {
-    auto* cell = blend_.get_first_cell();
-    if (auto* text = dynamic_cast<Gtk::CellRendererText*>(cell)) {
-      text->property_ellipsize() = Pango::ELLIPSIZE_END;
-    }
-  }
-  blend_.signal_changed().connect([this]() {
-    if (refreshing_ || document_ == nullptr) {
-      return;
-    }
-    document_->set_layer_blend(document_->layers().active_index(),
-                               blend_mode_from_index(blend_.get_active_row_number()));
-  });
+  std::vector<Gtk::TargetEntry> targets;
+  targets.emplace_back(kLayerDnD, Gtk::TARGET_SAME_APP, 0);
+  list_.drag_dest_set(targets, Gtk::DEST_DEFAULT_MOTION | Gtk::DEST_DEFAULT_HIGHLIGHT,
+                      Gdk::ACTION_MOVE);
+  list_.signal_drag_motion().connect(sigc::mem_fun(*this, &LayersPanel::on_list_drag_motion));
+  list_.signal_drag_leave().connect(sigc::mem_fun(*this, &LayersPanel::on_list_drag_leave));
+  list_.signal_drag_drop().connect(sigc::mem_fun(*this, &LayersPanel::on_list_drag_drop));
+  list_.signal_drag_data_received().connect(
+      sigc::mem_fun(*this, &LayersPanel::on_list_drag_data_received));
 
-  buttons_.set_row_spacing(1);
-  buttons_.set_column_spacing(1);
-  buttons_.set_hexpand(true);
-  auto pack_btn = [this](Gtk::Button& b, const char* icon, const char* tip, int col, int row) {
-    b.set_label("");
-    b.set_image_from_icon_name(icon, Gtk::ICON_SIZE_MENU);
-    b.set_tooltip_text(tip);
-    b.set_can_focus(false);
-    b.set_relief(Gtk::RELIEF_NONE);
-    b.set_hexpand(true);
-    buttons_.attach(b, col, row, 1, 1);
-  };
-  pack_btn(new_, "list-add-symbolic", "New layer", 0, 0);
-  pack_btn(dup_, "edit-copy-symbolic", "Duplicate layer", 1, 0);
-  pack_btn(del_, "edit-delete-symbolic", "Delete layer", 0, 1);
-  pack_btn(up_, "go-up-symbolic", "Raise layer", 1, 1);
-  pack_btn(down_, "go-down-symbolic", "Lower layer", 0, 2);
-  pack_btn(merge_, "go-bottom-symbolic", "Merge down", 1, 2);
-  pack_btn(flatten_, "view-restore-symbolic", "Flatten", 0, 3);
+  style_icon_button(del_, "layer-delete-symbolic", "Delete layer");
+  style_icon_button(rename_, "layer-rename-symbolic", "Rename layer");
+  style_icon_button(add_, "layer-add-symbolic", "Add layer");
 
-  new_.signal_clicked().connect([this]() {
-    if (document_ == nullptr) {
-      return;
-    }
-    if (document_->layers().count() >= kSoftMaxLayers) {
-      if (auto* win = toplevel_window(*this)) {
-        Gtk::MessageDialog warn(*win,
-                                "This document has 64 or more layers and may use a lot of memory.",
-                                false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
-        if (warn.run() != Gtk::RESPONSE_OK) {
-          return;
-        }
-      }
-    }
-    document_->add_layer();
-  });
-  dup_.signal_clicked().connect([this]() {
-    if (document_ != nullptr) {
-      document_->duplicate_layer();
-    }
-  });
-  del_.signal_clicked().connect([this]() {
-    if (document_ != nullptr) {
-      document_->delete_layer();
-    }
-  });
-  up_.signal_clicked().connect([this]() {
-    if (document_ != nullptr) {
-      document_->raise_layer();
-    }
-  });
-  down_.signal_clicked().connect([this]() {
-    if (document_ != nullptr) {
-      document_->lower_layer();
-    }
-  });
-  merge_.signal_clicked().connect([this]() {
-    if (document_ != nullptr) {
-      document_->merge_down();
-    }
-  });
-  flatten_.signal_clicked().connect([this]() {
-    if (document_ != nullptr) {
-      document_->flatten();
-    }
-  });
+  // Right-justified: Delete, Rename, Add (left → right).
+  toolbar_.set_halign(Gtk::ALIGN_END);
+  toolbar_.set_hexpand(true);
+  toolbar_.pack_start(del_, Gtk::PACK_SHRINK);
+  toolbar_.pack_start(rename_, Gtk::PACK_SHRINK);
+  toolbar_.pack_start(add_, Gtk::PACK_SHRINK);
+
+  add_.signal_clicked().connect(sigc::mem_fun(*this, &LayersPanel::add_layer_clicked));
+  del_.signal_clicked().connect(sigc::mem_fun(*this, &LayersPanel::delete_layer_clicked));
+  rename_.signal_clicked().connect(sigc::mem_fun(*this, &LayersPanel::rename_clicked));
 
   pack_start(scroll_, Gtk::PACK_EXPAND_WIDGET);
-  pack_start(blend_, Gtk::PACK_SHRINK);
-  pack_start(buttons_, Gtk::PACK_SHRINK);
+  pack_start(toolbar_, Gtk::PACK_SHRINK);
+}
+
+void LayersPanel::add_layer_clicked() {
+  if (document_ == nullptr) {
+    return;
+  }
+  if (document_->layers().count() >= kSoftMaxLayers) {
+    if (auto* win = toplevel_window(*this)) {
+      Gtk::MessageDialog warn(*win,
+                              "This document has 64 or more layers and may use a lot of memory.",
+                              false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
+      if (warn.run() != Gtk::RESPONSE_OK) {
+        return;
+      }
+    }
+  }
+  document_->add_layer();
+}
+
+void LayersPanel::delete_layer_clicked() {
+  if (document_ != nullptr) {
+    document_->delete_layer();
+  }
+}
+
+void LayersPanel::rename_clicked() {
+  if (document_ == nullptr) {
+    return;
+  }
+  rename_layer(document_->layers().active_index());
 }
 
 void LayersPanel::set_document(Document* document) {
@@ -186,6 +175,81 @@ void LayersPanel::on_row_selected(Gtk::ListBoxRow* row) {
     document_->layers().set_active_index(layer_row->stack_index);
     document_->notify_changed();
   }
+}
+
+void LayersPanel::on_row_drag_begin(const Glib::RefPtr<Gdk::DragContext>& /*context*/,
+                                    Gtk::ListBoxRow* row) {
+  drag_stack_from_ = -1;
+  if (auto* layer_row = dynamic_cast<LayerRow*>(row)) {
+    drag_stack_from_ = layer_row->stack_index;
+  }
+}
+
+void LayersPanel::on_row_drag_data_get(const Glib::RefPtr<Gdk::DragContext>& /*context*/,
+                                       Gtk::SelectionData& selection_data, guint /*info*/,
+                                       guint /*time*/, int stack_index) {
+  const int value = stack_index;
+  selection_data.set(kLayerDnD, 8, reinterpret_cast<const guchar*>(&value), sizeof(value));
+}
+
+bool LayersPanel::on_list_drag_motion(const Glib::RefPtr<Gdk::DragContext>& context, int /*x*/, int y,
+                                      guint time) {
+  auto* row = list_.get_row_at_y(y);
+  if (row != nullptr) {
+    gtk_list_box_drag_highlight_row(list_.gobj(), row->gobj());
+  } else {
+    gtk_list_box_drag_unhighlight_row(list_.gobj());
+  }
+  context->drag_status(Gdk::ACTION_MOVE, time);
+  return true;
+}
+
+void LayersPanel::on_list_drag_leave(const Glib::RefPtr<Gdk::DragContext>& /*context*/,
+                                     guint /*time*/) {
+  gtk_list_box_drag_unhighlight_row(list_.gobj());
+}
+
+bool LayersPanel::on_list_drag_drop(const Glib::RefPtr<Gdk::DragContext>& context, int /*x*/,
+                                    int /*y*/, guint time) {
+  if (context->list_targets().empty()) {
+    return false;
+  }
+  // Request the payload; drop completes in drag_data_received.
+  for (const auto& target : context->list_targets()) {
+    if (target == kLayerDnD) {
+      list_.drag_get_data(context, target, time);
+      return true;
+    }
+  }
+  return false;
+}
+
+void LayersPanel::on_list_drag_data_received(const Glib::RefPtr<Gdk::DragContext>& context, int x,
+                                             int y, const Gtk::SelectionData& data, guint /*info*/,
+                                             guint time) {
+  gtk_list_box_drag_unhighlight_row(list_.gobj());
+  bool success = false;
+  if (document_ != nullptr && data.get_length() >= static_cast<int>(sizeof(int)) &&
+      data.get_data_type() == kLayerDnD) {
+    int from = -1;
+    std::memcpy(&from, data.get_data(), sizeof(from));
+    auto* dest_row = list_.get_row_at_y(y);
+    int to = from;
+    if (dest_row != nullptr) {
+      if (auto* layer_row = dynamic_cast<LayerRow*>(dest_row)) {
+        to = layer_row->stack_index;
+      }
+    } else if (document_->layers().count() > 0) {
+      // Drop below last UI row → bottom of stack (index 0).
+      to = 0;
+    }
+    if (from >= 0 && to >= 0 && from != to) {
+      success = document_->move_layer(from, to);
+    }
+  }
+  (void)x;
+  context->drag_finish(success, false, time);
+  drag_stack_from_ = -1;
 }
 
 void LayersPanel::add_row(int stack_index) {
@@ -249,6 +313,18 @@ void LayersPanel::add_row(int stack_index) {
         return false;
       },
       false);
+
+  std::vector<Gtk::TargetEntry> targets;
+  targets.emplace_back(kLayerDnD, Gtk::TARGET_SAME_APP, 0);
+  row->drag_source_set(targets, Gdk::BUTTON1_MASK, Gdk::ACTION_MOVE);
+  row->signal_drag_begin().connect(
+      [this, row](const Glib::RefPtr<Gdk::DragContext>& ctx) { on_row_drag_begin(ctx, row); });
+  row->signal_drag_data_get().connect(
+      [this, stack_index](const Glib::RefPtr<Gdk::DragContext>& ctx, Gtk::SelectionData& sel,
+                          guint info, guint time) {
+        on_row_drag_data_get(ctx, sel, info, time, stack_index);
+      });
+
   row->show_all();
   list_.append(*row);
 }
@@ -266,7 +342,7 @@ void LayersPanel::popup_row_menu(int stack_index, GdkEventButton* event) {
     item->signal_activate().connect(std::move(fn));
     menu->append(*item);
   };
-  add_item("_New", [this]() { new_.clicked(); });
+  add_item("_Add layer", [this]() { add_layer_clicked(); });
   add_item("_Duplicate", [this]() { document_->duplicate_layer(); });
   add_item("De_lete", [this]() { document_->delete_layer(); });
   add_item("_Raise", [this]() { document_->raise_layer(); });
@@ -283,7 +359,6 @@ void LayersPanel::popup_row_menu(int stack_index, GdkEventButton* event) {
   } else {
     menu->popup(0, gtk_get_current_event_time());
   }
-  // Keep the menu alive until it is popped down.
   menu->signal_hide().connect([menu]() mutable { menu.reset(); });
 }
 
@@ -373,15 +448,9 @@ void LayersPanel::show_properties() {
 void LayersPanel::update_buttons() {
   const bool have = document_ != nullptr && document_->layers().count() > 0;
   const int count = have ? document_->layers().count() : 0;
-  const int active = have ? document_->layers().active_index() : 0;
-  dup_.set_sensitive(have);
   del_.set_sensitive(have && count > 1);
-  up_.set_sensitive(have && active + 1 < count);
-  down_.set_sensitive(have && active > 0);
-  merge_.set_sensitive(have && active > 0);
-  flatten_.set_sensitive(have && count > 1);
-  new_.set_sensitive(document_ != nullptr);
-  blend_.set_sensitive(have);
+  rename_.set_sensitive(have);
+  add_.set_sensitive(document_ != nullptr);
 }
 
 void LayersPanel::refresh() {
@@ -405,9 +474,6 @@ void LayersPanel::refresh() {
     const int ui = document_->layers().count() - 1 - active;
     if (auto* row = list_.get_row_at_index(ui)) {
       list_.select_row(*row);
-    }
-    if (document_->layers().count() > 0) {
-      blend_.set_active(static_cast<int>(document_->layers().active_layer().blend()));
     }
   }
   list_.show_all();

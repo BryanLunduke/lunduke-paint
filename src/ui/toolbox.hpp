@@ -9,6 +9,7 @@
 #include <gtkmm/cssprovider.h>
 #include <gtkmm/drawingarea.h>
 #include <gtkmm/grid.h>
+#include <gtkmm/stack.h>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,9 @@
 
 namespace lundukepaint {
 
+// Left MacPaint toolbox: tool grid + compact left-rail options (line width /
+// brush tips / spray radius) that swap with the active tool — not a strip
+// under the canvas.
 class Toolbox : public Gtk::Box {
 public:
   Toolbox();
@@ -24,6 +28,12 @@ public:
   void set_active_tool(const std::string& id);
   void set_line_width(int width);
   int line_width() const { return line_width_; }
+  void set_brush_tip(int index);
+  int brush_tip() const { return brush_tip_; }
+  void set_spray_radius(int radius);
+  int spray_radius() const { return spray_radius_; }
+  // Show the matching left-rail options panel for this tool id.
+  void show_options_for_tool(const std::string& id);
 
   const std::string& active_tool_id() const { return selection_.active_id(); }
   bool tool_button_selected(const std::string& id) const;
@@ -34,6 +44,8 @@ public:
 
   std::function<void(const std::string& id)> on_tool_chosen;
   std::function<void(int width)> on_line_width_chosen;
+  std::function<void(int index)> on_brush_tip_chosen;
+  std::function<void(int radius)> on_spray_radius_chosen;
 
 private:
   static void ensure_css();
@@ -43,15 +55,28 @@ private:
   int tool_grid_natural_width() const;
   bool on_line_width_draw(const Cairo::RefPtr<Cairo::Context>& cr);
   bool on_line_width_press(GdkEventButton* event);
+  bool on_brush_tips_draw(const Cairo::RefPtr<Cairo::Context>& cr);
+  bool on_brush_tips_press(GdkEventButton* event);
+  bool on_spray_draw(const Cairo::RefPtr<Cairo::Context>& cr);
+  bool on_spray_press(GdkEventButton* event);
   int width_at_y(double y) const;
+  int brush_tip_at(double x, double y) const;
+  int spray_radius_at_y(double y) const;
+  void size_option_panels();
 
   Gtk::Grid grid_;
+  Gtk::Stack options_stack_;
   Gtk::DrawingArea line_widths_;
+  Gtk::DrawingArea brush_tips_;
+  Gtk::DrawingArea spray_radii_;
+  Gtk::Box empty_options_{Gtk::ORIENTATION_VERTICAL};
   std::vector<Gtk::Button*> buttons_;
   ToolSelection selection_;
   int next_col_ = 0;
   int next_row_ = 0;
   int line_width_ = 1;
+  int brush_tip_ = 3;  // Round 8 by default
+  int spray_radius_ = 16;
 };
 
 }  // namespace lundukepaint

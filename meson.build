@@ -42,6 +42,7 @@ lunduke_paint_core_sources = files(
   'src/doc/selection.cpp',
   'src/raster/fill.cpp',
   'src/raster/stroke.cpp',
+  'src/raster/brush_tip.cpp',
   'src/raster/transform.cpp',
   'src/raster/shapes.cpp',
   'src/raster/blend.cpp',

@@ -5,15 +5,10 @@
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
+#include "raster/brush_tip.hpp"
 #include "raster/stroke.hpp"
 
-#include <gtkmm/box.h>
-#include <gtkmm/checkbutton.h>
-#include <gtkmm/label.h>
-#include <gtkmm/spinbutton.h>
-
 #include <cmath>
-#include <memory>
 
 namespace lundukepaint {
 
@@ -22,9 +17,10 @@ public:
   const char* id() const override { return "brush"; }
   const char* name() const override { return "Brush"; }
   char shortcut() const override { return 'B'; }
-  const char* hint() const override { return "Brush: drag to paint a round stroke"; }
+  const char* hint() const override { return "Brush: drag to paint; tip from left-rail picker"; }
   bool is_stroking() const override { return drawing_; }
-  Gtk::Widget* options_widget() override;
+  // Options live in the MacPaint left-rail tip picker (0.5-4).
+  Gtk::Widget* options_widget() override { return nullptr; }
 
   void on_press(CanvasEvent event) override;
   void on_motion(CanvasEvent event) override;
@@ -40,42 +36,8 @@ private:
   double last_x_ = 0;
   double last_y_ = 0;
   unsigned button_ = 1;
-  int size_ = 8;
-  bool antialias_ = true;
   Rect dirty_{};
-  std::unique_ptr<Gtk::Box> options_;
 };
-
-Gtk::Widget* BrushTool::options_widget() {
-  if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
-    auto* label = Gtk::manage(new Gtk::Label("Size"));
-    auto* spin = Gtk::manage(new Gtk::SpinButton());
-    spin->set_range(1, 64);
-    spin->set_increments(1, 4);
-    spin->set_digits(0);
-    spin->set_value(size_);
-    spin->signal_value_changed().connect([this, spin]() {
-      size_ = spin->get_value_as_int();
-      if (host_ != nullptr) {
-        host_->set_stroke_size(size_);
-      }
-    });
-    auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
-    aa->set_active(antialias_);
-    aa->signal_toggled().connect([this, aa]() {
-      antialias_ = aa->get_active();
-      if (host_ != nullptr) {
-        host_->set_brush_antialias(antialias_);
-      }
-    });
-    options_->pack_start(*label, Gtk::PACK_SHRINK);
-    options_->pack_start(*spin, Gtk::PACK_SHRINK);
-    options_->pack_start(*aa, Gtk::PACK_SHRINK);
-    options_->show_all();
-  }
-  return options_.get();
-}
 
 void BrushTool::on_press(CanvasEvent event) {
   if (event.button != 1 && event.button != 3) {
@@ -131,8 +93,9 @@ void BrushTool::stamp_to(double x, double y) {
     return;
   }
   Layer& tool = host_->document().layers().tool_layer();
-  stroke_brush(tool.pixels(), tool.width(), tool.height(), tool.stride(), last_x_, last_y_, x, y,
-               size_, stroke_color(button_), antialias_, &dirty_);
+  const BrushTip tip = brush_tip_at(host_->brush_tip());
+  stroke_brush_tip(tool.pixels(), tool.width(), tool.height(), tool.stride(), last_x_, last_y_, x, y,
+                   tip, stroke_color(button_), &dirty_);
   clip_rect_to_selection(tool, host_->document().layers().active_layer(), dirty_,
                          host_->document().selection());
   last_x_ = x;

@@ -102,7 +102,7 @@ void PolylineTool::preview() {
   }
   dirty_ = {};
   draw_polyline(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
-                static_cast<int>(xs.size()), thickness_, stroke_color(button_), antialias_,
+                static_cast<int>(xs.size()), (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), antialias_,
                 &dirty_);
   clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());
   host_->invalidate_canvas(dirty_);

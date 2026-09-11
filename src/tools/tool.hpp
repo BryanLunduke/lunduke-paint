@@ -55,6 +55,10 @@ public:
   virtual int pattern_index() const { return 0; }
   virtual void set_pattern_index(int /*index*/) {}
   virtual const Pattern& active_pattern() const { return pattern_at(0); }
+  virtual int brush_tip() const { return 3; }
+  virtual void set_brush_tip(int /*index*/) {}
+  virtual int spray_radius() const { return 16; }
+  virtual void set_spray_radius(int /*radius*/) {}
 };
 
 

@@ -7,17 +7,20 @@
 namespace lundukepaint {
 namespace {
 constexpr int kSwatch = 18;
-constexpr int kCurrent = 28;
+constexpr int kCurrent = 36;
 constexpr int kWell = 16;
+// MacPaint used 38 patterns in two rows (19 × 2).
+constexpr int kCols = 19;
 }  // namespace
 
 PatternStrip::PatternStrip() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 4) {
   set_border_width(3);
-  set_size_request(-1, 36);
+  set_size_request(-1, 48);
   get_style_context()->add_class("toolbar");
 
   current_.set_size_request(kCurrent, kCurrent);
   current_.set_tooltip_text("Current pattern");
+  current_.set_valign(Gtk::ALIGN_CENTER);
   current_.signal_draw().connect(sigc::mem_fun(*this, &PatternStrip::on_current_draw));
   pack_start(current_, Gtk::PACK_SHRINK);
 
@@ -41,6 +44,7 @@ PatternStrip::PatternStrip() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 4) {
   // Overlapping FG (front-left) / BG (back-right) like MacPaint.
   auto* well_box = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 0));
   well_box->set_size_request(kWell + 10, kWell + 10);
+  well_box->set_valign(Gtk::ALIGN_CENTER);
   auto* overlay = Gtk::manage(new Gtk::Fixed());
   overlay->set_size_request(kWell + 10, kWell + 10);
   overlay->put(bg_well_, 8, 8);
@@ -48,6 +52,10 @@ PatternStrip::PatternStrip() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 4) {
   well_box->pack_start(*overlay, Gtk::PACK_SHRINK);
   pack_start(*well_box, Gtk::PACK_SHRINK);
 
+  swatches_.set_row_spacing(1);
+  swatches_.set_column_spacing(1);
+  swatches_.set_column_homogeneous(true);
+  swatches_.set_row_homogeneous(true);
   for (int i = 0; i < kPatternCount; ++i) {
     auto* area = Gtk::manage(new Gtk::DrawingArea());
     area->set_size_request(kSwatch, kSwatch);
@@ -60,7 +68,9 @@ PatternStrip::PatternStrip() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 4) {
         });
     area->signal_button_press_event().connect(
         [this, index](GdkEventButton* event) { return on_swatch_press(event, index); });
-    swatches_.pack_start(*area, Gtk::PACK_SHRINK);
+    const int row = i / kCols;
+    const int col = i % kCols;
+    swatches_.attach(*area, col, row, 1, 1);
     areas_.push_back(area);
   }
   scroll_.set_policy(Gtk::POLICY_AUTOMATIC, Gtk::POLICY_NEVER);
@@ -91,7 +101,6 @@ void PatternStrip::set_pattern_index(int index) {
 void PatternStrip::draw_pattern(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h,
                                 int index) const {
   const Pattern& pat = pattern_at(index);
-  // Scale so each pattern cell is visible.
   const int cell = std::max(1, std::min(w, h) / 8);
   const int ox = (w - cell * 8) / 2;
   const int oy = (h - cell * 8) / 2;

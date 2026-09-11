@@ -29,5 +29,8 @@
     <file alias="scalable/actions/tool-rectangle-rounded-filled-symbolic.svg">icons/hicolor/scalable/actions/tool-rectangle-rounded-filled-symbolic.svg</file>
     <file alias="scalable/actions/tool-freeformshape-filled-symbolic.svg">icons/hicolor/scalable/actions/tool-freeformshape-filled-symbolic.svg</file>
     <file alias="scalable/actions/tool-polygon-filled-symbolic.svg">icons/hicolor/scalable/actions/tool-polygon-filled-symbolic.svg</file>
+    <file alias="scalable/actions/layer-delete-symbolic.svg">icons/hicolor/scalable/actions/layer-delete-symbolic.svg</file>
+    <file alias="scalable/actions/layer-rename-symbolic.svg">icons/hicolor/scalable/actions/layer-rename-symbolic.svg</file>
+    <file alias="scalable/actions/layer-add-symbolic.svg">icons/hicolor/scalable/actions/layer-add-symbolic.svg</file>
   </gresource>
 </gresources>

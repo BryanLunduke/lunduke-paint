@@ -120,8 +120,9 @@ void EraserTool::stamp_to(double x, double y) {
     return;
   }
   Layer& tool = host_->document().layers().tool_layer();
+  const int size = host_ != nullptr ? host_->stroke_size() : size_;
   stroke_brush(tool.pixels(), tool.width(), tool.height(), tool.stride(), last_x_, last_y_, x, y,
-               size_, erase_color(), false, &dirty_);
+               size, erase_color(), false, &dirty_);
   clip_rect_to_selection(tool, host_->document().layers().active_layer(), dirty_,
                          host_->document().selection());
   last_x_ = x;

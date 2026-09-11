@@ -145,7 +145,7 @@ void EllipseTool::preview(int x1, int y1, bool constrain) {
     constrain_square(x0_, y0_, &x1_, &y1_);
   }
   dirty_ = {};
-  draw_ellipse(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_, y0_, x1_, y1_, thickness_, stroke_color(button_), mode(), antialias_, &dirty_);
+  draw_ellipse(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_, y0_, x1_, y1_, (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), mode(), antialias_, &dirty_);
   clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());
   host_->invalidate_canvas(dirty_);
 }

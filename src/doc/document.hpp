@@ -75,6 +75,7 @@ public:
   bool delete_layer();
   bool raise_layer();
   bool lower_layer();
+  bool move_layer(int from, int to);
   bool merge_down();
   void flatten();
   void set_layer_visible(int index, bool visible);

@@ -9,12 +9,13 @@
 #include <gtkmm/box.h>
 #include <gtkmm/drawingarea.h>
 #include <gtkmm/fixed.h>
+#include <gtkmm/grid.h>
 #include <gtkmm/scrolledwindow.h>
 #include <vector>
 
 namespace lundukepaint {
 
-// MacPaint-style pattern strip: current pattern + FG/BG wells + swatch row.
+// MacPaint-style pattern strip: current pattern + FG/BG wells + two rows of swatches.
 class PatternStrip : public Gtk::Box {
 public:
   PatternStrip();
@@ -42,7 +43,7 @@ private:
   Gtk::DrawingArea fg_well_;
   Gtk::DrawingArea bg_well_;
   Gtk::ScrolledWindow scroll_;
-  Gtk::Box swatches_{Gtk::ORIENTATION_HORIZONTAL, 1};
+  Gtk::Grid swatches_;
   std::vector<Gtk::DrawingArea*> areas_;
   Color fg_ = Color::black();
   Color bg_ = Color::white();

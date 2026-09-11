@@ -13,7 +13,6 @@
 #include "ui/history_panel.hpp"
 #include "ui/layers_panel.hpp"
 #include "ui/status_bar.hpp"
-#include "ui/tool_options_bar.hpp"
 #include "ui/pattern_strip.hpp"
 #include "ui/toolbox.hpp"
 
@@ -73,6 +72,10 @@ public:
   int pattern_index() const override { return pattern_index_; }
   void set_pattern_index(int index) override;
   const Pattern& active_pattern() const override;
+  int brush_tip() const override { return brush_tip_; }
+  void set_brush_tip(int index) override;
+  int spray_radius() const override { return spray_radius_; }
+  void set_spray_radius(int radius) override;
   void invalidate_canvas(Rect rect) override;
   void return_to_previous_tool() override;
   Color sample_canvas(int x, int y) const override;
@@ -180,7 +183,6 @@ private:
 
   Gtk::Box root_{Gtk::ORIENTATION_VERTICAL};
   Gtk::Box toolbar_{Gtk::ORIENTATION_HORIZONTAL};
-  ToolOptionsBar tool_options_bar_;
   Gtk::Notebook tab_bar_;
   Gtk::Box work_area_{Gtk::ORIENTATION_HORIZONTAL};
   Toolbox toolbox_;
@@ -205,6 +207,8 @@ private:
   bool brush_aa_{true};
   int fill_tolerance_{0};
   int pattern_index_{0};
+  int brush_tip_{3};
+  int spray_radius_{16};
   int jpeg_quality_{90};
   bool intro_played_{false};
   Glib::RefPtr<Gio::SimpleAction> undo_action_;

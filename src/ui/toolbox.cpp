@@ -2,12 +2,15 @@
 
 #include "ui/toolbox.hpp"
 
+#include "raster/brush_tip.hpp"
+
 #include <gdkmm/pixbuf.h>
 #include <gdkmm/screen.h>
 #include <gtkmm/image.h>
 #include <gtkmm/stylecontext.h>
 
 #include <cmath>
+#include <cstring>
 
 namespace lundukepaint {
 
@@ -16,6 +19,16 @@ constexpr int kToolboxMaxWidth = 92;
 constexpr int kGridWidthSlop = 36;
 constexpr int kSideAir = 8;
 constexpr int kLineChoices[5] = {1, 2, 3, 5, 8};
+constexpr int kSprayChoices[5] = {4, 8, 12, 16, 24};
+constexpr int kBrushCols = 4;
+constexpr int kBrushRows = 4;
+
+bool uses_line_width(const std::string& id) {
+  return id == "pencil" || id == "eraser" || id == "line" || id == "rectangle" ||
+         id == "rectangle-fill" || id == "rounded-rect" || id == "rounded-rect-fill" ||
+         id == "ellipse" || id == "ellipse-fill" || id == "freeform" || id == "freeform-fill" ||
+         id == "polygon" || id == "polygon-fill" || id == "polyline" || id == "curve";
+}
 }  // namespace
 
 void Toolbox::ensure_css() {
@@ -58,17 +71,46 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
                    -1);
   grid_.signal_size_allocate().connect(sigc::mem_fun(*this, &Toolbox::on_grid_size_allocate));
 
-  // MacPaint-style line-width selector under the tool grid.
-  line_widths_.set_size_request(tool_grid_natural_width(), 72);
-  line_widths_.set_margin_start(kSideAir);
-  line_widths_.set_margin_end(kSideAir);
-  line_widths_.set_margin_top(4);
+  options_stack_.set_transition_type(Gtk::STACK_TRANSITION_TYPE_NONE);
+  options_stack_.set_margin_start(kSideAir);
+  options_stack_.set_margin_end(kSideAir);
+  options_stack_.set_margin_top(4);
+  options_stack_.set_hexpand(false);
+  options_stack_.set_halign(Gtk::ALIGN_START);
+
+  const int grid_w = tool_grid_natural_width();
+
+  // MacPaint-style line-width selector.
+  line_widths_.set_size_request(grid_w, 72);
   line_widths_.set_tooltip_text("Line width");
   line_widths_.add_events(Gdk::BUTTON_PRESS_MASK);
   line_widths_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_line_width_draw));
   line_widths_.signal_button_press_event().connect(
       sigc::mem_fun(*this, &Toolbox::on_line_width_press));
-  pack_start(line_widths_, Gtk::PACK_SHRINK);
+  options_stack_.add(line_widths_, "line", "Line width");
+
+  // MacPaint-style brush tip grid (4×4).
+  brush_tips_.set_size_request(grid_w, grid_w);
+  brush_tips_.set_tooltip_text("Brush shape");
+  brush_tips_.add_events(Gdk::BUTTON_PRESS_MASK);
+  brush_tips_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_brush_tips_draw));
+  brush_tips_.signal_button_press_event().connect(
+      sigc::mem_fun(*this, &Toolbox::on_brush_tips_press));
+  options_stack_.add(brush_tips_, "brush", "Brush shape");
+
+  // Compact spray radius rows (same visual language as line widths).
+  spray_radii_.set_size_request(grid_w, 72);
+  spray_radii_.set_tooltip_text("Spray radius");
+  spray_radii_.add_events(Gdk::BUTTON_PRESS_MASK);
+  spray_radii_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_spray_draw));
+  spray_radii_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_spray_press));
+  options_stack_.add(spray_radii_, "spray", "Spray radius");
+
+  empty_options_.set_size_request(grid_w, 8);
+  options_stack_.add(empty_options_, "none", "None");
+
+  pack_start(options_stack_, Gtk::PACK_SHRINK);
+  options_stack_.set_visible_child("line");
 }
 
 void Toolbox::add_tool_button(const std::string& id, const std::string& tooltip,
@@ -112,6 +154,19 @@ void Toolbox::add_tool_button(const std::string& id, const std::string& tooltip,
 void Toolbox::set_active_tool(const std::string& id) {
   selection_.select(id);
   apply_selection_style();
+  show_options_for_tool(id);
+}
+
+void Toolbox::show_options_for_tool(const std::string& id) {
+  if (id == "brush") {
+    options_stack_.set_visible_child("brush");
+  } else if (id == "spray") {
+    options_stack_.set_visible_child("spray");
+  } else if (uses_line_width(id)) {
+    options_stack_.set_visible_child("line");
+  } else {
+    options_stack_.set_visible_child("none");
+  }
 }
 
 void Toolbox::set_line_width(int width) {
@@ -120,6 +175,19 @@ void Toolbox::set_line_width(int width) {
   }
   line_width_ = width;
   line_widths_.queue_draw();
+}
+
+void Toolbox::set_brush_tip(int index) {
+  brush_tip_ = clamp_brush_tip_index(index);
+  brush_tips_.queue_draw();
+}
+
+void Toolbox::set_spray_radius(int radius) {
+  if (radius < 1) {
+    radius = 1;
+  }
+  spray_radius_ = radius;
+  spray_radii_.queue_draw();
 }
 
 void Toolbox::apply_selection_style() {
@@ -168,6 +236,14 @@ void Toolbox::get_preferred_width_vfunc(int& minimum_width, int& natural_width) 
   natural_width = w;
 }
 
+void Toolbox::size_option_panels() {
+  const int grid_w = tool_grid_natural_width();
+  line_widths_.set_size_request(grid_w, 72);
+  brush_tips_.set_size_request(grid_w, grid_w);
+  spray_radii_.set_size_request(grid_w, 72);
+  empty_options_.set_size_request(grid_w, 8);
+}
+
 void Toolbox::on_grid_size_allocate(Gtk::Allocation& allocation) {
   (void)allocation;
   const int grid_w = tool_grid_natural_width();
@@ -178,7 +254,7 @@ void Toolbox::on_grid_size_allocate(Gtk::Allocation& allocation) {
   get_size_request(req_w, req_h);
   if (req_w != want) {
     set_size_request(want, -1);
-    line_widths_.set_size_request(grid_w, 72);
+    size_option_panels();
   }
 }
 
@@ -196,6 +272,20 @@ int Toolbox::width_at_y(double y) const {
   const int h = line_widths_.get_allocated_height();
   const int row = std::max(0, std::min(4, static_cast<int>(y * 5.0 / std::max(1, h))));
   return kLineChoices[row];
+}
+
+int Toolbox::spray_radius_at_y(double y) const {
+  const int h = spray_radii_.get_allocated_height();
+  const int row = std::max(0, std::min(4, static_cast<int>(y * 5.0 / std::max(1, h))));
+  return kSprayChoices[row];
+}
+
+int Toolbox::brush_tip_at(double x, double y) const {
+  const int w = std::max(1, brush_tips_.get_allocated_width());
+  const int h = std::max(1, brush_tips_.get_allocated_height());
+  const int col = std::max(0, std::min(kBrushCols - 1, static_cast<int>(x * kBrushCols / w)));
+  const int row = std::max(0, std::min(kBrushRows - 1, static_cast<int>(y * kBrushRows / h)));
+  return row * kBrushCols + col;
 }
 
 bool Toolbox::on_line_width_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
@@ -256,6 +346,163 @@ bool Toolbox::on_line_width_press(GdkEventButton* event) {
   set_line_width(w);
   if (on_line_width_chosen) {
     on_line_width_chosen(w);
+  }
+  return true;
+}
+
+bool Toolbox::on_brush_tips_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
+  const int w = brush_tips_.get_allocated_width();
+  const int h = brush_tips_.get_allocated_height();
+  cr->set_source_rgb(0.92, 0.92, 0.92);
+  cr->rectangle(0, 0, w, h);
+  cr->fill();
+  cr->set_source_rgb(0.2, 0.2, 0.2);
+  cr->rectangle(0.5, 0.5, w - 1.0, h - 1.0);
+  cr->set_line_width(1.0);
+  cr->stroke();
+
+  const double cell_w = w / static_cast<double>(kBrushCols);
+  const double cell_h = h / static_cast<double>(kBrushRows);
+  for (int i = 0; i < kBrushTipCount; ++i) {
+    const int col = i % kBrushCols;
+    const int row = i / kBrushCols;
+    const double cx = cell_w * (col + 0.5);
+    const double cy = cell_h * (row + 0.5);
+    if (i == brush_tip_) {
+      cr->set_source_rgb(0.75, 0.82, 0.95);
+      cr->rectangle(cell_w * col + 1, cell_h * row + 1, cell_w - 2, cell_h - 2);
+      cr->fill();
+    }
+    const BrushTip tip = lundukepaint::brush_tip_at(i);
+    cr->set_source_rgb(0.05, 0.05, 0.05);
+    const int half = std::max(1, tip.size / 2);
+    auto paint = [&](int dx, int dy) {
+      cr->rectangle(cx + dx - 0.5, cy + dy - 0.5, 1.0, 1.0);
+      cr->fill();
+    };
+    switch (tip.kind) {
+      case BrushTipKind::Round: {
+        const double r = tip.size * 0.5;
+        cr->arc(cx, cy, std::max(0.6, r), 0, 6.283185307179586);
+        cr->fill();
+        break;
+      }
+      case BrushTipKind::Square:
+        cr->rectangle(cx - half, cy - half, tip.size, tip.size);
+        cr->fill();
+        break;
+      case BrushTipKind::Slash:
+        cr->set_line_width(std::max(1.0, tip.size / 4.0));
+        cr->move_to(cx - half, cy + half);
+        cr->line_to(cx + half, cy - half);
+        cr->stroke();
+        break;
+      case BrushTipKind::Backslash:
+        cr->set_line_width(std::max(1.0, tip.size / 4.0));
+        cr->move_to(cx - half, cy - half);
+        cr->line_to(cx + half, cy + half);
+        cr->stroke();
+        break;
+      case BrushTipKind::HBar:
+        cr->set_line_width(std::max(1.0, tip.size / 5.0));
+        cr->move_to(cx - half, cy);
+        cr->line_to(cx + half, cy);
+        cr->stroke();
+        break;
+      case BrushTipKind::VBar:
+        cr->set_line_width(std::max(1.0, tip.size / 5.0));
+        cr->move_to(cx, cy - half);
+        cr->line_to(cx, cy + half);
+        cr->stroke();
+        break;
+      case BrushTipKind::Cross:
+        cr->set_line_width(std::max(1.0, tip.size / 5.0));
+        cr->move_to(cx - half, cy);
+        cr->line_to(cx + half, cy);
+        cr->move_to(cx, cy - half);
+        cr->line_to(cx, cy + half);
+        cr->stroke();
+        break;
+    }
+    (void)paint;
+    cr->set_source_rgb(0.55, 0.55, 0.55);
+    cr->rectangle(cell_w * col + 0.5, cell_h * row + 0.5, cell_w - 1.0, cell_h - 1.0);
+    cr->set_line_width(1.0);
+    cr->stroke();
+  }
+  return true;
+}
+
+bool Toolbox::on_brush_tips_press(GdkEventButton* event) {
+  if (event == nullptr || event->button != 1) {
+    return false;
+  }
+  const int index = brush_tip_at(event->x, event->y);
+  set_brush_tip(index);
+  if (on_brush_tip_chosen) {
+    on_brush_tip_chosen(brush_tip_);
+  }
+  return true;
+}
+
+bool Toolbox::on_spray_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
+  const int w = spray_radii_.get_allocated_width();
+  const int h = spray_radii_.get_allocated_height();
+  cr->set_source_rgb(0.92, 0.92, 0.92);
+  cr->rectangle(0, 0, w, h);
+  cr->fill();
+  cr->set_source_rgb(0.2, 0.2, 0.2);
+  cr->rectangle(0.5, 0.5, w - 1.0, h - 1.0);
+  cr->set_line_width(1.0);
+  cr->stroke();
+
+  int best = 0;
+  int bestd = 999;
+  for (int j = 0; j < 5; ++j) {
+    const int d = std::abs(spray_radius_ - kSprayChoices[j]);
+    if (d < bestd) {
+      bestd = d;
+      best = j;
+    }
+  }
+
+  const double row_h = h / 5.0;
+  for (int i = 0; i < 5; ++i) {
+    const double cy = row_h * (i + 0.5);
+    const int rad = kSprayChoices[i];
+    if (i == best) {
+      cr->set_source_rgb(0.1, 0.1, 0.1);
+      cr->move_to(4, cy);
+      cr->line_to(7, cy + 3);
+      cr->line_to(12, cy - 4);
+      cr->set_line_width(1.5);
+      cr->stroke();
+    }
+    cr->set_source_rgb(0.05, 0.05, 0.05);
+    const double draw_r = std::min(row_h * 0.35, rad * 0.35);
+    cr->arc(w * 0.55, cy, std::max(1.0, draw_r), 0, 6.283185307179586);
+    cr->set_line_width(1.0);
+    cr->stroke();
+    // Speckle dots inside.
+    cr->set_source_rgb(0.15, 0.15, 0.15);
+    for (int k = 0; k < 6 + i * 2; ++k) {
+      const double ang = k * 0.9 + i;
+      const double rr = draw_r * (0.2 + 0.6 * ((k * 37) % 100) / 100.0);
+      cr->rectangle(w * 0.55 + std::cos(ang) * rr - 0.5, cy + std::sin(ang) * rr - 0.5, 1.2, 1.2);
+      cr->fill();
+    }
+  }
+  return true;
+}
+
+bool Toolbox::on_spray_press(GdkEventButton* event) {
+  if (event == nullptr || event->button != 1) {
+    return false;
+  }
+  const int r = spray_radius_at_y(event->y);
+  set_spray_radius(r);
+  if (on_spray_radius_chosen) {
+    on_spray_radius_chosen(r);
   }
   return true;
 }

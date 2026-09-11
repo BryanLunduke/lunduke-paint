@@ -106,7 +106,7 @@ void CurveTool::preview() {
               thickness_, stroke_color(button_), antialias_, &dirty_);
   } else {
     draw_cubic_bezier(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_, y0_, x1_, y1_,
-                      x2_, y2_, x3_, y3_, thickness_, stroke_color(button_), antialias_, &dirty_);
+                      x2_, y2_, x3_, y3_, (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), antialias_, &dirty_);
   }
   clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());
   host_->invalidate_canvas(dirty_);
