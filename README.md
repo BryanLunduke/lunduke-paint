@@ -19,7 +19,7 @@ user layers.
 
 ## 0.5
 
-LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-8); howdy launch-gated off.
+LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-9); howdy launch-gated off.
 
 0.5-2: selection move/rubber-band no longer substitutes the empty tool layer for the active layer during is_stroking capture (R-F03 false checkerboard flash); opaque-move empty float pixels keep underlying/canvas BG instead of punching the checker.
 
@@ -34,6 +34,8 @@ LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-8); howdy l
 0.5-7: Pattern strip drops the overlapping FG/BG color wells (color picking stays in the right Colors panel); two-row pattern swatches only.
 
 0.5-8: Drop the black outline/border box around the left-rail line-width (and matching brush-tip / spray-radius) pickers; size/shape options unchanged.
+
+0.5-9: Left-rail line-width / brush / spray pickers use theme_bg_color so their fill matches the toolbox strip (no darker gray panel); suppress bottom-left status-bar open/save/hint chatter (keep size/zoom/coords).
 
 ## 0.4
 

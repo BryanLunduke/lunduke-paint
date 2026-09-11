@@ -26,7 +26,7 @@ StatusBar::StatusBar() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 8) {
   pack_start(zoom_, Gtk::PACK_SHRINK);
   pack_start(*Gtk::manage(new Gtk::Separator(Gtk::ORIENTATION_VERTICAL)), Gtk::PACK_SHRINK);
   pack_start(modified_, Gtk::PACK_SHRINK);
-  set_hint("Ready");
+  hint_.set_text("");
   set_canvas_size(800, 600);
   set_zoom(1.0);
   set_modified(false);
@@ -34,8 +34,9 @@ StatusBar::StatusBar() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 8) {
   clear_coordinates();
 }
 
-void StatusBar::set_hint(const Glib::ustring& hint) {
-  hint_.set_text(hint);
+void StatusBar::set_hint(const Glib::ustring& /*hint*/) {
+  // Left status chatter removed in 0.5-9; keep an empty expanding spacer.
+  hint_.set_text("");
 }
 
 void StatusBar::show_coordinates(double x, double y) {
@@ -74,8 +75,9 @@ void StatusBar::set_modified(bool modified) {
   modified_.set_text(modified ? "Modified" : "");
 }
 
-void StatusBar::show_message(const Glib::ustring& message) {
-  hint_.set_text(message);
+void StatusBar::show_message(const Glib::ustring& /*message*/) {
+  // Open/save and other left-rail status messages suppressed (0.5-9).
+  hint_.set_text("");
 }
 
 }  // namespace lundukepaint

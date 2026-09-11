@@ -24,6 +24,21 @@ constexpr int kSprayChoices[5] = {4, 8, 12, 16, 24};
 constexpr int kBrushCols = 4;
 constexpr int kBrushRows = 4;
 
+
+void fill_picker_bg(Gtk::Widget& host, const Cairo::RefPtr<Cairo::Context>& cr, int w, int h) {
+  // Match the toolbox/tool-rail theme background (not a hardcoded gray that
+  // reads slightly darker than the strip under Adwaita / Clearlooks).
+  Gdk::RGBA bg;
+  if (host.get_style_context()->lookup_color("theme_bg_color", bg)) {
+    cr->set_source_rgba(bg.get_red(), bg.get_green(), bg.get_blue(), bg.get_alpha());
+  } else {
+    host.get_style_context()->render_background(cr, 0, 0, w, h);
+    return;
+  }
+  cr->rectangle(0, 0, w, h);
+  cr->fill();
+}
+
 bool uses_line_width(const std::string& id) {
   return id == "pencil" || id == "eraser" || id == "line" || id == "rectangle" ||
          id == "rectangle-fill" || id == "rounded-rect" || id == "rounded-rect-fill" ||
@@ -300,9 +315,7 @@ int Toolbox::brush_tip_at(double x, double y) const {
 bool Toolbox::on_line_width_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const int w = line_widths_.get_allocated_width();
   const int h = line_widths_.get_allocated_height();
-  cr->set_source_rgb(0.92, 0.92, 0.92);
-  cr->rectangle(0, 0, w, h);
-  cr->fill();
+  fill_picker_bg(*this, cr, w, h);
 
   int best = 0;
   int bestd = 999;
@@ -358,9 +371,7 @@ bool Toolbox::on_line_width_press(GdkEventButton* event) {
 bool Toolbox::on_brush_tips_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const int w = brush_tips_.get_allocated_width();
   const int h = brush_tips_.get_allocated_height();
-  cr->set_source_rgb(0.92, 0.92, 0.92);
-  cr->rectangle(0, 0, w, h);
-  cr->fill();
+  fill_picker_bg(*this, cr, w, h);
 
   const double cell_w = w / static_cast<double>(kBrushCols);
   const double cell_h = h / static_cast<double>(kBrushRows);
@@ -449,9 +460,7 @@ bool Toolbox::on_brush_tips_press(GdkEventButton* event) {
 bool Toolbox::on_spray_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const int w = spray_radii_.get_allocated_width();
   const int h = spray_radii_.get_allocated_height();
-  cr->set_source_rgb(0.92, 0.92, 0.92);
-  cr->rectangle(0, 0, w, h);
-  cr->fill();
+  fill_picker_bg(*this, cr, w, h);
 
   int best = 0;
   int bestd = 999;
