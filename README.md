@@ -19,7 +19,7 @@ user layers.
 
 ## 0.5
 
-LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-9); howdy launch-gated off.
+LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-10); howdy launch-gated off.
 
 0.5-2: selection move/rubber-band no longer substitutes the empty tool layer for the active layer during is_stroking capture (R-F03 false checkerboard flash); opaque-move empty float pixels keep underlying/canvas BG instead of punching the checker.
 
@@ -36,6 +36,8 @@ LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-9); howdy l
 0.5-8: Drop the black outline/border box around the left-rail line-width (and matching brush-tip / spray-radius) pickers; size/shape options unchanged.
 
 0.5-9: Left-rail line-width / brush / spray pickers use theme_bg_color so their fill matches the toolbox strip (no darker gray panel); suppress bottom-left status-bar open/save/hint chatter (keep size/zoom/coords).
+
+0.5-10: Replace app icon — full hicolor PNG set (16/22/24/32/48/64/96/128/256/512); drop misleading scalable SVG so theme uses the new rasters.
 
 ## 0.4
 
@@ -88,7 +90,7 @@ What works:
 - Help: Keyboard Shortcuts window; About (Lunduke Paint, GPL-3.0-or-later,
   app id `org.lunduke.LundukePaint`)
 - Print: Gtk::PrintOperation, fit-to-page, Ctrl+P
-- AppStream metainfo (homepage https://lunduke.com, mimetypes), `.desktop` (`%F`, MimeType, StartupWMClass=lunduke-paint), hicolor 32/48/96 icons
+- AppStream metainfo (homepage https://lunduke.com, mimetypes), `.desktop` (`%F`, MimeType, StartupWMClass=lunduke-paint), hicolor 16/22/24/32/48/64/96/128/256/512 icons (PNGs; no scalable app SVG)
 - Headless tests: `dummy`, `fill`, `history`, `selection`, `transform`,
   `blend`, `ora`, `stroke`, `effects`
 

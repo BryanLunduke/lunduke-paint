@@ -1,0 +1,2 @@
+App icon is shipped as hicolor PNGs (16–512); those rasters are authoritative.
+Do not add a placeholder SVG here — GTK prefers scalable over PNG when present.

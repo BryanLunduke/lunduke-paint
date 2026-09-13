@@ -260,23 +260,14 @@ install_data(
   install_dir: join_paths(get_option('datadir'), 'metainfo'),
 )
 
-install_data(
-  'data/icons/hicolor/scalable/apps/org.lunduke.LundukePaint.svg',
-  install_dir: join_paths(get_option('datadir'), 'icons/hicolor/scalable/apps'),
-)
-
-install_data(
-  'data/icons/hicolor/32x32/apps/org.lunduke.LundukePaint.png',
-  install_dir: join_paths(get_option('datadir'), 'icons/hicolor/32x32/apps'),
-)
-install_data(
-  'data/icons/hicolor/48x48/apps/org.lunduke.LundukePaint.png',
-  install_dir: join_paths(get_option('datadir'), 'icons/hicolor/48x48/apps'),
-)
-install_data(
-  'data/icons/hicolor/96x96/apps/org.lunduke.LundukePaint.png',
-  install_dir: join_paths(get_option('datadir'), 'icons/hicolor/96x96/apps'),
-)
+# App icon: hicolor PNGs are authoritative (no scalable SVG — GTK prefers SVG over PNG).
+app_icon_sizes = ['16', '22', '24', '32', '48', '64', '96', '128', '256', '512']
+foreach size : app_icon_sizes
+  install_data(
+    'data/icons/hicolor/' + size + 'x' + size + '/apps/org.lunduke.LundukePaint.png',
+    install_dir: join_paths(get_option('datadir'), 'icons/hicolor/' + size + 'x' + size + '/apps'),
+  )
+endforeach
 
 install_data(
   'data/mime/org.lunduke.LundukePaint.xml',

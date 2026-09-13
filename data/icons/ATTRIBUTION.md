@@ -41,3 +41,10 @@ freedesktop GTK theme icon names.
 ## 0.5-4 layer toolbar icons
 
 - `layer-add-symbolic.svg`, `layer-delete-symbolic.svg`, `layer-rename-symbolic.svg` — original Lunduke Paint (public domain / BSD)
+
+## Application icon (0.5-10)
+
+`org.lunduke.LundukePaint` hicolor PNGs (16–512) plus archival master
+`org.lunduke.LundukePaint-master.png` (1408×1408 RGBA). Rasters are
+authoritative; no scalable app SVG is installed (a placeholder SVG would
+outrank PNG in the theme lookup).
