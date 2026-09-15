@@ -73,6 +73,8 @@ MainWindow::MainWindow() {
   workspace_.add(std::move(startup));
   set_title(Glib::ustring("Untitled — ") + actions::kProductName);
   set_default_size(1100, 720);
+  // Reinforce default icon for WMs that ignore gtk_window_set_default_icon_name.
+  set_icon_name(actions::kAppId);
   // Traditional WM decorations: do not call set_titlebar() / GtkHeaderBar.
 
   add_action(actions::kToggleRightDock, sigc::mem_fun(*this, &MainWindow::on_toggle_right_dock));

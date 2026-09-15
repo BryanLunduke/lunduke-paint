@@ -7,6 +7,7 @@
 
 #include <giomm/application.h>
 #include <gtkmm/icontheme.h>
+#include <gtkmm/window.h>
 
 namespace lundukepaint {
 
@@ -19,6 +20,8 @@ Application::Application()
 
 void Application::on_startup() {
   Gtk::Application::on_startup();
+  // WM / title-bar icon (xfwm4 etc.): desktop Icon= alone is not enough.
+  Gtk::Window::set_default_icon_name(actions::kAppId);
   Gtk::IconTheme::get_default()->add_resource_path("/org/lunduke/LundukePaint/icons");
 
   add_action(actions::kNew, sigc::mem_fun(*this, &Application::on_action_new));

@@ -19,7 +19,7 @@ user layers.
 
 ## 0.5
 
-LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-11); howdy launch-gated off.
+LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-12); howdy launch-gated off.
 
 0.5-2: selection move/rubber-band no longer substitutes the empty tool layer for the active layer during is_stroking capture (R-F03 false checkerboard flash); opaque-move empty float pixels keep underlying/canvas BG instead of punching the checker.
 
@@ -40,6 +40,8 @@ LCOS 0.5 identity. MacPaint-inspired single-window chrome (0.5-3/0.5-11); howdy 
 0.5-10: Replace app icon — full hicolor PNG set (16/22/24/32/48/64/96/128/256/512); drop misleading scalable SVG so theme uses the new rasters.
 
 0.5-11: Toolbox (and Layers) symbolic icons use currentColor + theme_fg_color at pixbuf load so tools look enabled on Clearlooks instead of washed #bebebe grey; selected-tool chrome unchanged.
+
+0.5-12: Set GTK/X window icon via Gtk::Window::set_default_icon_name (and MainWindow set_icon_name) so the title bar shows the Paint palette icon, not a generic default; desktop StartupWMClass remains lunduke-paint.
 
 ## 0.4
 
