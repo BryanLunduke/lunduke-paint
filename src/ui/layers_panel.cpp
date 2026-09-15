@@ -2,6 +2,8 @@
 
 #include "ui/layers_panel.hpp"
 
+#include "ui/symbolic_icon.hpp"
+
 #include "doc/document.hpp"
 #include "raster/blend.hpp"
 
@@ -68,9 +70,12 @@ void LayersPanel::style_icon_button(Gtk::Button& button, const std::string& icon
       "/org/lunduke/LundukePaint/icons/scalable/actions/" + icon_name + ".svg";
   auto* image = Gtk::manage(new Gtk::Image());
   try {
-    auto pixbuf = Gdk::Pixbuf::create_from_resource(resource, 18, 18, true);
+    auto pixbuf = symbolic_icon::load_from_resource(button, resource, 18);
     image->set(pixbuf);
   } catch (const Glib::Error&) {
+    image->set_from_resource(resource);
+    image->set_pixel_size(18);
+  } catch (const std::exception&) {
     image->set_from_resource(resource);
     image->set_pixel_size(18);
   }

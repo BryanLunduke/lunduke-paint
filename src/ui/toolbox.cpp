@@ -2,6 +2,8 @@
 
 #include "ui/toolbox.hpp"
 
+#include "ui/symbolic_icon.hpp"
+
 #include "raster/brush_tip.hpp"
 
 #include <gdkmm/pixbuf.h>
@@ -144,9 +146,13 @@ void Toolbox::add_tool_button(const std::string& id, const std::string& tooltip,
       "/org/lunduke/LundukePaint/icons/scalable/actions/" + icon_name + ".svg";
   auto* image = Gtk::manage(new Gtk::Image());
   try {
-    auto pixbuf = Gdk::Pixbuf::create_from_resource(resource, 18, 18, true);
+    // Bake theme_fg into the SVG (currentColor) — pixbuf decode ignores CSS color.
+    auto pixbuf = symbolic_icon::load_from_resource(*this, resource, 18);
     image->set(pixbuf);
   } catch (const Glib::Error&) {
+    image->set_from_resource(resource);
+    image->set_pixel_size(18);
+  } catch (const std::exception&) {
     image->set_from_resource(resource);
     image->set_pixel_size(18);
   }
