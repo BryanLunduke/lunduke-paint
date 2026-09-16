@@ -1,0 +1,14 @@
+Source: lunduke-paint
+Section: graphics
+Priority: optional
+Maintainer: LCOS <lcos@lunduke.com>
+Homepage: https://lunduke.com
+Standards-Version: 4.6.2
+
+Package: lunduke-paint
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, librsvg2-common, shared-mime-info, desktop-file-utils, gtk-update-icon-cache
+Description: Lunduke Paint, a GTK3 layered bitmap paint program for Linux X11
+ Lunduke Paint is a traditional GTK 3 paint program for Linux X11.
+ Look and feel: classic MS Paint plus KolourPaint, with user layers
+ and a visible history list. Native project format is OpenRaster (.ora).
