@@ -51,6 +51,7 @@ jobs:
               gtk+3.0-dev gtk+3.0 gtkmm3-dev cairomm-dev pangomm-dev libsigc++-dev \
               gdk-pixbuf-dev gdk-pixbuf librsvg-dev librsvg \
               libarchive-dev pugixml-dev \
+              libdbusmenu-gtk3 libdbusmenu-glib \
               hicolor-icon-theme adwaita-icon-theme \
               glib-dev \
               git wget xz squashfs-tools desktop-file-utils \

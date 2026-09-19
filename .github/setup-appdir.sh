@@ -107,6 +107,38 @@ done
 
 echo "Libraries bundled: $(ls "$APPDIR/usr/lib/" 2>/dev/null | wc -l)"
 
+# --- libdbusmenu-gtk3 ------------------------------------------------------
+# The bundled GTK is musl-linked, so a host copy of libdbusmenu can never be
+# loaded into this process - it has to travel inside the AppDir.
+
+echo "Bundling libdbusmenu..."
+DBUSMENU_FOUND=0
+for lib in /usr/lib/libdbusmenu-gtk3.so.* /usr/lib/libdbusmenu-glib.so.*; do
+    [ -f "$lib" ] || continue
+    cp -a "$lib" "$APPDIR/usr/lib/" 2>/dev/null || true
+    DBUSMENU_FOUND=1
+done
+
+if [ "$DBUSMENU_FOUND" = 1 ]; then
+    # Pull in whatever the dbusmenu libraries themselves need.
+    for lib in "$APPDIR/usr/lib/"libdbusmenu-*.so.*; do
+        [ -f "$lib" ] || continue
+        ldd "$lib" 2>/dev/null | while read -r line; do
+            lib_path=$(echo "$line" | awk '/=>/ { print $3 }')
+            if [ -n "$lib_path" ] && [ -f "$lib_path" ]; then
+                lib_name=$(basename "$lib_path")
+                if [ ! -f "$APPDIR/usr/lib/$lib_name" ]; then
+                    cp -f "$lib_path" "$APPDIR/usr/lib/" 2>/dev/null || true
+                    echo "libdbusmenu dependency bundled: $lib_name"
+                fi
+            fi
+        done
+    done
+    echo "libdbusmenu bundled: $(ls "$APPDIR/usr/lib/"libdbusmenu-*.so.* 2>/dev/null | wc -l) files"
+else
+    echo "WARNING: libdbusmenu-gtk3 not found in /usr/lib"
+fi
+
 # --- patchelf: set RPATH ---------------------------------------------------
 # Set RPATH so the binary finds bundled libs.
 
