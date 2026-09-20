@@ -139,6 +139,48 @@ else
     echo "WARNING: libdbusmenu-gtk3 not found in /usr/lib"
 fi
 
+# --- appmenu-gtk-module ----------------------------------------------------
+# Built by .github/build-appmenu-module.sh just before this script runs.
+# GTK finds it through GTK_PATH, which AppRun points at the bundled tree, so a
+# session that asks for it via GTK_MODULES gets the musl build from here rather
+# than the host's unloadable glibc one.
+
+MODULE_SRC="/usr/lib/gtk-3.0/modules/libappmenu-gtk-module.so"
+if [ ! -f "$MODULE_SRC" ]; then
+    echo "ERROR: $MODULE_SRC missing - build-appmenu-module.sh did not run" >&2
+    exit 1
+fi
+
+mkdir -p "$APPDIR/usr/lib/gtk-3.0/modules"
+cp -a "$MODULE_SRC" "$APPDIR/usr/lib/gtk-3.0/modules/"
+
+for lib in /usr/lib/libappmenu-gtk3-parser.so.*; do
+    [ -f "$lib" ] || continue
+    cp -a "$lib" "$APPDIR/usr/lib/"
+done
+
+# The module sits one level deeper than the other libraries, so it needs its
+# own RPATH; the loop below only walks usr/lib.
+patchelf --set-rpath '$ORIGIN/../..' \
+    "$APPDIR/usr/lib/gtk-3.0/modules/libappmenu-gtk-module.so"
+
+for f in "$APPDIR/usr/lib/gtk-3.0/modules/libappmenu-gtk-module.so" \
+         "$APPDIR/usr/lib/"libappmenu-gtk3-parser.so.*; do
+    [ -f "$f" ] || continue
+    ldd "$f" 2>/dev/null | while read -r line; do
+        lib_path=$(echo "$line" | awk '/=>/ { print $3 }')
+        if [ -n "$lib_path" ] && [ -f "$lib_path" ]; then
+            lib_name=$(basename "$lib_path")
+            if [ ! -f "$APPDIR/usr/lib/$lib_name" ]; then
+                cp -f "$lib_path" "$APPDIR/usr/lib/" 2>/dev/null || true
+                echo "appmenu-gtk-module dependency bundled: $lib_name"
+            fi
+        fi
+    done
+done
+
+echo "appmenu-gtk-module bundled"
+
 # --- patchelf: set RPATH ---------------------------------------------------
 # Set RPATH so the binary finds bundled libs.
 

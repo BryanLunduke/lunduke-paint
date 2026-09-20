@@ -55,6 +55,12 @@ export XDG_DATA_DIRS="$PREFIX/share:/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 export GTK_DATA_PREFIX="$PREFIX"
 export GTK_EXE_PREFIX="$PREFIX"
 
+# Point GTK's module search at the bundle. A host GTK_PATH would offer
+# glibc-linked modules, which this musl-linked GTK cannot load; the bundled
+# appmenu-gtk-module lives here instead. GTK_MODULES is deliberately left
+# alone, so only a session that asks for the global menu gets it.
+export GTK_PATH="$PREFIX/lib/gtk-3.0"
+
 [ -d "$PREFIX/share/glib-2.0/schemas" ] \
     && export GSETTINGS_SCHEMA_DIR="$PREFIX/share/glib-2.0/schemas"
 

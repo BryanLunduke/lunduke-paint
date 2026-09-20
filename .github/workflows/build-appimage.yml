@@ -63,6 +63,9 @@ jobs:
             rm -rf /tmp/lunduke-install
             DESTDIR=/tmp/lunduke-install meson install -C build
 
+            chmod +x .github/build-appmenu-module.sh
+            ./.github/build-appmenu-module.sh
+
             chmod +x .github/setup-appdir.sh
             ./.github/setup-appdir.sh
 
