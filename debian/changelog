@@ -1,3 +1,11 @@
+lunduke-paint (0.7-1) unstable; urgency=medium
+
+  * Bump version to 0.7 / package 0.7-1 for the LCOS 0.7 track.
+  * Retain 0.5-12 UI/icon fixes (WM title-bar icon, themed toolbox
+    symbolics, app icon PNG set, MacPaint chrome).
+
+ -- Phil <phil@brushpad.local>  Wed, 23 Sep 2026 22:10:00 -0500
+
 lunduke-paint (0.6-1) unstable; urgency=medium
 
   * Bump version to 0.6 / package 0.6-1 for the LCOS 0.6 track.

@@ -18,3 +18,7 @@ builddir/
 *.autosave
 .DS_Store
 compile_commands.json
+
+packaging/src/
+packaging/debs/
+build/

@@ -1,15 +1,14 @@
 #!/bin/sh
-# Build lunduke-paint_0.6-1_amd64.deb and drop it in the LCOS overlay dirs.
+# Build lunduke-paint_0.7-1_amd64.deb into packaging/debs/ (repo-local).
+# Does NOT seed lcos-live-06 or lcos-live-07.
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-VERSION="0.6-1"
+VERSION="0.7-1"
 PKGNAME="lunduke-paint_${VERSION}_amd64"
-OVERLAY="/workspace/lcos-live-06"
 BUILD="$ROOT/build"
-DEST="$OVERLAY/packaging/src/lunduke-paint"
-DEB_DIR="$OVERLAY/packaging/debs"
-CHROOT_DIR="$OVERLAY/config/packages.chroot"
+DEST="$ROOT/packaging/src/lunduke-paint"
+DEB_DIR="$ROOT/packaging/debs"
 
 cd "$ROOT"
 
@@ -82,15 +81,8 @@ chmod 0755 "$DEST/DEBIAN/postinst"
 )
 
 rm -rf "$DEST/debian"
-# Drop any placeholder notes left in packaging/src
-rm -f "$DEST"/WAITING_ON_PHIL.txt "$DEST"/WAITING_ON_PHIL*.txt
 
-mkdir -p "$DEB_DIR" "$CHROOT_DIR"
+mkdir -p "$DEB_DIR"
 fakeroot dpkg-deb --root-owner-group --build "$DEST" "$DEB_DIR/${PKGNAME}.deb"
-# Replace prior lunduke-paint debs in packages.chroot only (keep history in packaging/debs).
-rm -f "$CHROOT_DIR"/lunduke-paint_*.deb
-cp -f "$DEB_DIR/${PKGNAME}.deb" "$CHROOT_DIR/${PKGNAME}.deb"
-# Clear chroot waiting note once real 0.6-1 is seeded
-rm -f "$CHROOT_DIR"/WAITING_ON_PHIL-paint-updates.txt
 
 echo "built $DEB_DIR/${PKGNAME}.deb"

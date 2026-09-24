@@ -14,8 +14,12 @@ user layers.
   decorations, no HeaderBar as main chrome)
 - Theme: follows the active GTK3 theme; the app is not skinned
 - Native project file: OpenRaster `.ora` (libarchive + pugixml)
-- Version: 0.6
+- Version: 0.7
 - Config: `$XDG_CONFIG_HOME/lunduke-paint/lunduke-paint.ini` via GKeyFile
+
+## 0.7
+
+LCOS 0.7 identity. Same MacPaint-inspired chrome and 0.5-12 UI/icon fixes; howdy launch-gated off.
 
 ## 0.6
 
