@@ -1,7 +1,7 @@
 project(
   'lunduke-paint',
   'cpp',
-  version: '0.7',
+  version: '0.8',
   license: 'GPL-3.0-or-later',
   meson_version: '>=0.56.0',
   default_options: [

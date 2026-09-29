@@ -1,3 +1,12 @@
+lunduke-paint (0.8-1) unstable; urgency=medium
+
+  * LCOS 0.8 track identity bump (0.7 → 0.8 / Debian 0.8-1). Features
+    and UI unchanged.
+  * Retain 0.5-12 UI/icon fixes (WM title-bar icon, themed toolbox
+    symbolics, app icon PNG set, MacPaint chrome).
+
+ -- Phil <phil@brushpad.local>  Mon, 28 Sep 2026 21:34:16 -0500
+
 lunduke-paint (0.7-1) unstable; urgency=medium
 
   * Bump version to 0.7 / package 0.7-1 for the LCOS 0.7 track.
