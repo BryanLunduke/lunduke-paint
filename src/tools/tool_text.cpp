@@ -2,27 +2,26 @@
 
 #include "tools/tool.hpp"
 
-#include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
-#include "doc/selection.hpp"
-#include "raster/text.hpp"
+#include "raster/text_box.hpp"
 
 #include <cairomm/context.h>
 #include <cairomm/surface.h>
-#include <gdk/gdk.h>
+#include <gdk/gdkkeysyms.h>
 #include <glib.h>
+#include <glibmm/main.h>
 #include <gtkmm/box.h>
 #include <gtkmm/checkbutton.h>
+#include <gtkmm/clipboard.h>
 #include <gtkmm/comboboxtext.h>
-#include <gtkmm/entry.h>
 #include <gtkmm/label.h>
 #include <gtkmm/spinbutton.h>
-#include <gtkmm/window.h>
 #include <pango/pangocairo.h>
+#include <sigc++/connection.h>
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,126 +29,104 @@
 namespace lundukepaint {
 namespace {
 
-bool render_text_rgba(const std::string& text, const std::string& family, int size_pt, bool bold,
-                      bool italic, Color color, std::vector<std::uint8_t>& out, int& out_w,
-                      int& out_h) {
-  out.clear();
-  out_w = 0;
-  out_h = 0;
-  if (text.empty() || size_pt < 1) {
-    return false;
+void paint_straight_rgba(const Cairo::RefPtr<Cairo::Context>& cr, double x, double y, double zoom,
+                         const std::uint8_t* rgba, int width, int height) {
+  if (rgba == nullptr || width < 1 || height < 1 || zoom <= 0.0) {
+    return;
   }
-  auto measure = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, 8, 8);
-  auto mcr = Cairo::Context::create(measure);
-  PangoLayout* layout = pango_cairo_create_layout(mcr->cobj());
-  pango_layout_set_text(layout, text.c_str(), -1);
-  PangoFontDescription* desc = pango_font_description_new();
-  pango_font_description_set_family(desc, family.c_str());
-  pango_font_description_set_size(desc, size_pt * PANGO_SCALE);
-  pango_font_description_set_weight(desc, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
-  pango_font_description_set_style(desc, italic ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
-  pango_layout_set_font_description(layout, desc);
-  pango_layout_set_width(layout, 40 * size_pt * PANGO_SCALE);
-  pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-  int tw = 0;
-  int th = 0;
-  pango_layout_get_pixel_size(layout, &tw, &th);
-  if (tw < 1) {
-    tw = 1;
-  }
-  if (th < 1) {
-    th = 1;
-  }
-  auto surface = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, tw, th);
-  auto cr = Cairo::Context::create(surface);
-  cr->set_operator(Cairo::OPERATOR_SOURCE);
-  cr->set_source_rgba(0, 0, 0, 0);
-  cr->paint();
-  cr->set_operator(Cairo::OPERATOR_OVER);
-  if (color.a == 0) {
-    cr->set_source_rgba(0, 0, 0, 1);
-  } else {
-    cr->set_source_rgba(color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0);
-  }
-  pango_cairo_update_layout(cr->cobj(), layout);
-  pango_cairo_show_layout(cr->cobj(), layout);
-  surface->flush();
+  auto surface = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, width, height);
+  std::uint8_t* dst = surface->get_data();
   const int stride = surface->get_stride();
-  const std::uint8_t* src = surface->get_data();
-  out.assign(static_cast<std::size_t>(tw) * static_cast<std::size_t>(th) * 4, 0);
-  for (int y = 0; y < th; ++y) {
-    const std::uint8_t* srow = src + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
-    std::uint8_t* drow = out.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(tw) * 4;
-    for (int x = 0; x < tw; ++x) {
-      const std::uint8_t* p = srow + static_cast<std::size_t>(x) * 4;
+  for (int row = 0; row < height; ++row) {
+    const std::uint8_t* srow = rgba + static_cast<std::size_t>(row) * static_cast<std::size_t>(width) * 4;
+    std::uint8_t* drow = dst + static_cast<std::size_t>(row) * static_cast<std::size_t>(stride);
+    for (int col = 0; col < width; ++col) {
+      const std::uint8_t* s = srow + static_cast<std::size_t>(col) * 4;
+      std::uint8_t* d = drow + static_cast<std::size_t>(col) * 4;
+      const int a = s[3];
 #if G_BYTE_ORDER == G_LITTLE_ENDIAN
-      const int a = p[3];
-      const int b = p[0];
-      const int g = p[1];
-      const int r = p[2];
+      d[0] = static_cast<std::uint8_t>((s[2] * a + 127) / 255);
+      d[1] = static_cast<std::uint8_t>((s[1] * a + 127) / 255);
+      d[2] = static_cast<std::uint8_t>((s[0] * a + 127) / 255);
+      d[3] = s[3];
 #else
-      const int a = p[0];
-      const int r = p[1];
-      const int g = p[2];
-      const int b = p[3];
+      d[0] = s[3];
+      d[1] = static_cast<std::uint8_t>((s[0] * a + 127) / 255);
+      d[2] = static_cast<std::uint8_t>((s[1] * a + 127) / 255);
+      d[3] = static_cast<std::uint8_t>((s[2] * a + 127) / 255);
 #endif
-      std::uint8_t* d = drow + static_cast<std::size_t>(x) * 4;
-      if (a == 0) {
-        d[0] = d[1] = d[2] = d[3] = 0;
-        continue;
-      }
-      if (color.a == 0) {
-        d[0] = d[1] = d[2] = d[3] = 0;
-        continue;
-      }
-      d[0] = static_cast<std::uint8_t>(r * 255 / a);
-      d[1] = static_cast<std::uint8_t>(g * 255 / a);
-      d[2] = static_cast<std::uint8_t>(b * 255 / a);
-      d[3] = static_cast<std::uint8_t>(a);
     }
   }
-  pango_font_description_free(desc);
-  g_object_unref(layout);
-  out_w = tw;
-  out_h = th;
-  return true;
+  surface->mark_dirty();
+  cr->save();
+  cr->translate(x, y);
+  cr->scale(zoom, zoom);
+  auto pattern = Cairo::SurfacePattern::create(surface);
+  pattern->set_filter(Cairo::FILTER_NEAREST);
+  cr->set_source(pattern);
+  cr->paint();
+  cr->restore();
 }
 
 }  // namespace
 
 class TextTool : public Tool {
 public:
+  ~TextTool() override { blink_.disconnect(); }
+
   const char* id() const override { return "text"; }
   const char* name() const override { return "Text"; }
   char shortcut() const override { return 'T'; }
   const char* hint() const override {
-    return "Text: click to type; Enter or click away rasterizes; Esc cancels";
+    return "Text: click for a box; drag handles to resize, the border to move; "
+           "click away or Enter stamps; Esc cancels";
   }
   bool is_stroking() const override { return editing_; }
+  bool uses_tool_layer() const override { return false; }
   bool captures_keys() const override { return editing_; }
   Gtk::Widget* options_widget() override;
+  void draw_overlay(const Cairo::RefPtr<Cairo::Context>& cr, int origin_x, int origin_y,
+                    double zoom) override;
+  bool on_key(unsigned keyval, unsigned modifiers, const std::string& text) override;
+  void on_document_changed() override;
 
   void on_press(CanvasEvent event) override;
-  void on_motion(CanvasEvent /*event*/) override {}
-  void on_release(CanvasEvent /*event*/) override {}
+  void on_motion(CanvasEvent event) override;
+  void on_release(CanvasEvent event) override;
   void on_cancel() override;
   bool on_commit() override;
 
 private:
-  void start_editor(int x, int y, unsigned button);
-  void close_editor();
-  void rasterize();
+  enum class Drag { None, Move, Resize };
+
+  void begin_box(int x, int y, unsigned button);
+  void close_box();
+  void apply_style();
+  void rebuild_pixels();
+  void relayout_caret();
+  void invalidate_box(const Rect& box) const;
+  Rect chrome_rect(const Rect& box) const;
+  void start_blink();
+  void paste_clipboard();
 
   bool editing_ = false;
-  int x_ = 0;
-  int y_ = 0;
   unsigned button_ = 1;
+  TextBoxState state_{};
+  TextBoxMetrics metrics_{};
+  std::vector<std::uint8_t> pixels_;
+  int pix_w_ = 0;
+  int pix_h_ = 0;
+  bool cursor_on_ = true;
+  Drag drag_ = Drag::None;
+  TextBoxHit drag_hit_ = TextBoxHit::Outside;
+  Rect drag_start_{};
+  int grab_x_ = 0;
+  int grab_y_ = 0;
   std::string family_{"Sans"};
   int size_pt_ = 16;
   bool bold_ = false;
   bool italic_ = false;
-  std::unique_ptr<Gtk::Window> popup_;
-  Gtk::Entry* entry_{nullptr};
+  sigc::connection blink_;
   std::unique_ptr<Gtk::Box> options_;
 };
 
@@ -185,20 +162,32 @@ Gtk::Widget* TextTool::options_widget() {
       font->set_active(0);
       family_ = font->get_active_text();
     }
-    font->signal_changed().connect([this, font]() { family_ = font->get_active_text(); });
+    font->signal_changed().connect([this, font]() {
+      family_ = font->get_active_text();
+      apply_style();
+    });
     auto* slabel = Gtk::manage(new Gtk::Label("Size"));
     auto* spin = Gtk::manage(new Gtk::SpinButton());
     spin->set_range(6, 128);
     spin->set_increments(1, 8);
     spin->set_digits(0);
     spin->set_value(size_pt_);
-    spin->signal_value_changed().connect([this, spin]() { size_pt_ = spin->get_value_as_int(); });
+    spin->signal_value_changed().connect([this, spin]() {
+      size_pt_ = spin->get_value_as_int();
+      apply_style();
+    });
     auto* bold = Gtk::manage(new Gtk::CheckButton("Bold"));
     bold->set_active(bold_);
-    bold->signal_toggled().connect([this, bold]() { bold_ = bold->get_active(); });
+    bold->signal_toggled().connect([this, bold]() {
+      bold_ = bold->get_active();
+      apply_style();
+    });
     auto* italic = Gtk::manage(new Gtk::CheckButton("Italic"));
     italic->set_active(italic_);
-    italic->signal_toggled().connect([this, italic]() { italic_ = italic->get_active(); });
+    italic->signal_toggled().connect([this, italic]() {
+      italic_ = italic->get_active();
+      apply_style();
+    });
     options_->pack_start(*flabel, Gtk::PACK_SHRINK);
     options_->pack_start(*font, Gtk::PACK_SHRINK);
     options_->pack_start(*slabel, Gtk::PACK_SHRINK);
@@ -210,132 +199,271 @@ Gtk::Widget* TextTool::options_widget() {
   return options_.get();
 }
 
-void TextTool::start_editor(int x, int y, unsigned button) {
+void TextTool::apply_style() {
+  state_.family = family_;
+  state_.size_pt = std::max(1, size_pt_);
+  state_.bold = bold_;
+  state_.italic = italic_;
+  if (!editing_) {
+    return;
+  }
+  rebuild_pixels();
+  invalidate_box(state_.box);
+}
+
+void TextTool::on_document_changed() {
+  if (!editing_ || host_ == nullptr) {
+    return;
+  }
+  const Color color = stroke_color(button_);
+  if (color == state_.color) {
+    return;
+  }
+  state_.color = color;
+  rebuild_pixels();
+  invalidate_box(state_.box);
+}
+
+Rect TextTool::chrome_rect(const Rect& box) const {
+  const double zoom = host_ != nullptr ? host_->canvas_zoom() : 1.0;
+  const int margin = text_box_handle_radius(zoom) + text_box_border_slop(zoom) + 2;
+  return Rect{box.x - margin, box.y - margin, box.w + margin * 2, box.h + margin * 2};
+}
+
+void TextTool::invalidate_box(const Rect& box) const {
+  if (host_ != nullptr) {
+    host_->invalidate_canvas(chrome_rect(box));
+  }
+}
+
+void TextTool::rebuild_pixels() {
+  pixels_.clear();
+  pix_w_ = 0;
+  pix_h_ = 0;
+  render_text_box(state_, pixels_, pix_w_, pix_h_, &metrics_);
+}
+
+void TextTool::relayout_caret() {
+  layout_text_box(state_, metrics_);
+}
+
+void TextTool::start_blink() {
+  blink_.disconnect();
+  cursor_on_ = true;
+  blink_ = Glib::signal_timeout().connect(
+      [this]() {
+        if (!editing_) {
+          return false;
+        }
+        cursor_on_ = !cursor_on_;
+        invalidate_box(state_.box);
+        return true;
+      },
+      530);
+}
+
+void TextTool::begin_box(int x, int y, unsigned button) {
   if (host_ == nullptr || !ensure_editable()) {
     return;
   }
   host_->document().commit_floating();
-  // While editing_ is true the canvas draws the (empty) tool layer in place of
-  // the active layer, so mirror the layer into it: without this the picture
-  // appears to vanish behind the entry until the text is committed.
-  host_->document().layers().copy_active_to_tool();
-  x_ = x;
-  y_ = y;
   button_ = button;
+  state_ = {};
+  state_.family = family_;
+  state_.size_pt = std::max(1, size_pt_);
+  state_.bold = bold_;
+  state_.italic = italic_;
+  state_.color = stroke_color(button_);
+  state_.text.clear();
+  state_.cursor = 0;
+  TextBoxMetrics probe;
+  layout_text_box(state_, probe);
+  const int height = std::max(kTextBoxMinSize, probe.cursor_h + kTextBoxPad * 2);
+  const int width = std::max(160, state_.size_pt * 10);
+  state_.box = Rect{x, y, width, height};
   editing_ = true;
-  // A Gtk::WINDOW_POPUP is an override-redirect X11 window: the window manager
-  // never manages it, so under X11/XFCE it does not get the keyboard focus and
-  // everything typed went nowhere. Use a real toplevel, undecorated and hinted
-  // as a utility window, parented to the main window, and present() it after
-  // show_all() so the WM actually hands it X input focus.
-  popup_ = std::make_unique<Gtk::Window>(Gtk::WINDOW_TOPLEVEL);
-  popup_->set_decorated(false);
-  popup_->set_type_hint(Gdk::WINDOW_TYPE_HINT_UTILITY);
-  popup_->set_skip_taskbar_hint(true);
-  popup_->set_skip_pager_hint(true);
-  popup_->set_accept_focus(true);
-  popup_->set_focus_on_map(true);
-  popup_->set_resizable(false);
-  popup_->set_position(Gtk::WIN_POS_NONE);
-  popup_->set_border_width(2);
-  if (Gtk::Window* parent = host_->host_window()) {
-    popup_->set_transient_for(*parent);
-  }
-  entry_ = Gtk::manage(new Gtk::Entry());
-  entry_->set_width_chars(16);
-  entry_->signal_activate().connect([this]() { on_commit(); });
-  entry_->signal_key_press_event().connect(
-      [this](GdkEventKey* event) {
-        if (event != nullptr && event->keyval == GDK_KEY_Escape) {
-          on_cancel();
-          return true;
-        }
-        return false;
-      },
-      false);
-  popup_->add(*entry_);
-  int sx = 0;
-  int sy = 0;
-  const bool placed = host_->canvas_to_screen(x, y, sx, sy);
-  if (placed) {
-    popup_->move(sx, sy);
-  }
-  popup_->show_all();
-  if (placed) {
-    // xfwm4 can re-place a utility window on map; put it back on the click.
-    popup_->move(sx, sy);
-  }
-  popup_->present();
-  entry_->grab_focus();
-  if (host_ != nullptr) {
-    host_->show_status_hint("Text: type, then Enter to stamp");
-  }
+  drag_ = Drag::None;
+  rebuild_pixels();
+  start_blink();
+  invalidate_box(state_.box);
+  host_->show_status_hint("Text: type in the box; click away or Enter to stamp");
 }
 
-void TextTool::close_editor() {
-  entry_ = nullptr;
-  popup_.reset();
+void TextTool::close_box() {
+  const bool was = editing_;
+  const Rect box = state_.box;
   editing_ = false;
-  if (host_ != nullptr) {
-    host_->document().layers().clear_tool_layer();
-    host_->invalidate_canvas(Rect{});
+  drag_ = Drag::None;
+  blink_.disconnect();
+  pixels_.clear();
+  pix_w_ = 0;
+  pix_h_ = 0;
+  if (was) {
+    invalidate_box(box);
   }
 }
 
-void TextTool::rasterize() {
-  if (host_ == nullptr || entry_ == nullptr) {
-    close_editor();
+void TextTool::paste_clipboard() {
+  auto clipboard = Gtk::Clipboard::get(GDK_SELECTION_CLIPBOARD);
+  if (!clipboard) {
     return;
   }
-  const std::string text = entry_->get_text();
-  close_editor();
+  const Glib::ustring text = clipboard->wait_for_text();
   if (text.empty()) {
     return;
   }
-  if (!ensure_editable()) {
-    return;
+  text_box_insert(state_, text);
+  cursor_on_ = true;
+  rebuild_pixels();
+  invalidate_box(state_.box);
+}
+
+bool TextTool::on_key(unsigned keyval, unsigned modifiers, const std::string& text) {
+  if (!editing_) {
+    return false;
   }
-  Document& doc = host_->document();
-  std::vector<std::uint8_t> rgba;
-  int tw = 0;
-  int th = 0;
-  if (!render_text_rgba(text, family_, size_pt_, bold_, italic_, stroke_color(button_), rgba, tw,
-                         th)) {
-    return;
+  if (keyval == GDK_KEY_Tab || keyval == GDK_KEY_ISO_Left_Tab || keyval == GDK_KEY_KP_Tab) {
+    return false;
   }
-  doc.layers().copy_active_to_tool();
-  Layer& tool = doc.layers().tool_layer();
-  Rect dirty{};
-  blit_rgba_buffer(tool.pixels(), tool.width(), tool.height(), tool.stride(), x_, y_, rgba.data(),
-                   tw, th, tw * 4, true, &dirty);
-  clip_rect_to_selection(tool, doc.layers().active_layer(), dirty, doc.selection());
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), tool, dirty, "Text",
-                                            doc.layers().active_index());
-  doc.layers().clear_tool_layer();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
+  if ((modifiers & Modifier::Ctrl) != 0 && (modifiers & Modifier::Alt) == 0) {
+    if (keyval == GDK_KEY_v || keyval == GDK_KEY_V) {
+      paste_clipboard();
+      return true;
+    }
+    return false;
+  }
+  if (keyval == GDK_KEY_Insert && (modifiers & Modifier::Shift) != 0) {
+    paste_clipboard();
+    return true;
+  }
+  bool edited = false;
+  switch (keyval) {
+    case GDK_KEY_BackSpace:
+      text_box_backspace(state_);
+      edited = true;
+      break;
+    case GDK_KEY_Delete:
+    case GDK_KEY_KP_Delete:
+      text_box_delete_forward(state_);
+      edited = true;
+      break;
+    case GDK_KEY_Left:
+    case GDK_KEY_KP_Left:
+      text_box_move_left(state_);
+      break;
+    case GDK_KEY_Right:
+    case GDK_KEY_KP_Right:
+      text_box_move_right(state_);
+      break;
+    case GDK_KEY_Up:
+    case GDK_KEY_KP_Up:
+      text_box_move_up(state_);
+      break;
+    case GDK_KEY_Down:
+    case GDK_KEY_KP_Down:
+      text_box_move_down(state_);
+      break;
+    case GDK_KEY_Home:
+    case GDK_KEY_KP_Home:
+      text_box_move_line_start(state_);
+      break;
+    case GDK_KEY_End:
+    case GDK_KEY_KP_End:
+      text_box_move_line_end(state_);
+      break;
+    default:
+      if (text.empty() || static_cast<unsigned char>(text[0]) < 0x20) {
+        return true;
+      }
+      text_box_insert(state_, text);
+      edited = true;
+      break;
+  }
+  cursor_on_ = true;
+  if (edited) {
+    rebuild_pixels();
   } else {
-    host_->invalidate_canvas(dirty);
+    relayout_caret();
   }
+  invalidate_box(state_.box);
+  return true;
 }
 
 void TextTool::on_press(CanvasEvent event) {
   if (event.button != 1 && event.button != 3) {
     return;
   }
-  if (editing_) {
-    on_commit();
+  const int x = static_cast<int>(std::floor(event.x));
+  const int y = static_cast<int>(std::floor(event.y));
+  if (!editing_) {
+    begin_box(x, y, event.button);
     return;
   }
-  start_editor(static_cast<int>(std::floor(event.x)), static_cast<int>(std::floor(event.y)),
-               event.button);
+  const double zoom = host_ != nullptr ? host_->canvas_zoom() : 1.0;
+  const TextBoxHit hit = hit_test_text_box(state_.box, x, y, zoom);
+  switch (text_box_press_action(hit)) {
+    case TextBoxPress::Commit:
+      on_commit();
+      return;
+    case TextBoxPress::PlaceCursor:
+      state_.cursor = text_box_index_at(state_, x, y);
+      cursor_on_ = true;
+      drag_ = Drag::None;
+      relayout_caret();
+      invalidate_box(state_.box);
+      return;
+    case TextBoxPress::Move:
+      drag_ = Drag::Move;
+      drag_hit_ = hit;
+      drag_start_ = state_.box;
+      grab_x_ = x;
+      grab_y_ = y;
+      return;
+    case TextBoxPress::Resize:
+      drag_ = Drag::Resize;
+      drag_hit_ = hit;
+      drag_start_ = state_.box;
+      grab_x_ = x;
+      grab_y_ = y;
+      return;
+  }
+}
+
+void TextTool::on_motion(CanvasEvent event) {
+  if (!editing_ || drag_ == Drag::None) {
+    return;
+  }
+  const int x = static_cast<int>(std::floor(event.x));
+  const int y = static_cast<int>(std::floor(event.y));
+  const Rect before = state_.box;
+  if (drag_ == Drag::Move) {
+    state_.box = drag_start_;
+    move_text_box(state_.box, x - grab_x_, y - grab_y_);
+    invalidate_box(before);
+    invalidate_box(state_.box);
+    return;
+  }
+  resize_text_box(state_.box, drag_hit_, x, y, drag_start_, grab_x_, grab_y_);
+  if (state_.box.w != before.w || state_.box.h != before.h) {
+    rebuild_pixels();
+  }
+  invalidate_box(before);
+  invalidate_box(state_.box);
+}
+
+void TextTool::on_release(CanvasEvent /*event*/) {
+  drag_ = Drag::None;
 }
 
 bool TextTool::on_commit() {
-  if (!editing_) {
+  if (!editing_ || host_ == nullptr) {
     return false;
   }
-  rasterize();
+  const TextBoxState state = state_;
+  close_box();
+  if (!state.text.empty() && ensure_editable()) {
+    commit_text_box(host_->document(), state);
+  }
   return true;
 }
 
@@ -343,7 +471,85 @@ void TextTool::on_cancel() {
   if (!editing_) {
     return;
   }
-  close_editor();
+  close_box();
+}
+
+void TextTool::draw_overlay(const Cairo::RefPtr<Cairo::Context>& cr, int origin_x, int origin_y,
+                            double zoom) {
+  if (!editing_ || !cr || zoom <= 0.0) {
+    return;
+  }
+  const Rect& box = state_.box;
+  if (!pixels_.empty() && pix_w_ > 0 && pix_h_ > 0) {
+    const double tx = origin_x + static_cast<double>(box.x + kTextBoxPad) * zoom;
+    const double ty = origin_y + static_cast<double>(box.y + kTextBoxPad) * zoom;
+    paint_straight_rgba(cr, tx, ty, zoom, pixels_.data(), pix_w_, pix_h_);
+  }
+
+  const double x = origin_x + box.x * zoom + 0.5;
+  const double y = origin_y + box.y * zoom + 0.5;
+  const double w = box.w * zoom;
+  const double h = box.h * zoom;
+  cr->save();
+  cr->set_line_width(1.0);
+  cr->set_source_rgb(1.0, 1.0, 1.0);
+  cr->rectangle(x, y, w, h);
+  cr->stroke();
+  cr->set_source_rgb(0.05, 0.05, 0.05);
+  std::vector<double> dash{3.0, 2.0};
+  cr->set_dash(dash, 0.0);
+  cr->rectangle(x, y, w, h);
+  cr->stroke();
+  cr->restore();
+
+  int xs[8];
+  int ys[8];
+  xs[0] = box.x;
+  ys[0] = box.y;
+  xs[1] = box.x + box.w / 2;
+  ys[1] = box.y;
+  xs[2] = box.x + box.w;
+  ys[2] = box.y;
+  xs[3] = box.x + box.w;
+  ys[3] = box.y + box.h / 2;
+  xs[4] = box.x + box.w;
+  ys[4] = box.y + box.h;
+  xs[5] = box.x + box.w / 2;
+  ys[5] = box.y + box.h;
+  xs[6] = box.x;
+  ys[6] = box.y + box.h;
+  xs[7] = box.x;
+  ys[7] = box.y + box.h / 2;
+  cr->save();
+  cr->set_line_width(1.0);
+  for (int i = 0; i < 8; ++i) {
+    const double hx = origin_x + xs[i] * zoom;
+    const double hy = origin_y + ys[i] * zoom;
+    cr->set_source_rgb(1.0, 1.0, 1.0);
+    cr->rectangle(hx - 3.5, hy - 3.5, 7.0, 7.0);
+    cr->fill_preserve();
+    cr->set_source_rgb(0.1, 0.1, 0.1);
+    cr->stroke();
+  }
+  cr->restore();
+
+  if (cursor_on_) {
+    const double cx = origin_x + static_cast<double>(box.x + kTextBoxPad + metrics_.cursor_x) * zoom;
+    const double cy = origin_y + static_cast<double>(box.y + kTextBoxPad + metrics_.cursor_y) * zoom;
+    const double ch = std::max(zoom, static_cast<double>(metrics_.cursor_h) * zoom);
+    cr->save();
+    cr->set_line_width(3.0);
+    cr->set_source_rgb(1.0, 1.0, 1.0);
+    cr->move_to(cx, cy);
+    cr->line_to(cx, cy + ch);
+    cr->stroke();
+    cr->set_line_width(1.0);
+    cr->set_source_rgb(0.0, 0.0, 0.0);
+    cr->move_to(cx, cy);
+    cr->line_to(cx, cy + ch);
+    cr->stroke();
+    cr->restore();
+  }
 }
 
 Tool* create_text_tool() {

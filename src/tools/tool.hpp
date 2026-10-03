@@ -6,6 +6,10 @@
 #include "raster/shapes.hpp"
 #include "raster/pattern.hpp"
 
+#include <cairomm/context.h>
+
+#include <string>
+
 namespace Gtk {
 class Widget;
 class Window;
@@ -80,6 +84,26 @@ public:
   virtual bool on_commit() { return false; }
 
   virtual Gtk::Widget* options_widget() { return nullptr; }
+  // Chrome drawn above the canvas (text box border, handles, caret). Default
+  // is a no-op so other tools are unchanged.
+  virtual void draw_overlay(const Cairo::RefPtr<Cairo::Context>& cr, int origin_x, int origin_y,
+                            double zoom) {
+    (void)cr;
+    (void)origin_x;
+    (void)origin_y;
+    (void)zoom;
+  }
+  // While a tool owns the keyboard (the text box). `text` is the typed UTF-8,
+  // possibly empty for navigation keys. Return true if the key was consumed.
+  virtual bool on_key(unsigned keyval, unsigned modifiers, const std::string& text) {
+    (void)keyval;
+    (void)modifiers;
+    (void)text;
+    return false;
+  }
+  // Document colors or other host state changed. Tools that preview from the
+  // current foreground (the text box) refresh here; the default is a no-op.
+  virtual void on_document_changed() {}
   virtual bool is_stroking() const { return false; }
   // When is_stroking() is true, CanvasView may composite tool_layer in place of
   // the active layer. Selection tools set is_stroking for pointer capture only

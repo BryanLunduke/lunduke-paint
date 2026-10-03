@@ -27,6 +27,12 @@ std::string format_extension(ImageFormat format);
 
 LoadedImage load_flat_image(const std::string& path);
 
+// One scaled preview of a PNG, JPEG, BMP, GIF, or OpenRaster file.
+// `max_edge` is the longer-side cap (no upscale). Returns false for anything
+// that is not a readable image of those types; `out.error` may be set and
+// must not be shown as a dialog.
+bool load_image_preview(const std::string& path, int max_edge, LoadedImage& out);
+
 bool save_flat_image(const std::string& path, ImageFormat format, const std::uint8_t* rgba,
                      int width, int height, int stride, int jpeg_quality, std::string& error);
 

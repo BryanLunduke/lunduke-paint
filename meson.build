@@ -47,6 +47,7 @@ lunduke_paint_core_sources = files(
   'src/raster/shapes.cpp',
   'src/raster/blend.cpp',
   'src/raster/text.cpp',
+  'src/raster/text_box.cpp',
   'src/raster/effects.cpp',
   'src/raster/pattern.cpp',
   'src/doc/commands_layers.cpp',
@@ -59,7 +60,7 @@ lunduke_paint_core = static_library(
   'lunduke_paint_core',
   lunduke_paint_core_sources,
   include_directories: lunduke_paint_inc,
-  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, pangocairo_dep],
 )
 
 lunduke_paint_sources = files(
@@ -249,6 +250,16 @@ test_copy_merged = executable(
   install: false,
 )
 test('copy_merged', test_copy_merged)
+
+test_text_box = executable(
+  'test_text_box',
+  files('tests/test_text_box.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, pangocairo_dep],
+  install: false,
+)
+test('text_box', test_text_box)
 
 install_data(
   'data/org.lunduke.LundukePaint.desktop',

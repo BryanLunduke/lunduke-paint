@@ -43,6 +43,11 @@ struct LoadedOra {
 LoadedOra load_ora(const std::string& path);
 bool save_ora(const std::string& path, const Document& document, std::string& error);
 
+// PNG bytes of mergedimage.png, or Thumbnails/thumbnail.png when the merged
+// image is absent. False for anything that is not a readable OpenRaster zip
+// with one of those entries. Does not report a dialog.
+bool load_ora_preview_png(const std::string& path, std::vector<std::uint8_t>& png);
+
 }  // namespace lundukepaint
 
 #endif

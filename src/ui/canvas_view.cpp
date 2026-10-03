@@ -669,6 +669,9 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   if (intro_active_ || intro_held_) {
     draw_intro(cr);
   }
+  if (tool_ != nullptr) {
+    tool_->draw_overlay(cr, ox, oy, zoom_);
+  }
   ensure_ants_timer();
 
   cr->restore();
