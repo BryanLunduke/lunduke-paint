@@ -2,9 +2,13 @@
 
 #include "io/image_io.hpp"
 
+#include "io/ora.hpp"
+#include "raster/transform.hpp"
+
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cctype>
 #include <cstring>
@@ -266,6 +270,94 @@ bool decode_png_memory(const std::uint8_t* data, std::size_t size, LoadedImage& 
   copy_pixbuf_to_rgba(pixbuf, out.rgba, out.width, out.height);
   g_object_unref(pixbuf);
   return out.ok();
+}
+
+namespace {
+
+void fit_preview(LoadedImage& image, int max_edge) {
+  if (max_edge < 1 || (image.width <= max_edge && image.height <= max_edge)) {
+    return;
+  }
+  const double scale = std::min(static_cast<double>(max_edge) / image.width,
+                                 static_cast<double>(max_edge) / image.height);
+  const int nw = std::max(1, static_cast<int>(std::lround(image.width * scale)));
+  const int nh = std::max(1, static_cast<int>(std::lround(image.height * scale)));
+  std::vector<std::uint8_t> dest(static_cast<std::size_t>(nw) * static_cast<std::size_t>(nh) * 4);
+  scale_bilinear(image.rgba.data(), image.width, image.height, image.width * 4, dest.data(), nw, nh,
+                 nw * 4);
+  image.rgba = std::move(dest);
+  image.width = nw;
+  image.height = nh;
+}
+
+bool preview_from_pixbuf(GdkPixbuf* pixbuf, int max_edge, LoadedImage& out) {
+  if (pixbuf == nullptr) {
+    return false;
+  }
+  out.width = gdk_pixbuf_get_width(pixbuf);
+  out.height = gdk_pixbuf_get_height(pixbuf);
+  if (out.width < 1 || out.height < 1) {
+    g_object_unref(pixbuf);
+    out = {};
+    out.error = "Empty image";
+    return false;
+  }
+  copy_pixbuf_to_rgba(pixbuf, out.rgba, out.width, out.height);
+  g_object_unref(pixbuf);
+  fit_preview(out, max_edge);
+  return out.ok();
+}
+
+}  // namespace
+
+bool load_image_preview(const std::string& path, int max_edge, LoadedImage& out) {
+  out = {};
+  if (path.empty()) {
+    out.error = "No file";
+    return false;
+  }
+  const ImageFormat format = format_from_path(path);
+  if (format == ImageFormat::Ora) {
+    std::vector<std::uint8_t> png;
+    if (!load_ora_preview_png(path, png) || !decode_png_memory(png.data(), png.size(), out)) {
+      out = {};
+      out.error = "Unreadable OpenRaster preview";
+      return false;
+    }
+    fit_preview(out, max_edge);
+    return out.ok();
+  }
+  if (format != ImageFormat::Png && format != ImageFormat::Jpeg && format != ImageFormat::Bmp &&
+      format != ImageFormat::Gif) {
+    out.error = "Not an image";
+    return false;
+  }
+  int info_w = 0;
+  int info_h = 0;
+  if (gdk_pixbuf_get_file_info(path.c_str(), &info_w, &info_h) == nullptr || info_w < 1 ||
+      info_h < 1) {
+    out.error = "Unreadable image";
+    return false;
+  }
+  int target_w = info_w;
+  int target_h = info_h;
+  if (max_edge > 0 && (info_w > max_edge || info_h > max_edge)) {
+    const double scale = std::min(static_cast<double>(max_edge) / info_w,
+                                   static_cast<double>(max_edge) / info_h);
+    target_w = std::max(1, static_cast<int>(std::lround(info_w * scale)));
+    target_h = std::max(1, static_cast<int>(std::lround(info_h * scale)));
+  }
+  GError* error = nullptr;
+  GdkPixbuf* pixbuf =
+      gdk_pixbuf_new_from_file_at_scale(path.c_str(), target_w, target_h, TRUE, &error);
+  if (pixbuf == nullptr) {
+    out.error = error != nullptr ? error->message : "Unreadable image";
+    if (error != nullptr) {
+      g_error_free(error);
+    }
+    return false;
+  }
+  return preview_from_pixbuf(pixbuf, max_edge, out);
 }
 
 }  // namespace lundukepaint

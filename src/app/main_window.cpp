@@ -34,6 +34,7 @@
 #include <gtkmm/colorchooserdialog.h>
 #include <gtkmm/filechooserdialog.h>
 #include <gtkmm/filefilter.h>
+#include <gtkmm/image.h>
 #include <gtkmm/messagedialog.h>
 #include <gtkmm/menubar.h>
 #include <gtkmm/separator.h>
@@ -614,6 +615,7 @@ void MainWindow::update_chrome() {
   status_bar_.set_modified(document().dirty());
   if (active_tool_ != nullptr) {
     status_bar_.set_hint(active_tool_->hint());
+    active_tool_->on_document_changed();
   }
   pattern_strip_.set_colors(document().foreground(), document().background());
   colors_panel_.set_colors(document().foreground(), document().background());
@@ -678,7 +680,30 @@ bool MainWindow::on_key_press(GdkEventKey* event) {
     return false;
   }
   canvas_.skip_intro();  // skip mid-animation; a finished howdy stays
+  if (event->keyval == GDK_KEY_Escape && active_tool_ != nullptr && active_tool_->captures_keys()) {
+    active_tool_->on_cancel();
+    return true;
+  }
+  const bool texting =
+      active_tool_ != nullptr && active_tool_->captures_keys() && !focus_is_editable();
+  auto mods_of = [](guint state) {
+    unsigned mods = 0;
+    if ((state & GDK_SHIFT_MASK) != 0) {
+      mods |= Modifier::Shift;
+    }
+    if ((state & GDK_CONTROL_MASK) != 0) {
+      mods |= Modifier::Ctrl;
+    }
+    if ((state & GDK_MOD1_MASK) != 0) {
+      mods |= Modifier::Alt;
+    }
+    return mods;
+  };
   if (event->keyval == GDK_KEY_space) {
+    if (texting) {
+      const std::string typed = event->string != nullptr ? event->string : " ";
+      return active_tool_->on_key(event->keyval, mods_of(event->state), typed);
+    }
     canvas_.set_space_down(true);
     return false;
   }
@@ -698,8 +723,23 @@ bool MainWindow::on_key_press(GdkEventKey* event) {
       return true;
     }
   }
-  if (active_tool_ != nullptr && active_tool_->captures_keys()) {
-    return false;
+  if (texting) {
+    const bool ctrl = (event->state & GDK_CONTROL_MASK) != 0;
+    const bool alt = (event->state & GDK_MOD1_MASK) != 0;
+    const bool paste = ctrl && !alt && (event->keyval == GDK_KEY_v || event->keyval == GDK_KEY_V);
+    const bool shift_insert =
+        !ctrl && !alt && (event->state & GDK_SHIFT_MASK) != 0 && event->keyval == GDK_KEY_Insert;
+    if ((!ctrl && !alt) || paste || shift_insert) {
+      const std::string typed = event->string != nullptr ? event->string : "";
+      if (active_tool_->on_key(event->keyval, mods_of(event->state), typed)) {
+        return true;
+      }
+    }
+    // Plain keys must not fall through to tool shortcuts while a text box is
+    // open. Accelerators (Ctrl/Alt, other than paste) still propagate.
+    if (!ctrl && !alt) {
+      return false;
+    }
   }
   if ((event->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK)) != 0) {
     return false;
@@ -1058,10 +1098,73 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
   return true;
 }
 
+namespace {
+
+Glib::RefPtr<Gdk::Pixbuf> pixbuf_from_preview(const LoadedImage& image) {
+  if (!image.ok()) {
+    return {};
+  }
+  auto pixbuf = Gdk::Pixbuf::create(Gdk::COLORSPACE_RGB, true, 8, image.width, image.height);
+  if (!pixbuf) {
+    return {};
+  }
+  guint8* dst = pixbuf->get_pixels();
+  const int stride = pixbuf->get_rowstride();
+  const int channels = pixbuf->get_n_channels();
+  for (int y = 0; y < image.height; ++y) {
+    const std::uint8_t* src =
+        image.rgba.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) * 4;
+    guint8* row = dst + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+    for (int x = 0; x < image.width; ++x) {
+      guint8* pixel = row + static_cast<std::size_t>(x) * static_cast<std::size_t>(channels);
+      pixel[0] = src[static_cast<std::size_t>(x) * 4 + 0];
+      pixel[1] = src[static_cast<std::size_t>(x) * 4 + 1];
+      pixel[2] = src[static_cast<std::size_t>(x) * 4 + 2];
+      if (channels > 3) {
+        pixel[3] = src[static_cast<std::size_t>(x) * 4 + 3];
+      }
+    }
+  }
+  return pixbuf;
+}
+
+}  // namespace
+
 std::string MainWindow::choose_open_path() {
   Gtk::FileChooserDialog dialog(*this, "Open Image", Gtk::FILE_CHOOSER_ACTION_OPEN);
   dialog.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
   dialog.add_button("_Open", Gtk::RESPONSE_ACCEPT);
+  Gtk::Image preview;
+  preview.set_margin_start(8);
+  preview.set_margin_end(8);
+  preview.set_margin_top(8);
+  preview.set_margin_bottom(8);
+  preview.set_halign(Gtk::ALIGN_CENTER);
+  preview.set_valign(Gtk::ALIGN_CENTER);
+  dialog.set_preview_widget(preview);
+  dialog.set_use_preview_label(false);
+  dialog.set_preview_widget_active(false);
+  dialog.signal_update_preview().connect([&dialog, &preview]() {
+    try {
+      preview.clear();
+      const std::string path = dialog.get_preview_filename();
+      LoadedImage image;
+      if (path.empty() || !load_image_preview(path, 240, image)) {
+        dialog.set_preview_widget_active(false);
+        return;
+      }
+      const auto pixbuf = pixbuf_from_preview(image);
+      if (!pixbuf) {
+        dialog.set_preview_widget_active(false);
+        return;
+      }
+      preview.set(pixbuf);
+      dialog.set_preview_widget_active(true);
+    } catch (const Glib::Error&) {
+      preview.clear();
+      dialog.set_preview_widget_active(false);
+    }
+  });
   auto all = Gtk::FileFilter::create();
   all->set_name("Images");
   all->add_pattern("*.ora");

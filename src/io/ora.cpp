@@ -435,6 +435,89 @@ bool save_ora(const std::string& path, const Document& document, std::string& er
   return true;
 }
 
+bool load_ora_preview_png(const std::string& path, std::vector<std::uint8_t>& png) {
+  png.clear();
+  archive* a = archive_read_new();
+  if (a == nullptr) {
+    return false;
+  }
+  archive_read_support_format_zip(a);
+  archive_read_support_filter_all(a);
+  if (archive_read_open_filename(a, path.c_str(), 16384) != ARCHIVE_OK) {
+    archive_read_free(a);
+    return false;
+  }
+  std::vector<std::uint8_t> merged;
+  std::vector<std::uint8_t> thumb;
+  archive_entry* entry = nullptr;
+  bool failed = false;
+  while (!failed) {
+    const int r = archive_read_next_header(a, &entry);
+    if (r == ARCHIVE_EOF) {
+      break;
+    }
+    if (r != ARCHIVE_OK) {
+      failed = true;
+      break;
+    }
+    const char* name = archive_entry_pathname(entry);
+    const bool want_merged = name != nullptr && std::strcmp(name, "mergedimage.png") == 0;
+    const bool want_thumb = name != nullptr && std::strcmp(name, "Thumbnails/thumbnail.png") == 0;
+    if ((!want_merged && !want_thumb) || archive_entry_filetype(entry) != AE_IFREG) {
+      archive_read_data_skip(a);
+      continue;
+    }
+    std::vector<std::uint8_t> data;
+    const la_int64_t sz = archive_entry_size(entry);
+    if (sz > 0 && sz < 64 * 1024 * 1024) {
+      data.resize(static_cast<std::size_t>(sz));
+      std::size_t got = 0;
+      while (got < data.size()) {
+        const la_ssize_t n = archive_read_data(a, data.data() + got, data.size() - got);
+        if (n <= 0) {
+          failed = true;
+          break;
+        }
+        got += static_cast<std::size_t>(n);
+      }
+    } else if (sz <= 0) {
+      std::uint8_t buf[4096];
+      while (!failed) {
+        const la_ssize_t n = archive_read_data(a, buf, sizeof(buf));
+        if (n == 0) {
+          break;
+        }
+        if (n < 0) {
+          failed = true;
+          break;
+        }
+        data.insert(data.end(), buf, buf + n);
+      }
+    } else {
+      archive_read_data_skip(a);
+      continue;
+    }
+    if (failed) {
+      break;
+    }
+    if (want_merged) {
+      merged = std::move(data);
+    } else {
+      thumb = std::move(data);
+    }
+  }
+  archive_read_free(a);
+  if (!merged.empty()) {
+    png = std::move(merged);
+    return true;
+  }
+  if (!thumb.empty()) {
+    png = std::move(thumb);
+    return true;
+  }
+  return false;
+}
+
 LoadedOra load_ora(const std::string& path) {
   LoadedOra out;
   std::map<std::string, std::vector<std::uint8_t>> files;
