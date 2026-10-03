@@ -6,7 +6,7 @@ namespace lundukepaint {
 namespace actions {
 
 constexpr const char* kAppId = "org.lunduke.LundukePaint";
-constexpr const char* kVersion = "0.8.1";
+constexpr const char* kVersion = "0.9";
 constexpr const char* kProductName = "Lunduke Paint";
 
 

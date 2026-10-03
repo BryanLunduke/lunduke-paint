@@ -37,6 +37,11 @@
     <category>RasterGraphics</category>
   </categories>
   <releases>
+    <release version="0.9" date="2026-10-03">
+      <description>
+        <p>Lunduke Paint 0.9 for LCOS 0.9. Identity bump (0.8 → 0.9 / Debian 0.9-1); features and UI unchanged. About dialog reads 0.9. Keeps 0.5-12 UI/icon fixes.</p>
+      </description>
+    </release>
     <release version="0.8.1" date="2026-10-03">
       <description>
         <p>Lunduke Paint 0.8.1 (Debian 0.8-2). Saves floating selections, keeps nested OpenRaster groups, and fixes merge, offset, transform, selection, autocrop, and undo-dirty bugs.</p>
