@@ -1,3 +1,12 @@
+lunduke-paint (0.9-1) unstable; urgency=medium
+
+  * LCOS 0.9 track identity bump (0.8 → 0.9 / Debian 0.9-1). Features
+    and UI unchanged. About dialog reads 0.9.
+  * Retain 0.5-12 UI/icon fixes (WM title-bar icon, themed toolbox
+    symbolics, app icon PNG set, MacPaint chrome).
+
+ -- Phil <phil@brushpad.local>  Sat, 03 Oct 2026 21:30:00 -0500
+
 lunduke-paint (0.8-2) unstable; urgency=medium
 
   * Commit a floating selection before Save, Save As, print, and crash

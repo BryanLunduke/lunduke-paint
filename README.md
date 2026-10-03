@@ -14,8 +14,12 @@ user layers.
   decorations, no HeaderBar as main chrome)
 - Theme: follows the active GTK3 theme; the app is not skinned
 - Native project file: OpenRaster `.ora` (libarchive + pugixml)
-- Version: 0.8.1
+- Version: 0.9
 - Config: `$XDG_CONFIG_HOME/lunduke-paint/lunduke-paint.ini` via GKeyFile
+
+## 0.9
+
+LCOS 0.9 identity. Package 0.9-1. About dialog and meson version read 0.9. Same MacPaint-inspired chrome and 0.5-12 UI/icon fixes; howdy launch-gated off. Features and UI unchanged from 0.8.
 
 ## 0.8.1
 
