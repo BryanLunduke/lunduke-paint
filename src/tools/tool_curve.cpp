@@ -98,18 +98,22 @@ void CurveTool::preview() {
     return;
   }
   Document& doc = host_->document();
+  const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
-  tool.copy_from(doc.layers().active_layer());
+  tool.copy_from(active);
   dirty_ = {};
+  const int ox = active.offset_x();
+  const int oy = active.offset_y();
   if (phase_ == 1) {
-    draw_line(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_, y0_, x3_, y3_,
-              thickness_, stroke_color(button_), antialias_, &dirty_);
+    draw_line(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy, x3_ - ox,
+              y3_ - oy, thickness_, stroke_color(button_), antialias_, &dirty_);
   } else {
-    draw_cubic_bezier(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_, y0_, x1_, y1_,
-                      x2_, y2_, x3_, y3_, (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), antialias_, &dirty_);
+    draw_cubic_bezier(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy,
+                      x1_ - ox, y1_ - oy, x2_ - ox, y2_ - oy, x3_ - ox, y3_ - oy, thickness_,
+                      stroke_color(button_), antialias_, &dirty_);
   }
-  clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());
-  host_->invalidate_canvas(dirty_);
+  clip_rect_to_selection(tool, active, dirty_, doc.selection());
+  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
 }
 
 void CurveTool::reset() {
@@ -140,7 +144,7 @@ void CurveTool::finish() {
   if (cmd && !cmd->empty()) {
     doc.commit(std::move(cmd));
   } else {
-    host_->invalidate_canvas(dirty_);
+    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   }
 }
 
@@ -234,7 +238,7 @@ void CurveTool::on_cancel() {
   }
   if (host_ != nullptr) {
     host_->document().layers().clear_tool_layer();
-    host_->invalidate_canvas(dirty_);
+    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   }
   reset();
 }

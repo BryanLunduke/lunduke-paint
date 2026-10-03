@@ -14,6 +14,7 @@
 #include "ui/layers_panel.hpp"
 #include "ui/status_bar.hpp"
 #include "ui/pattern_strip.hpp"
+#include "raster/transform.hpp"
 #include "ui/toolbox.hpp"
 
 #include <cstdint>
@@ -160,9 +161,8 @@ private:
   bool on_delete_event(GdkEventAny* event) override;
   void commit_buffer_change(const char* name, int new_w, int new_h, const std::uint8_t* rgba,
                             int stride);
-  void commit_stack_transform(
-      const char* name, int new_w, int new_h,
-      const std::function<void(const Layer&, std::vector<std::uint8_t>&, int, int)>& xform);
+  void commit_stack_transform(const char* name, int new_w, int new_h,
+                              const std::function<PlacedPixels(const Layer&)>& xform);
   bool warn_size(int width, int height);
   void copy_selection_to_clipboard();
   void copy_merged_to_clipboard();

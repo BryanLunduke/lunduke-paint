@@ -77,10 +77,12 @@ void MagicWandTool::on_press(CanvasEvent event) {
     return;
   }
   const Layer& layer = doc.layers().active_layer();
+  const int lx = x - layer.offset_x();
+  const int ly = y - layer.offset_y();
   std::vector<std::uint8_t> full;
   Rect bounds{};
-  flood_mask(layer.pixels(), layer.width(), layer.height(), layer.stride(), x, y, tolerance_, full,
-             &bounds);
+  flood_mask(layer.pixels(), layer.width(), layer.height(), layer.stride(), lx, ly, tolerance_,
+             full, &bounds);
   if (bounds.empty()) {
     const Rect dirty = doc.selection().bounds();
     doc.selection().clear();
@@ -97,6 +99,8 @@ void MagicWandTool::on_press(CanvasEvent event) {
       tight[static_cast<std::size_t>(yy) * bounds.w + static_cast<std::size_t>(xx)] = full[src];
     }
   }
+  bounds.x += layer.offset_x();
+  bounds.y += layer.offset_y();
   const Rect old = doc.selection().dirty_union();
   doc.selection().set_mask(bounds, std::move(tight));
   host_->invalidate_canvas(rect_union(old, doc.selection().dirty_union()));

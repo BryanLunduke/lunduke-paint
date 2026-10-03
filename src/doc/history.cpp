@@ -32,6 +32,9 @@ void History::commit_applied(std::unique_ptr<Command> command) {
     return;
   }
   if (index_ + 1 < static_cast<int>(commands_.size())) {
+    if (saved_valid_ && saved_index_ > index_) {
+      saved_valid_ = false;
+    }
     commands_.erase(commands_.begin() + index_ + 1, commands_.end());
   }
   commands_.push_back(std::move(command));
@@ -86,6 +89,21 @@ Rect History::jump_to(Document& document, int target) {
 void History::clear() {
   commands_.clear();
   index_ = -1;
+  saved_valid_ = true;
+  saved_index_ = -1;
+}
+
+bool History::matches_saved() const {
+  return saved_valid_ && saved_index_ == index_;
+}
+
+void History::mark_saved() {
+  saved_valid_ = true;
+  saved_index_ = index_;
+}
+
+void History::invalidate_saved() {
+  saved_valid_ = false;
 }
 
 std::string History::name_at(int i) const {
@@ -100,6 +118,15 @@ void History::trim() {
     commands_.erase(commands_.begin());
     if (index_ >= 0) {
       --index_;
+    }
+    if (!saved_valid_) {
+      continue;
+    }
+    if (saved_index_ > 0) {
+      --saved_index_;
+    } else if (saved_index_ == 0) {
+      // The saved command itself fell off the front of the stack.
+      saved_valid_ = false;
     }
   }
 }

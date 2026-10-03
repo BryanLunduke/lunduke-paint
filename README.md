@@ -14,8 +14,14 @@ user layers.
   decorations, no HeaderBar as main chrome)
 - Theme: follows the active GTK3 theme; the app is not skinned
 - Native project file: OpenRaster `.ora` (libarchive + pugixml)
-- Version: 0.8
+- Version: 0.8.1
 - Config: `$XDG_CONFIG_HOME/lunduke-paint/lunduke-paint.ini` via GKeyFile
+
+## 0.8.1
+
+Debian package 0.8-2. Meson and the About dialog show 0.8.1 (the same string the 0.8 UI used for the meson version, not the Debian revision).
+
+Fixes floating selections on save, print, and recovery; flip and rotate of smaller layers; nested OpenRaster groups; Merge Down; layer offset for paint tools; thickness and eraser size; masked Invert Selection; autocrop side margins; and the unsaved marker after undo back to the saved image.
 
 ## 0.8
 

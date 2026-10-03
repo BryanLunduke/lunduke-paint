@@ -121,6 +121,81 @@ bool read_zip(const std::string& path, std::map<std::string, std::vector<std::ui
   return true;
 }
 
+void append_layer_xml(pugi::xml_node parent, const Document& document, int index, int ancestor_x,
+                      int ancestor_y) {
+  const Layer& layer = document.layers().at(index);
+  auto node = parent.append_child("layer");
+  node.append_attribute("name") = layer.name().c_str();
+  const std::string src = "data/layer-" + std::to_string(index) + ".png";
+  node.append_attribute("src") = src.c_str();
+  node.append_attribute("x") = layer.offset_x() - ancestor_x;
+  node.append_attribute("y") = layer.offset_y() - ancestor_y;
+  node.append_attribute("opacity") = layer.opacity();
+  node.append_attribute("visibility") = layer.visible() ? "visible" : "hidden";
+  node.append_attribute("composite-op") = blend_mode_ora_op(layer.blend());
+  node.append_attribute("lundukepaint:locked") = layer.locked() ? "true" : "false";
+}
+
+bool stack_covers_layers(const OraNode& node, int layer_count, std::vector<int>& seen) {
+  if (!node.is_stack) {
+    if (node.layer_index < 0 || node.layer_index >= layer_count) {
+      return false;
+    }
+    if (seen[static_cast<std::size_t>(node.layer_index)] != 0) {
+      return false;
+    }
+    seen[static_cast<std::size_t>(node.layer_index)] = 1;
+    return true;
+  }
+  for (const OraNode& child : node.children) {
+    if (!stack_covers_layers(child, layer_count, seen)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool stack_is_usable(const Document& document, const OraNode& root) {
+  if (!root.is_stack || document.layers().count() < 1) {
+    return false;
+  }
+  std::vector<int> seen(static_cast<std::size_t>(document.layers().count()), 0);
+  if (!stack_covers_layers(root, document.layers().count(), seen)) {
+    return false;
+  }
+  for (int hit : seen) {
+    if (hit != 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void append_stack_xml(pugi::xml_node parent, const OraNode& node, const Document& document,
+                      int ancestor_x, int ancestor_y) {
+  auto stack = parent.append_child("stack");
+  if (!node.name.empty()) {
+    stack.append_attribute("name") = node.name.c_str();
+  }
+  stack.append_attribute("x") = node.x;
+  stack.append_attribute("y") = node.y;
+  stack.append_attribute("opacity") = node.opacity;
+  stack.append_attribute("visibility") = node.visible ? "visible" : "hidden";
+  stack.append_attribute("composite-op") = blend_mode_ora_op(node.blend);
+  if (node.isolate) {
+    stack.append_attribute("isolation") = "isolate";
+  }
+  const int ax = ancestor_x + node.x;
+  const int ay = ancestor_y + node.y;
+  for (const OraNode& child : node.children) {
+    if (child.is_stack) {
+      append_stack_xml(stack, child, document, ax, ay);
+    } else {
+      append_layer_xml(stack, document, child.layer_index, ax, ay);
+    }
+  }
+}
+
 std::string make_stack_xml(const Document& document) {
   pugi::xml_document xml;
   auto decl = xml.prepend_child(pugi::node_declaration);
@@ -131,23 +206,127 @@ std::string make_stack_xml(const Document& document) {
   image.append_attribute("w") = document.width();
   image.append_attribute("h") = document.height();
   image.append_attribute("xmlns:lundukepaint") = kLundukePaintNs;
-  auto stack = image.append_child("stack");
-  for (int i = document.layers().count() - 1; i >= 0; --i) {
-    const Layer& layer = document.layers().at(i);
-    auto node = stack.append_child("layer");
-    node.append_attribute("name") = layer.name().c_str();
-    const std::string src = "data/layer-" + std::to_string(i) + ".png";
-    node.append_attribute("src") = src.c_str();
-    node.append_attribute("x") = layer.offset_x();
-    node.append_attribute("y") = layer.offset_y();
-    node.append_attribute("opacity") = layer.opacity();
-    node.append_attribute("visibility") = layer.visible() ? "visible" : "hidden";
-    node.append_attribute("composite-op") = blend_mode_ora_op(layer.blend());
-    node.append_attribute("lundukepaint:locked") = layer.locked() ? "true" : "false";
+  const OraNode* grouped = document.ora_stack();
+  if (grouped != nullptr && stack_is_usable(document, *grouped)) {
+    append_stack_xml(image, *grouped, document, 0, 0);
+  } else {
+    auto stack = image.append_child("stack");
+    for (int i = document.layers().count() - 1; i >= 0; --i) {
+      append_layer_xml(stack, document, i, 0, 0);
+    }
   }
   std::ostringstream out;
   xml.save(out, "  ");
   return out.str();
+}
+
+bool load_layer_snapshot(const pugi::xml_node& node,
+                         const std::map<std::string, std::vector<std::uint8_t>>& files,
+                         LayerSnapshot& snap, std::string& error) {
+  snap.name = node.attribute("name").as_string("Layer");
+  snap.offset_x = node.attribute("x").as_int(0);
+  snap.offset_y = node.attribute("y").as_int(0);
+  snap.opacity = node.attribute("opacity").as_float(1.0f);
+  const char* vis = node.attribute("visibility").as_string("visible");
+  snap.visible = std::strcmp(vis, "hidden") != 0 && std::strcmp(vis, "false") != 0;
+  snap.blend = blend_mode_from_ora(node.attribute("composite-op").as_string("svg:src-over"));
+  const char* locked = node.attribute("locked").as_string(nullptr);
+  if (locked == nullptr) {
+    locked = node.attribute("lundukepaint:locked").as_string(nullptr);
+  }
+  if (locked == nullptr) {
+    locked = node.attribute("brushpad:locked").as_string(nullptr);
+  }
+  if (locked == nullptr) {
+    locked = "false";
+  }
+  snap.locked = std::strcmp(locked, "true") == 0 || std::strcmp(locked, "1") == 0;
+  const char* src = node.attribute("src").as_string("");
+  auto pit = files.find(src);
+  if (pit == files.end()) {
+    error = std::string("OpenRaster is missing layer image ") + src;
+    return false;
+  }
+  LoadedImage png;
+  if (!decode_png_memory(pit->second.data(), pit->second.size(), png)) {
+    error = png.error.empty() ? "Corrupt layer PNG" : png.error;
+    return false;
+  }
+  snap.width = png.width;
+  snap.height = png.height;
+  snap.pixels = std::move(png.rgba);
+  return true;
+}
+
+void fill_stack_attrs(const pugi::xml_node& node, OraNode& group) {
+  group.is_stack = true;
+  group.name = node.attribute("name").as_string("");
+  group.x = node.attribute("x").as_int(0);
+  group.y = node.attribute("y").as_int(0);
+  group.opacity = node.attribute("opacity").as_float(1.0f);
+  const char* vis = node.attribute("visibility").as_string("visible");
+  group.visible = std::strcmp(vis, "hidden") != 0 && std::strcmp(vis, "false") != 0;
+  group.blend = blend_mode_from_ora(node.attribute("composite-op").as_string("svg:src-over"));
+  const char* iso = node.attribute("isolation").as_string("");
+  group.isolate = std::strcmp(iso, "isolate") == 0;
+}
+
+bool load_stack_children(const pugi::xml_node& stack, OraNode& parent,
+                         std::vector<LayerSnapshot>& top_to_bottom,
+                         const std::map<std::string, std::vector<std::uint8_t>>& files, bool& nested,
+                         std::string& error) {
+  for (auto node : stack.children()) {
+    if (node.type() != pugi::node_element) {
+      continue;
+    }
+    const char* name = node.name();
+    if (std::strcmp(name, "layer") == 0) {
+      LayerSnapshot snap;
+      if (!load_layer_snapshot(node, files, snap, error)) {
+        return false;
+      }
+      OraNode child;
+      child.is_stack = false;
+      child.layer_index = static_cast<int>(top_to_bottom.size());
+      top_to_bottom.push_back(std::move(snap));
+      parent.children.push_back(std::move(child));
+    } else if (std::strcmp(name, "stack") == 0) {
+      nested = true;
+      OraNode group;
+      fill_stack_attrs(node, group);
+      if (!load_stack_children(node, group, top_to_bottom, files, nested, error)) {
+        return false;
+      }
+      parent.children.push_back(std::move(group));
+    }
+  }
+  return true;
+}
+
+void remap_layer_indices(OraNode& node, int count) {
+  if (!node.is_stack) {
+    node.layer_index = count - 1 - node.layer_index;
+    return;
+  }
+  for (OraNode& child : node.children) {
+    remap_layer_indices(child, count);
+  }
+}
+
+void bake_group_offsets(const OraNode& node, int ancestor_x, int ancestor_y,
+                        std::vector<LayerSnapshot>& layers) {
+  if (node.is_stack) {
+    for (const OraNode& child : node.children) {
+      bake_group_offsets(child, ancestor_x + node.x, ancestor_y + node.y, layers);
+    }
+    return;
+  }
+  if (node.layer_index < 0 || node.layer_index >= static_cast<int>(layers.size())) {
+    return;
+  }
+  LayerSnapshot& snap = layers[static_cast<std::size_t>(node.layer_index)];
+  snap.offset_x += ancestor_x;
+  snap.offset_y += ancestor_y;
 }
 
 }  // namespace
@@ -299,43 +478,17 @@ LoadedOra load_ora(const std::string& path) {
     out.warn_size = true;
   }
 
-  std::vector<LayerSnapshot> top_to_bottom;
   auto stack = image.child("stack");
-  for (auto node : stack.children("layer")) {
-    LayerSnapshot snap;
-    snap.name = node.attribute("name").as_string("Layer");
-    snap.offset_x = node.attribute("x").as_int(0);
-    snap.offset_y = node.attribute("y").as_int(0);
-    snap.opacity = node.attribute("opacity").as_float(1.0f);
-    const char* vis = node.attribute("visibility").as_string("visible");
-    snap.visible = std::strcmp(vis, "hidden") != 0 && std::strcmp(vis, "false") != 0;
-    snap.blend = blend_mode_from_ora(node.attribute("composite-op").as_string("svg:src-over"));
-    const char* locked = node.attribute("locked").as_string(nullptr);
-    if (locked == nullptr) {
-      locked = node.attribute("lundukepaint:locked").as_string(nullptr);
-    }
-    if (locked == nullptr) {
-      locked = node.attribute("brushpad:locked").as_string(nullptr);
-    }
-    if (locked == nullptr) {
-      locked = "false";
-    }
-    snap.locked = std::strcmp(locked, "true") == 0 || std::strcmp(locked, "1") == 0;
-    const char* src = node.attribute("src").as_string("");
-    auto pit = files.find(src);
-    if (pit == files.end()) {
-      out.error = std::string("OpenRaster is missing layer image ") + src;
-      return out;
-    }
-    LoadedImage png;
-    if (!decode_png_memory(pit->second.data(), pit->second.size(), png)) {
-      out.error = png.error.empty() ? "Corrupt layer PNG" : png.error;
-      return out;
-    }
-    snap.width = png.width;
-    snap.height = png.height;
-    snap.pixels = std::move(png.rgba);
-    top_to_bottom.push_back(std::move(snap));
+  if (!stack) {
+    out.error = "OpenRaster file has no layers";
+    return out;
+  }
+  std::vector<LayerSnapshot> top_to_bottom;
+  OraNode root;
+  fill_stack_attrs(stack, root);
+  bool nested = false;
+  if (!load_stack_children(stack, root, top_to_bottom, files, nested, out.error)) {
+    return out;
   }
   if (top_to_bottom.empty()) {
     out.error = "OpenRaster file has no layers";
@@ -344,7 +497,15 @@ LoadedOra load_ora(const std::string& path) {
   if (static_cast<int>(top_to_bottom.size()) > kSoftMaxLayers) {
     out.warn_layers = true;
   }
-  out.layers.assign(top_to_bottom.rbegin(), top_to_bottom.rend());
+  const int count = static_cast<int>(top_to_bottom.size());
+  std::reverse(top_to_bottom.begin(), top_to_bottom.end());
+  remap_layer_indices(root, count);
+  if (nested) {
+    bake_group_offsets(root, 0, 0, top_to_bottom);
+    out.nested_groups = true;
+    out.stack = std::move(root);
+  }
+  out.layers = std::move(top_to_bottom);
   return out;
 }
 

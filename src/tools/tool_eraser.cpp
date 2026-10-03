@@ -95,7 +95,7 @@ void EraserTool::on_cancel() {
   }
   drawing_ = false;
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(dirty_);
+  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   dirty_ = {};
 }
 
@@ -119,15 +119,19 @@ void EraserTool::stamp_to(double x, double y) {
   if (host_ == nullptr || !drawing_) {
     return;
   }
+  const Layer& active = host_->document().layers().active_layer();
   Layer& tool = host_->document().layers().tool_layer();
-  const int size = host_ != nullptr ? host_->stroke_size() : size_;
-  stroke_brush(tool.pixels(), tool.width(), tool.height(), tool.stride(), last_x_, last_y_, x, y,
-               size, erase_color(), false, &dirty_);
-  clip_rect_to_selection(tool, host_->document().layers().active_layer(), dirty_,
-                         host_->document().selection());
+  const int size = size_;
+  const double x0 = last_x_ - active.offset_x();
+  const double y0 = last_y_ - active.offset_y();
+  const double x1 = x - active.offset_x();
+  const double y1 = y - active.offset_y();
+  stroke_brush(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1, size,
+               erase_color(), false, &dirty_);
+  clip_rect_to_selection(tool, active, dirty_, host_->document().selection());
   last_x_ = x;
   last_y_ = y;
-  host_->invalidate_canvas(dirty_);
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, dirty_));
 }
 
 void EraserTool::finish_stroke() {
@@ -143,7 +147,7 @@ void EraserTool::finish_stroke() {
   if (cmd && !cmd->empty()) {
     doc.commit(std::move(cmd));
   } else {
-    host_->invalidate_canvas(dirty_);
+    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   }
   dirty_ = {};
 }

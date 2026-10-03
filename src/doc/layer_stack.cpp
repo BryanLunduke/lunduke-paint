@@ -3,6 +3,7 @@
 #include "doc/layer_stack.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
@@ -65,7 +66,12 @@ void LayerStack::clear_tool_layer() {
 }
 
 void LayerStack::copy_active_to_tool() {
-  tool_layer().copy_from(active_layer());
+  const Layer& src = active_layer();
+  if (!tool_layer_ || tool_layer_->width() != src.width() || tool_layer_->height() != src.height()) {
+    tool_layer_ = std::make_unique<Layer>(src.width(), src.height(), Color::transparent(), "Tool");
+  }
+  tool_layer_->set_offset(src.offset_x(), src.offset_y());
+  tool_layer_->copy_from(src);
 }
 
 Layer& LayerStack::selection_layer() {
@@ -247,25 +253,154 @@ Color LayerStack::composite_pixel(int x, int y, const Layer* tool_override, int 
   return {dest[0], dest[1], dest[2], dest[3]};
 }
 
+namespace {
+
+void blend_one(std::uint8_t* dest, int width, int height, const Layer& layer) {
+  if (!layer.visible()) {
+    return;
+  }
+  blend_layer_rect(dest, width, height, width * 4, layer.pixels(), layer.width(), layer.height(),
+                   layer.stride(), layer.offset_x(), layer.offset_y(), Rect{0, 0, width, height},
+                   layer.blend(), layer.opacity());
+}
+
+int forward_coverage(int src_a, int dest_a) {
+  return src_a + (dest_a * (255 - src_a) + 127) / 255;
+}
+
+// Pixels of a Normal, fully-opaque layer which, placed over `below`, reproduce `full`.
+void uncomposite_normal(const std::uint8_t* below, const std::uint8_t* full, std::uint8_t* out) {
+  if (below[3] == 0) {
+    std::memcpy(out, full, 4);
+    return;
+  }
+  if (std::memcmp(below, full, 4) == 0) {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    return;
+  }
+  const int da = below[3];
+  const int oa = full[3];
+  int lo = 0;
+  int hi = 255;
+  while (lo < hi) {
+    const int mid = (lo + hi) / 2;
+    if (forward_coverage(mid, da) < oa) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  int guess = lo;
+  int guess_err = std::abs(forward_coverage(lo, da) - oa);
+  if (lo > 0) {
+    const int err = std::abs(forward_coverage(lo - 1, da) - oa);
+    if (err < guess_err) {
+      guess_err = err;
+      guess = lo - 1;
+    }
+  }
+  if (lo < 255) {
+    const int err = std::abs(forward_coverage(lo + 1, da) - oa);
+    if (err < guess_err) {
+      guess = lo + 1;
+    }
+  }
+
+  auto score = [&](int src_a, int sr, int sg, int sb, std::uint8_t* dest) {
+    dest[0] = static_cast<std::uint8_t>(std::clamp(sr, 0, 255));
+    dest[1] = static_cast<std::uint8_t>(std::clamp(sg, 0, 255));
+    dest[2] = static_cast<std::uint8_t>(std::clamp(sb, 0, 255));
+    dest[3] = static_cast<std::uint8_t>(std::clamp(src_a, 0, 255));
+    std::uint8_t tmp[4] = {below[0], below[1], below[2], below[3]};
+    blend_pixel(tmp, dest, BlendMode::Normal, 1.0f);
+    int err = 0;
+    for (int i = 0; i < 4; ++i) {
+      err += std::abs(static_cast<int>(tmp[i]) - static_cast<int>(full[i]));
+    }
+    return err;
+  };
+
+  std::uint8_t best[4] = {0, 0, 0, 0};
+  int best_err = 1000000;
+  for (int delta = -2; delta <= 2; ++delta) {
+    const int src_a = std::clamp(guess + delta, 0, 255);
+    int sr = 0;
+    int sg = 0;
+    int sb = 0;
+    if (src_a > 0) {
+      const int pred_a = std::max(1, forward_coverage(src_a, da));
+      const int inv = 255 - src_a;
+      const int rgb_full[3] = {full[0], full[1], full[2]};
+      const int rgb_below[3] = {below[0], below[1], below[2]};
+      int solved[3] = {0, 0, 0};
+      for (int c = 0; c < 3; ++c) {
+        const int term = rgb_below[c] * da * inv / 255;
+        const int num = rgb_full[c] * pred_a - term - pred_a / 2;
+        int v = 0;
+        if (num >= 0) {
+          v = (num + src_a / 2) / src_a;
+        } else {
+          v = -(((-num) + src_a / 2) / src_a);
+        }
+        int best_v = std::clamp(v, 0, 255);
+        int best_c = 1000000;
+        for (int dv = -3; dv <= 3; ++dv) {
+          const int cand = std::clamp(v + dv, 0, 255);
+          const int pred = (cand * src_a + term + pred_a / 2) / pred_a;
+          const int err = std::abs(pred - rgb_full[c]);
+          if (err < best_c) {
+            best_c = err;
+            best_v = cand;
+          }
+        }
+        solved[c] = best_v;
+      }
+      sr = solved[0];
+      sg = solved[1];
+      sb = solved[2];
+    }
+    std::uint8_t cand[4];
+    const int err = score(src_a, sr, sg, sb, cand);
+    if (err < best_err) {
+      best_err = err;
+      std::memcpy(best, cand, 4);
+      if (err == 0) {
+        break;
+      }
+    }
+  }
+  std::memcpy(out, best, 4);
+}
+
+}  // namespace
+
 bool LayerStack::merge_down(int index) {
   if (index <= 0 || index >= count()) {
     return false;
   }
-  Layer& upper = at(index);
-  Layer& lower = at(index - 1);
-  std::vector<std::uint8_t> dest(static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_) *
-                                 4);
-  // Start with the lower layer as dest, then blend the upper onto it.
-  for (int y = 0; y < height_; ++y) {
-    std::memcpy(dest.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(width_) * 4,
-                lower.pixels() + static_cast<std::size_t>(y) * lower.stride(),
-                static_cast<std::size_t>(std::min(width_, lower.width())) * 4);
+  const int width = width_;
+  const int height = height_;
+  const std::size_t pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  std::vector<std::uint8_t> below(pixels * 4, 0);
+  for (int i = 0; i < index - 1; ++i) {
+    blend_one(below.data(), width, height, at(i));
   }
-  blend_layer_rect(dest.data(), width_, height_, width_ * 4, upper.pixels(), upper.width(),
-                   upper.height(), upper.stride(), upper.offset_x(), upper.offset_y(),
-                   Rect{0, 0, width_, height_}, upper.blend(), upper.opacity());
-  lower.set_pixels(width_, height_, dest.data(), width_ * 4);
+  std::vector<std::uint8_t> full = below;
+  const bool show = at(index - 1).visible() || at(index).visible();
+  blend_one(full.data(), width, height, at(index - 1));
+  blend_one(full.data(), width, height, at(index));
+
+  std::vector<std::uint8_t> baked(pixels * 4, 0);
+  for (std::size_t i = 0; i < pixels; ++i) {
+    uncomposite_normal(below.data() + i * 4, full.data() + i * 4, baked.data() + i * 4);
+  }
+
+  Layer& lower = at(index - 1);
+  lower.set_pixels(width, height, baked.data(), width * 4);
   lower.set_offset(0, 0);
+  lower.set_opacity(1.0f);
+  lower.set_blend(BlendMode::Normal);
+  lower.set_visible(show);
   take(index);
   active_ = index - 1;
   return true;

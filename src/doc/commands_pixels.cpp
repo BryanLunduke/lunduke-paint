@@ -83,6 +83,9 @@ std::unique_ptr<PixelPatchCommand> PixelPatchCommand::from_layers(const Layer& b
 
   if (cmd->tiles_.empty()) {
     cmd->bounds_ = {};
+  } else {
+    cmd->bounds_.x += before.offset_x();
+    cmd->bounds_.y += before.offset_y();
   }
   return cmd;
 }

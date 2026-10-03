@@ -2,6 +2,7 @@
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
+#include "raster/blend.hpp"
 #include "raster/fill.hpp"
 #include "raster/stroke.hpp"
 
@@ -134,6 +135,70 @@ int main() {
     doc->jump_history(1);
     errors += expect(doc->history().index() == 1, "jump forward to fill");
     errors += expect(same_pixels(layer, filled), "jump redo matches fill");
+  }
+
+  {
+    auto clean = Document::create(4, 4, Color::white(), "Background");
+    errors += expect(!clean->dirty(), "new document is clean");
+    Layer& paint = clean->layers().active_layer();
+    Layer before(paint.width(), paint.height(), Color::transparent(), "before");
+    before.copy_from(paint);
+    Rect dirty{};
+    lundukepaint::stroke_pencil(paint.pixels(), paint.width(), paint.height(), paint.stride(), 0, 0, 2,
+                            2, 1, Color::black(), &dirty);
+    clean->commit(PixelPatchCommand::from_layers(before, paint, dirty, "Pencil stroke"));
+    errors += expect(clean->dirty(), "stroke marks unsaved");
+    clean->undo();
+    errors += expect(!clean->dirty(), "undo to the initial image clears unsaved");
+    clean->redo();
+    errors += expect(clean->dirty(), "redo away from the initial image is unsaved");
+    clean->mark_clean();
+    errors += expect(!clean->dirty(), "save clears unsaved");
+    const int saved = clean->history().index();
+    clean->undo();
+    errors += expect(clean->dirty(), "undo away from the save is unsaved");
+    clean->redo();
+    errors += expect(!clean->dirty(), "redo back to the save clears unsaved");
+    errors += expect(clean->history().index() == saved, "redo landed on the save");
+
+    Layer before2(paint.width(), paint.height(), Color::transparent(), "before2");
+    before2.copy_from(paint);
+    Rect dirty2{};
+    lundukepaint::stroke_pencil(paint.pixels(), paint.width(), paint.height(), paint.stride(), 1, 1, 3,
+                            1, 1, Color{0, 0, 255, 255}, &dirty2);
+    clean->commit(PixelPatchCommand::from_layers(before2, paint, dirty2, "Second stroke"));
+    errors += expect(clean->dirty(), "new stroke after save is unsaved");
+    clean->jump_history(saved);
+    errors += expect(!clean->dirty(), "jump back to the save clears unsaved");
+    clean->jump_history(clean->history().count() - 1);
+    errors += expect(clean->dirty(), "jump away from the save is unsaved");
+  }
+
+  {
+    auto doc = Document::create(4, 3, Color::transparent(), "Lower");
+    Layer& lower = doc->layers().active_layer();
+    std::vector<std::uint8_t> small(2 * 2 * 4, 0);
+    small[0] = 255;
+    small[3] = 255;
+    lower.set_pixels(2, 2, small.data(), 8);
+    lower.set_opacity(0.5f);
+    lower.set_blend(lundukepaint::BlendMode::Multiply);
+    lower.set_offset(1, 1);
+    doc->add_layer();
+    Layer& upper = doc->layers().active_layer();
+    upper.set_pixel(0, 0, Color{0, 0, 255, 255});
+    std::vector<std::uint8_t> before(static_cast<std::size_t>(4 * 3 * 4), 0);
+    doc->layers().composite_rect(before.data(), 16, Rect{0, 0, 4, 3});
+    errors += expect(doc->merge_down(), "merge down");
+    std::vector<std::uint8_t> after(static_cast<std::size_t>(4 * 3 * 4), 0);
+    doc->layers().composite_rect(after.data(), 16, Rect{0, 0, 4, 3});
+    errors += expect(before == after, "merge matches the screen");
+    errors += expect(doc->layers().count() == 1, "merge leaves one layer");
+    const Layer& merged = doc->layers().active_layer();
+    errors += expect(merged.opacity() > 0.99f, "merged opacity is opaque");
+    errors += expect(merged.blend() == lundukepaint::BlendMode::Normal, "merged blend is normal");
+    errors += expect(merged.offset_x() == 0 && merged.offset_y() == 0, "merged offset is rebased");
+    errors += expect(merged.width() == 4 && merged.height() == 3, "merged buffer is the canvas");
   }
 
   if (errors != 0) {
