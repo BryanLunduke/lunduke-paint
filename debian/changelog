@@ -5,7 +5,7 @@ lunduke-paint (0.9-1) unstable; urgency=medium
   * Retain 0.5-12 UI/icon fixes (WM title-bar icon, themed toolbox
     symbolics, app icon PNG set, MacPaint chrome).
 
- -- Phil <phil@brushpad.local>  Sat, 03 Oct 2026 21:30:00 -0500
+ -- Phil <phil@brushpad.local>  Sat, 03 Oct 2026 17:31:00 -0500
 
 lunduke-paint (0.8-2) unstable; urgency=medium
 
