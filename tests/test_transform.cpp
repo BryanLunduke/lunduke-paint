@@ -105,17 +105,30 @@ int main() {
     const Color red{200, 0, 0, 255};
     const Color green{0, 180, 0, 255};
     const Color blue{0, 0, 220, 255};
+    const Color white{255, 255, 255, 255};
+    const Color magenta{200, 0, 200, 255};
+    // Row 0 is a uniform red border. The left column below it is a uniform
+    // green margin, and the right column is a uniform magenta margin. The
+    // interior is not uniform, so only those borders should go. Scanning the
+    // side columns through the red row would see mixed colors and keep them.
     for (int x = 0; x < width; ++x) {
       put(x, 0, red);
     }
     for (int y = 1; y < height; ++y) {
       put(0, y, green);
-      for (int x = 1; x < width; ++x) {
-        put(x, y, blue);
-      }
+      put(width - 1, y, magenta);
     }
+    put(1, 1, blue);
+    put(2, 1, white);
+    put(3, 1, blue);
+    put(1, 2, white);
+    put(2, 2, blue);
+    put(3, 2, white);
+    put(1, 3, blue);
+    put(2, 3, blue);
+    put(3, 3, white);
     const lundukepaint::Rect crop = lundukepaint::autocrop_bounds(img.data(), width, height, width * 4);
-    errors += expect(crop.x == 1 && crop.y == 1 && crop.w == 4 && crop.h == 3,
+    errors += expect(crop.x == 1 && crop.y == 1 && crop.w == 3 && crop.h == 3,
                      "autocrop drops top border and side margin");
   }
 
