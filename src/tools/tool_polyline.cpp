@@ -92,26 +92,35 @@ void PolylineTool::preview() {
     return;
   }
   Document& doc = host_->document();
+  const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
-  tool.copy_from(doc.layers().active_layer());
+  tool.copy_from(active);
   std::vector<int> xs = xs_;
   std::vector<int> ys = ys_;
   if (hover_x_ != xs.back() || hover_y_ != ys.back()) {
     xs.push_back(hover_x_);
     ys.push_back(hover_y_);
   }
+  const int ox = active.offset_x();
+  const int oy = active.offset_y();
+  for (int& px : xs) {
+    px -= ox;
+  }
+  for (int& py : ys) {
+    py -= oy;
+  }
   dirty_ = {};
   draw_polyline(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
-                static_cast<int>(xs.size()), (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), antialias_,
+                static_cast<int>(xs.size()), thickness_, stroke_color(button_), antialias_,
                 &dirty_);
-  clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());
-  host_->invalidate_canvas(dirty_);
+  clip_rect_to_selection(tool, active, dirty_, doc.selection());
+  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
 }
 
 void PolylineTool::clear_preview() {
   if (host_ != nullptr) {
     host_->document().layers().clear_tool_layer();
-    host_->invalidate_canvas(dirty_);
+    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   }
   xs_.clear();
   ys_.clear();
@@ -133,7 +142,7 @@ void PolylineTool::finish() {
   if (cmd && !cmd->empty()) {
     doc.commit(std::move(cmd));
   } else {
-    host_->invalidate_canvas(dirty_);
+    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   }
   dirty_ = {};
 }

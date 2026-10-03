@@ -152,13 +152,24 @@ void FreeformShapeTool::preview() {
     return;
   }
   Document& doc = host_->document();
+  const Layer& active = doc.layers().active_layer();
   doc.layers().copy_active_to_tool();
   Layer& tool = doc.layers().tool_layer();
+  std::vector<int> xs = xs_;
+  std::vector<int> ys = ys_;
+  const int ox = active.offset_x();
+  const int oy = active.offset_y();
+  for (int& px : xs) {
+    px -= ox;
+  }
+  for (int& py : ys) {
+    py -= oy;
+  }
   dirty_ = {};
-  draw_polygon(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs_.data(), ys_.data(),
-               static_cast<int>(xs_.size()), (host_ != nullptr ? host_->stroke_size() : thickness_), stroke_color(button_), fill_mode_, false,
-               &dirty_);
-  host_->invalidate_canvas(dirty_);
+  draw_polygon(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
+               static_cast<int>(xs.size()), (host_ != nullptr ? host_->stroke_size() : thickness_),
+               stroke_color(button_), fill_mode_, false, &dirty_);
+  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
 }
 
 void FreeformShapeTool::finish() {
@@ -181,7 +192,7 @@ void FreeformShapeTool::finish() {
   if (cmd && !cmd->empty()) {
     doc.commit(std::move(cmd));
   } else {
-    host_->invalidate_canvas(dirty_);
+    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   }
   xs_.clear();
   ys_.clear();
@@ -193,7 +204,7 @@ void FreeformShapeTool::clear_preview() {
     return;
   }
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(dirty_);
+  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   dirty_ = {};
 }
 

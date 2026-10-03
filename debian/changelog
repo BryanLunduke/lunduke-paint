@@ -1,3 +1,19 @@
+lunduke-paint (0.8-2) unstable; urgency=medium
+
+  * Commit a floating selection before Save, Save As, print, and crash
+    recovery, so the file matches the screen.
+  * Flip, rotate, scale, crop, and canvas size keep a smaller layer inside
+    its buffer and keep a meaningful layer offset.
+  * OpenRaster load and save keep nested layer groups.
+  * Merge Down respects the lower layer's opacity, blend, and offset.
+  * Pencil, brush, fill, wand, and shapes honor layer offset. Thickness and
+    eraser size spins affect the stroke.
+  * Invert Selection keeps a full-canvas masked selection. Autocrop ignores
+    rows it already trimmed. Undo back to the last successful save clears
+    the unsaved marker.
+
+ -- Phil <phil@brushpad.local>  Sat, 03 Oct 2026 17:05:00 -0500
+
 lunduke-paint (0.8-1) unstable; urgency=medium
 
   * LCOS 0.8 track identity bump (0.7 → 0.8 / Debian 0.8-1). Features

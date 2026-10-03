@@ -189,14 +189,6 @@ Rect autocrop_bounds(const std::uint8_t* rgba, int width, int height, int stride
     }
     return true;
   };
-  auto col_uniform = [&](int x, Color c) {
-    for (int y = 0; y < height; ++y) {
-      if (get(rgba, stride, x, y) != c) {
-        return false;
-      }
-    }
-    return true;
-  };
   int top = 0;
   while (top < height - 1 && row_uniform(top, get(rgba, stride, 0, top))) {
     ++top;
@@ -205,6 +197,16 @@ Rect autocrop_bounds(const std::uint8_t* rgba, int width, int height, int stride
   while (bottom > top && row_uniform(bottom, get(rgba, stride, 0, bottom))) {
     --bottom;
   }
+  // Left/right run only over the rows still inside the crop. A uniform top
+  // border of a different color must not keep a uniform side margin.
+  auto col_uniform = [&](int x, Color c) {
+    for (int y = top; y <= bottom; ++y) {
+      if (get(rgba, stride, x, y) != c) {
+        return false;
+      }
+    }
+    return true;
+  };
   int left = 0;
   while (left < width - 1 && col_uniform(left, get(rgba, stride, left, top))) {
     ++left;
@@ -214,6 +216,176 @@ Rect autocrop_bounds(const std::uint8_t* rgba, int width, int height, int stride
     --right;
   }
   return {left, top, right - left + 1, bottom - top + 1};
+}
+
+namespace {
+
+std::vector<std::uint8_t> copy_tight(const std::uint8_t* src, int w, int h, int stride) {
+  std::vector<std::uint8_t> out(static_cast<std::size_t>(std::max(1, w)) *
+                                    static_cast<std::size_t>(std::max(1, h)) * 4,
+                                0);
+  if (src == nullptr || w < 1 || h < 1) {
+    return out;
+  }
+  const int row = w * 4;
+  for (int y = 0; y < h; ++y) {
+    std::memcpy(out.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(row),
+                src + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride),
+                static_cast<std::size_t>(row));
+  }
+  return out;
+}
+
+int map_edge(int v, int from, int to) {
+  if (from == 0) {
+    return 0;
+  }
+  return static_cast<int>(std::llround(static_cast<long double>(v) * static_cast<long double>(to) /
+                                       static_cast<long double>(from)));
+}
+
+}  // namespace
+
+PlacedPixels place_flip_h(const std::uint8_t* src, int src_w, int src_h, int src_stride, int ox,
+                          int oy, int canvas_w, int canvas_h) {
+  (void)canvas_h;
+  PlacedPixels out;
+  out.width = std::max(1, src_w);
+  out.height = std::max(1, src_h);
+  out.offset_x = canvas_w - ox - src_w;
+  out.offset_y = oy;
+  out.pixels = copy_tight(src, src_w, src_h, src_stride);
+  flip_h(out.pixels.data(), out.width, out.height, out.width * 4);
+  return out;
+}
+
+PlacedPixels place_flip_v(const std::uint8_t* src, int src_w, int src_h, int src_stride, int ox,
+                          int oy, int canvas_w, int canvas_h) {
+  (void)canvas_w;
+  PlacedPixels out;
+  out.width = std::max(1, src_w);
+  out.height = std::max(1, src_h);
+  out.offset_x = ox;
+  out.offset_y = canvas_h - oy - src_h;
+  out.pixels = copy_tight(src, src_w, src_h, src_stride);
+  flip_v(out.pixels.data(), out.width, out.height, out.width * 4);
+  return out;
+}
+
+PlacedPixels place_rotate_180(const std::uint8_t* src, int src_w, int src_h, int src_stride, int ox,
+                              int oy, int canvas_w, int canvas_h) {
+  PlacedPixels out;
+  out.width = std::max(1, src_w);
+  out.height = std::max(1, src_h);
+  out.offset_x = canvas_w - ox - src_w;
+  out.offset_y = canvas_h - oy - src_h;
+  out.pixels = copy_tight(src, src_w, src_h, src_stride);
+  rotate_180(out.pixels.data(), out.width, out.height, out.width * 4);
+  return out;
+}
+
+PlacedPixels place_rotate_90_cw(const std::uint8_t* src, int src_w, int src_h, int src_stride,
+                                int ox, int oy, int canvas_w, int canvas_h) {
+  (void)canvas_w;
+  PlacedPixels out;
+  out.width = std::max(1, src_h);
+  out.height = std::max(1, src_w);
+  out.offset_x = canvas_h - oy - src_h;
+  out.offset_y = ox;
+  out.pixels.assign(static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.height) * 4, 0);
+  if (src != nullptr && src_w > 0 && src_h > 0) {
+    rotate_90_cw(src, src_w, src_h, src_stride, out.pixels.data(), out.width * 4);
+  }
+  return out;
+}
+
+PlacedPixels place_rotate_90_ccw(const std::uint8_t* src, int src_w, int src_h, int src_stride,
+                                 int ox, int oy, int canvas_w, int canvas_h) {
+  (void)canvas_h;
+  PlacedPixels out;
+  out.width = std::max(1, src_h);
+  out.height = std::max(1, src_w);
+  out.offset_x = oy;
+  out.offset_y = canvas_w - ox - src_w;
+  out.pixels.assign(static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.height) * 4, 0);
+  if (src != nullptr && src_w > 0 && src_h > 0) {
+    rotate_90_ccw(src, src_w, src_h, src_stride, out.pixels.data(), out.width * 4);
+  }
+  return out;
+}
+
+PlacedPixels place_scale(const std::uint8_t* src, int src_w, int src_h, int src_stride, int ox,
+                         int oy, int canvas_w, int canvas_h, int new_w, int new_h, bool nearest) {
+  int nw = new_w;
+  int nh = new_h;
+  int nox = 0;
+  int noy = 0;
+  if (!(ox == 0 && oy == 0 && src_w == canvas_w && src_h == canvas_h)) {
+    nox = map_edge(ox, canvas_w, new_w);
+    noy = map_edge(oy, canvas_h, new_h);
+    nw = std::max(1, map_edge(ox + src_w, canvas_w, new_w) - nox);
+    nh = std::max(1, map_edge(oy + src_h, canvas_h, new_h) - noy);
+  }
+  PlacedPixels out;
+  out.width = std::max(1, nw);
+  out.height = std::max(1, nh);
+  out.offset_x = nox;
+  out.offset_y = noy;
+  out.pixels.assign(static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.height) * 4, 0);
+  if (nearest) {
+    scale_nearest(src, src_w, src_h, src_stride, out.pixels.data(), out.width, out.height,
+                  out.width * 4);
+  } else {
+    scale_bilinear(src, src_w, src_h, src_stride, out.pixels.data(), out.width, out.height,
+                   out.width * 4);
+  }
+  return out;
+}
+
+PlacedPixels place_crop(const std::uint8_t* src, int src_w, int src_h, int src_stride, int ox, int oy,
+                        Rect crop) {
+  const Rect layer_rect{ox, oy, src_w, src_h};
+  const Rect vis = rect_intersect(layer_rect, crop);
+  PlacedPixels out;
+  if (vis.empty() || (vis.x == ox && vis.y == oy && vis.w == src_w && vis.h == src_h)) {
+    out.width = std::max(1, src_w);
+    out.height = std::max(1, src_h);
+    out.offset_x = ox - crop.x;
+    out.offset_y = oy - crop.y;
+    out.pixels = copy_tight(src, src_w, src_h, src_stride);
+    return out;
+  }
+  const Rect local{vis.x - ox, vis.y - oy, vis.w, vis.h};
+  out.width = local.w;
+  out.height = local.h;
+  out.offset_x = vis.x - crop.x;
+  out.offset_y = vis.y - crop.y;
+  out.pixels.assign(static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.height) * 4, 0);
+  crop_rect(src, src_w, src_h, src_stride, local, out.pixels.data(), out.width * 4);
+  return out;
+}
+
+PlacedPixels place_resize_canvas(const std::uint8_t* src, int src_w, int src_h, int src_stride,
+                                 int ox, int oy, int canvas_w, int canvas_h, int new_w, int new_h,
+                                 Color fill) {
+  PlacedPixels out;
+  if (ox == 0 && oy == 0 && src_w == canvas_w && src_h == canvas_h) {
+    out.width = std::max(1, new_w);
+    out.height = std::max(1, new_h);
+    out.offset_x = 0;
+    out.offset_y = 0;
+    out.pixels.assign(static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.height) * 4,
+                      0);
+    resize_canvas(src, src_w, src_h, src_stride, out.pixels.data(), out.width, out.height,
+                  out.width * 4, fill);
+    return out;
+  }
+  out.width = std::max(1, src_w);
+  out.height = std::max(1, src_h);
+  out.offset_x = ox;
+  out.offset_y = oy;
+  out.pixels = copy_tight(src, src_w, src_h, src_stride);
+  return out;
 }
 
 }  // namespace lundukepaint

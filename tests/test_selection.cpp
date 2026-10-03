@@ -97,6 +97,28 @@ int main() {
     errors += expect(!lasso.contains(2 + 7, 2 + 0), "lasso far corner not selected");
   }
 
+  {
+    Selection all;
+    all.select_all(8, 6);
+    all.invert(8, 6);
+    errors += expect(all.empty(), "select all inverts to empty");
+  }
+  {
+    Selection masked;
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(8 * 6), 0);
+    mask[0] = 255;
+    masked.set_mask({0, 0, 8, 6}, std::move(mask));
+    errors += expect(masked.contains(0, 0), "wand pixel selected");
+    errors += expect(!masked.contains(1, 0), "rest of canvas not selected");
+    masked.invert(8, 6);
+    errors += expect(!masked.empty(), "full-canvas mask still inverts");
+    errors += expect(masked.inverted(), "mask invert sets the flag");
+    errors += expect(!masked.contains(0, 0), "inverted mask drops the wand pixel");
+    errors += expect(masked.contains(1, 0), "inverted mask keeps the complement");
+    masked.invert(8, 6);
+    errors += expect(masked.contains(0, 0) && !masked.contains(1, 0), "second invert restores mask");
+  }
+
   if (errors != 0) {
     std::fprintf(stderr, "test_selection: %d failure(s)\n", errors);
     return 1;

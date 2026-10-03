@@ -69,9 +69,10 @@ void FillTool::on_press(CanvasEvent event) {
   Document& doc = host_->document();
   doc.commit_floating();
   doc.layers().copy_active_to_tool();
+  const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
-  const int x = static_cast<int>(std::floor(event.x));
-  const int y = static_cast<int>(std::floor(event.y));
+  const int x = static_cast<int>(std::floor(event.x)) - active.offset_x();
+  const int y = static_cast<int>(std::floor(event.y)) - active.offset_y();
   Rect dirty{};
   const Color paint = stroke_color(event.button);
   const Color other = (event.button == 3) ? doc.foreground() : doc.background();
@@ -87,7 +88,7 @@ void FillTool::on_press(CanvasEvent event) {
     apply_pattern_mask(tool.pixels(), tool.width(), tool.height(), tool.stride(), mask.data(),
                        host_->active_pattern(), paint, other, &dirty);
   }
-  clip_rect_to_selection(tool, doc.layers().active_layer(), dirty, doc.selection());
+  clip_rect_to_selection(tool, active, dirty, doc.selection());
   auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), tool, dirty, "Flood fill",
                                             doc.layers().active_index());
   doc.layers().clear_tool_layer();

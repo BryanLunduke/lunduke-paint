@@ -41,12 +41,19 @@ public:
   int count() const { return static_cast<int>(commands_.size()); }
   std::string name_at(int i) const;
 
+  // True when the current index is the document state last marked saved.
+  bool matches_saved() const;
+  void mark_saved();
+  void invalidate_saved();
+
 private:
   void trim();
 
   std::vector<std::unique_ptr<Command>> commands_;
   int index_ = -1;
   int depth_ = kDefaultUndoDepth;
+  bool saved_valid_ = true;
+  int saved_index_ = -1;
 };
 
 }  // namespace lundukepaint

@@ -112,11 +112,12 @@ void Selection::invert(int width, int height) {
     select_all(width, height);
     return;
   }
-  if (!inverted_ && rect_.x == 0 && rect_.y == 0 && rect_.w == width && rect_.h == height) {
-    clear();
-    return;
-  }
-  if (inverted_ && rect_.x == 0 && rect_.y == 0 && rect_.w == width && rect_.h == height) {
+  // Select All is a full-canvas rect with no mask; its inverse is empty.
+  // A masked selection (magic wand, lasso) can use that same bounding box and
+  // still has a complement, so the mask must keep the selection alive.
+  const bool full_canvas =
+      rect_.x == 0 && rect_.y == 0 && rect_.w == width && rect_.h == height;
+  if (full_canvas && mask_.empty()) {
     clear();
     return;
   }
@@ -253,9 +254,11 @@ void clip_rect_to_selection(Layer& dest, const Layer& source, Rect rect, const S
   if (rect.empty()) {
     return;
   }
+  const int ox = source.offset_x();
+  const int oy = source.offset_y();
   for (int y = rect.y; y < rect.y2(); ++y) {
     for (int x = rect.x; x < rect.x2(); ++x) {
-      if (!sel.contains(x, y)) {
+      if (!sel.contains(x + ox, y + oy)) {
         dest.set_pixel(x, y, source.pixel(x, y));
       }
     }

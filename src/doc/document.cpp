@@ -21,6 +21,11 @@ std::unique_ptr<Document> Document::create(int width, int height, Color backgrou
 }
 
 void Document::set_dirty(bool dirty) {
+  if (dirty) {
+    history_.invalidate_saved();
+  } else {
+    history_.mark_saved();
+  }
   if (dirty_ == dirty) {
     return;
   }
@@ -30,6 +35,29 @@ void Document::set_dirty(bool dirty) {
 
 void Document::mark_clean() {
   set_dirty(false);
+}
+
+void Document::set_ora_stack(OraNode node) {
+  ora_stack_ = std::move(node);
+  has_ora_stack_ = true;
+}
+
+void Document::clear_ora_stack() {
+  has_ora_stack_ = false;
+  ora_stack_ = {};
+}
+
+const OraNode* Document::ora_stack() const {
+  return has_ora_stack_ ? &ora_stack_ : nullptr;
+}
+
+void Document::note_history_dirty() {
+  const bool dirty = !history_.matches_saved();
+  if (dirty_ == dirty) {
+    return;
+  }
+  dirty_ = dirty;
+  notify_changed();
 }
 
 void Document::set_foreground(Color color) {
@@ -65,7 +93,7 @@ void Document::commit(std::unique_ptr<Command> command) {
   }
   const Rect dirty = command->dirty_rect();
   history_.commit(*this, std::move(command));
-  dirty_ = true;
+  note_history_dirty();
   notify_invalidated(dirty);
   notify_changed();
 }
@@ -75,7 +103,7 @@ Rect Document::undo() {
     return {};
   }
   const Rect dirty = history_.undo(*this);
-  dirty_ = true;
+  note_history_dirty();
   notify_invalidated(dirty);
   notify_changed();
   return dirty;
@@ -86,7 +114,7 @@ Rect Document::redo() {
     return {};
   }
   const Rect dirty = history_.redo(*this);
-  dirty_ = true;
+  note_history_dirty();
   notify_invalidated(dirty);
   notify_changed();
   return dirty;
@@ -97,7 +125,7 @@ Rect Document::jump_history(int target) {
     return {};
   }
   const Rect dirty = history_.jump_to(*this, target);
-  dirty_ = true;
+  note_history_dirty();
   notify_invalidated(dirty);
   notify_changed();
   return dirty;
@@ -281,6 +309,7 @@ std::vector<LayerSnapshot> Document::snapshot_layers() const {
 }
 
 void Document::add_layer() {
+  clear_ora_stack();
   commit_floating();
   LayerSnapshot snap;
   snap.name = layers_.next_layer_name();
@@ -295,6 +324,7 @@ void Document::add_layer() {
 }
 
 void Document::duplicate_layer() {
+  clear_ora_stack();
   commit_floating();
   if (layers_.count() < 1) {
     return;
@@ -303,6 +333,7 @@ void Document::duplicate_layer() {
 }
 
 bool Document::delete_layer() {
+  clear_ora_stack();
   commit_floating();
   if (layers_.count() <= 1) {
     return false;
@@ -313,6 +344,7 @@ bool Document::delete_layer() {
 }
 
 bool Document::raise_layer() {
+  clear_ora_stack();
   commit_floating();
   const int idx = layers_.active_index();
   if (idx + 1 >= layers_.count()) {
@@ -323,6 +355,7 @@ bool Document::raise_layer() {
 }
 
 bool Document::lower_layer() {
+  clear_ora_stack();
   commit_floating();
   const int idx = layers_.active_index();
   if (idx <= 0) {
@@ -333,6 +366,7 @@ bool Document::lower_layer() {
 }
 
 bool Document::move_layer(int from, int to) {
+  clear_ora_stack();
   commit_floating();
   if (from < 0 || to < 0 || from >= layers_.count() || to >= layers_.count() || from == to) {
     return false;
@@ -342,6 +376,7 @@ bool Document::move_layer(int from, int to) {
 }
 
 bool Document::merge_down() {
+  clear_ora_stack();
   commit_floating();
   const int idx = layers_.active_index();
   if (idx <= 0) {
@@ -353,6 +388,7 @@ bool Document::merge_down() {
 }
 
 void Document::flatten() {
+  clear_ora_stack();
   commit_floating();
   if (layers_.count() <= 1) {
     return;

@@ -135,18 +135,22 @@ void RoundedRectTool::preview(int x1, int y1, bool constrain) {
     return;
   }
   Document& doc = host_->document();
+  const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
-  tool.copy_from(doc.layers().active_layer());
+  tool.copy_from(active);
   x1_ = x1;
   y1_ = y1;
   if (constrain) {
     constrain_square(x0_, y0_, &x1_, &y1_);
   }
   dirty_ = {};
-  draw_rounded_rect(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_, y0_, x1_, y1_,
-                    (host_ != nullptr ? host_->stroke_size() : thickness_), radius_, stroke_color(button_), fill_mode_, antialias_, &dirty_);
-  clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());
-  host_->invalidate_canvas(dirty_);
+  const int ox = active.offset_x();
+  const int oy = active.offset_y();
+  draw_rounded_rect(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy,
+                    x1_ - ox, y1_ - oy, thickness_, radius_, stroke_color(button_), fill_mode_,
+                    antialias_, &dirty_);
+  clip_rect_to_selection(tool, active, dirty_, doc.selection());
+  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
 }
 
 void RoundedRectTool::on_motion(CanvasEvent event) {
@@ -172,7 +176,7 @@ void RoundedRectTool::on_cancel() {
   }
   drawing_ = false;
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(dirty_);
+  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   dirty_ = {};
 }
 
@@ -189,7 +193,7 @@ void RoundedRectTool::finish() {
   if (cmd && !cmd->empty()) {
     doc.commit(std::move(cmd));
   } else {
-    host_->invalidate_canvas(dirty_);
+    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   }
   dirty_ = {};
 }

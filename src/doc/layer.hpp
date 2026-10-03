@@ -99,6 +99,25 @@ private:
   mutable bool thumb_valid_ = false;
 };
 
+inline void shift_to_layer(const Layer& layer, int& x, int& y) {
+  x -= layer.offset_x();
+  y -= layer.offset_y();
+}
+
+inline void shift_to_layer(const Layer& layer, double& x, double& y) {
+  x -= static_cast<double>(layer.offset_x());
+  y -= static_cast<double>(layer.offset_y());
+}
+
+// Stroke dirty rects are in layer-buffer space. Canvas invalidation is document space.
+inline Rect layer_dirty_to_canvas(const Layer& layer, Rect dirty) {
+  if (!dirty.empty()) {
+    dirty.x += layer.offset_x();
+    dirty.y += layer.offset_y();
+  }
+  return dirty;
+}
+
 }  // namespace lundukepaint
 
 #endif

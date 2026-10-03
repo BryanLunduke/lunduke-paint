@@ -5,6 +5,7 @@
 #include "doc/history.hpp"
 #include "doc/layer_stack.hpp"
 #include "doc/selection.hpp"
+#include "io/ora.hpp"
 #include "raster/types.hpp"
 
 #include <functional>
@@ -32,6 +33,12 @@ public:
   bool dirty() const { return dirty_; }
   void set_dirty(bool dirty);
   void mark_clean();
+
+  // Nested OpenRaster stacks. Null when the file has no layer groups.
+  // Cleared when layers are added, removed, or reordered.
+  void set_ora_stack(OraNode node);
+  void clear_ora_stack();
+  const OraNode* ora_stack() const;
 
   Color foreground() const { return fg_; }
   Color background() const { return bg_; }
@@ -96,6 +103,7 @@ public:
 
 private:
   Document(int width, int height, Color background, std::string layer_name);
+  void note_history_dirty();
 
   int width_ = kDefaultWidth;
   int height_ = kDefaultHeight;
@@ -103,6 +111,8 @@ private:
   std::string path_;
   double view_zoom_ = 1.0;
   bool dirty_ = false;
+  bool has_ora_stack_ = false;
+  OraNode ora_stack_{};
   Color fg_ = Color::black();
   Color bg_ = Color::white();
   Color canvas_bg_ = Color::white();

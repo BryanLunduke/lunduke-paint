@@ -67,7 +67,7 @@ void SprayTool::on_cancel() {
   }
   drawing_ = false;
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(dirty_);
+  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   dirty_ = {};
 }
 
@@ -88,12 +88,13 @@ void SprayTool::stamp_to(double x, double y) {
     return;
   }
   Document& doc = host_->document();
+  const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
   const int radius = host_ != nullptr ? host_->spray_radius() : radius_;
-  spray_dots(tool.pixels(), tool.width(), tool.height(), tool.stride(), x, y, radius, density_,
-             stroke_color(button_), &rng_, &dirty_);
-  clip_rect_to_selection(tool, doc.layers().active_layer(), dirty_, doc.selection());
-  host_->invalidate_canvas(dirty_);
+  spray_dots(tool.pixels(), tool.width(), tool.height(), tool.stride(), x - active.offset_x(),
+             y - active.offset_y(), radius, density_, stroke_color(button_), &rng_, &dirty_);
+  clip_rect_to_selection(tool, active, dirty_, doc.selection());
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, dirty_));
 }
 
 void SprayTool::finish_stroke() {
@@ -109,7 +110,7 @@ void SprayTool::finish_stroke() {
   if (cmd && !cmd->empty()) {
     doc.commit(std::move(cmd));
   } else {
-    host_->invalidate_canvas(dirty_);
+    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
   }
   dirty_ = {};
 }

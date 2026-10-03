@@ -91,6 +91,71 @@ int main() {
     errors += expect(doc->layers().active_layer().pixel(0, 0) == C, "undo flip restores rotate");
   }
 
+  {
+    const int width = 5;
+    const int height = 4;
+    std::vector<std::uint8_t> img(static_cast<std::size_t>(width * height * 4), 0);
+    auto put = [&](int x, int y, Color c) {
+      std::uint8_t* p = img.data() + static_cast<std::size_t>((y * width + x) * 4);
+      p[0] = c.r;
+      p[1] = c.g;
+      p[2] = c.b;
+      p[3] = c.a;
+    };
+    const Color red{200, 0, 0, 255};
+    const Color green{0, 180, 0, 255};
+    const Color blue{0, 0, 220, 255};
+    for (int x = 0; x < width; ++x) {
+      put(x, 0, red);
+    }
+    for (int y = 1; y < height; ++y) {
+      put(0, y, green);
+      for (int x = 1; x < width; ++x) {
+        put(x, y, blue);
+      }
+    }
+    const lundukepaint::Rect crop = lundukepaint::autocrop_bounds(img.data(), width, height, width * 4);
+    errors += expect(crop.x == 1 && crop.y == 1 && crop.w == 4 && crop.h == 3,
+                     "autocrop drops top border and side margin");
+  }
+
+  {
+    const Color red{9, 0, 0, 255};
+    const Color blue{0, 8, 0, 255};
+    std::vector<std::uint8_t> small(2 * 2 * 4, 0);
+    auto put = [&](int x, int y, Color c) {
+      std::uint8_t* p = small.data() + static_cast<std::size_t>((y * 2 + x) * 4);
+      p[0] = c.r;
+      p[1] = c.g;
+      p[2] = c.b;
+      p[3] = c.a;
+    };
+    put(0, 0, red);
+    put(1, 0, blue);
+    put(0, 1, blue);
+    put(1, 1, red);
+    const lundukepaint::PlacedPixels flipped =
+        lundukepaint::place_flip_h(small.data(), 2, 2, 8, 0, 0, 4, 2);
+    errors += expect(flipped.width == 2 && flipped.height == 2, "flip keeps the small buffer");
+    errors += expect(flipped.offset_x == 2 && flipped.offset_y == 0, "flip mirrors the offset");
+    errors += expect(static_cast<int>(flipped.pixels.size()) == 2 * 2 * 4, "flip buffer is layer-sized");
+    const std::uint8_t* p = flipped.pixels.data();
+    errors += expect(p[0] == blue.r && p[4] == red.r, "flip swaps the top row");
+
+    const lundukepaint::PlacedPixels turned =
+        lundukepaint::place_rotate_180(small.data(), 2, 2, 8, 1, 0, 6, 4);
+    errors += expect(turned.width == 2 && turned.height == 2, "rotate 180 keeps the small buffer");
+    errors += expect(turned.offset_x == 3 && turned.offset_y == 2, "rotate 180 updates offset");
+    errors += expect(static_cast<int>(turned.pixels.size()) == 16, "rotate 180 does not grow to the canvas");
+
+    std::vector<std::uint8_t> full = small;
+    lundukepaint::flip_h(full.data(), 2, 2, 8);
+    const lundukepaint::PlacedPixels same =
+        lundukepaint::place_flip_h(small.data(), 2, 2, 8, 0, 0, 2, 2);
+    errors += expect(same.offset_x == 0 && same.offset_y == 0, "canvas-sized flip keeps offset 0");
+    errors += expect(same.pixels == full, "canvas-sized flip matches flip_h");
+  }
+
   if (errors != 0) {
     std::fprintf(stderr, "test_transform: %d failure(s)\n", errors);
     return 1;
