@@ -130,6 +130,22 @@ int main() {
     errors += expect(get(dest, w, 4, 3) == Color{0, 0, 0, 0}, "text blit skipped transparent");
     errors += expect(dirty.x == 3 && dirty.y == 3, "text blit dirty origin");
   }
+  {
+    std::vector<std::uint8_t> buf(static_cast<std::size_t>(32 * 8 * 4), 0);
+    Rect dirty{};
+    std::uint32_t rng = 1;
+    lundukepaint::stroke_spray(buf.data(), 32, 8, 32 * 4, 2, 4, 28, 4, 3, 80, red, &rng, &dirty);
+    errors += expect(dirty.w > 20, "spray stroke covers the segment");
+    int dots = 0;
+    for (int x = 0; x < 32; ++x) {
+      for (int y = 0; y < 8; ++y) {
+        if (get(buf, 32, x, y).a != 0) {
+          ++dots;
+        }
+      }
+    }
+    errors += expect(dots > 4, "spray steps place more than one dab");
+  }
 
   if (errors != 0) {
     std::fprintf(stderr, "test_stroke: %d failure(s)\n", errors);

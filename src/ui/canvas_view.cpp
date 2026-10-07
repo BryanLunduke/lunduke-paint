@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <vector>
 
 namespace lundukepaint {
@@ -56,8 +57,11 @@ Color apply_floating_overlay(const Document* document, Color c, int x, int y) {
   if (!sel.copy_mode() && sel.origin_rect().contains(x, y)) {
     // Cut-hole preview: hide the active layer, keep layers below; never fall
     // through to the transparency checker on an otherwise opaque canvas.
-    Color below = document->layers().composite_pixel(x, y, nullptr, -1,
-                                                     document->layers().active_index());
+    int skip = sel.source_layer();
+    if (skip < 0 || skip >= document->layers().count()) {
+      skip = document->layers().active_index();
+    }
+    Color below = document->layers().composite_pixel(x, y, nullptr, -1, skip);
     if (below.a != 0) {
       c = below;
     } else {
@@ -94,22 +98,18 @@ Color apply_floating_overlay(const Document* document, Color c, int x, int y) {
   return c;
 }
 
-void draw_checker(const Cairo::RefPtr<Cairo::Context>& cr, int x, int y, int w, int h, Color light,
-                  Color dark) {
-  const int cell = 8;
-  const int x0 = x;
-  const int y0 = y;
-  const int x1 = x + w;
-  const int y1 = y + h;
-  for (int cy = y0; cy < y1; cy += cell) {
-    for (int cx = x0; cx < x1; cx += cell) {
-      const int tx = ((cx - x0) / cell) + ((cy - y0) / cell);
-      const Color c = ((tx & 1) == 0) ? light : dark;
-      cr->set_source_rgb(c.r / 255.0, c.g / 255.0, c.b / 255.0);
-      const int cw = std::min(cell, x1 - cx);
-      const int ch = std::min(cell, y1 - cy);
-      cr->rectangle(cx, cy, cw, ch);
-      cr->fill();
+void fill_checker_tile(std::uint8_t* data, int stride, Color light, Color dark) {
+  for (int y = 0; y < 16; ++y) {
+    std::uint8_t* row = data + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+    const Color c = ((y / 8) & 1) == 0 ? light : dark;
+    const Color alt = ((y / 8) & 1) == 0 ? dark : light;
+    for (int x = 0; x < 16; ++x) {
+      const Color src = x < 8 ? c : alt;
+      // Cairo RGB24 is actually 32-bit xRGB, little-endian.
+      row[static_cast<std::size_t>(x) * 4 + 0] = src.b;
+      row[static_cast<std::size_t>(x) * 4 + 1] = src.g;
+      row[static_cast<std::size_t>(x) * 4 + 2] = src.r;
+      row[static_cast<std::size_t>(x) * 4 + 3] = 255;
     }
   }
 }
@@ -157,6 +157,9 @@ CanvasView::CanvasView() {
 void CanvasView::set_document(Document* document) {
   cancel_intro();
   document_ = document;
+  ants_path_.reset();
+  ants_halos_.clear();
+  ants_generation_ = 0;
   update_area_size();
   queue_draw();
   signal_view_changed_.emit();
@@ -278,20 +281,29 @@ void CanvasView::zoom_to(double zoom, double widget_x, double widget_y) {
 
   const auto hadj = get_hadjustment();
   const auto vadj = get_vadjustment();
+  const double old_scroll_x = hadj ? hadj->get_value() : 0.0;
+  const double old_scroll_y = vadj ? vadj->get_value() : 0.0;
+  const int old_move_x = area_move_x_;
+  const int old_move_y = area_move_y_;
 
   zoom_ = zoom;
   update_area_size();
 
-  // Keep the canvas point under the pointer after the size change.
+  // Event positions are drawing-area coordinates (they already include scroll).
+  // layout_.move recenters the area when the canvas is smaller than the viewport,
+  // so the scroll also shifts by the change in that centering offset.
   if (hadj) {
     const double new_widget_x = origin_x() + canvas_x * zoom_;
-    hadj->set_value(new_widget_x - widget_x);
+    hadj->set_value(new_widget_x - widget_x + old_scroll_x +
+                    static_cast<double>(area_move_x_ - old_move_x));
   }
   if (vadj) {
     const double new_widget_y = origin_y() + canvas_y * zoom_;
-    vadj->set_value(new_widget_y - widget_y);
+    vadj->set_value(new_widget_y - widget_y + old_scroll_y +
+                    static_cast<double>(area_move_y_ - old_move_y));
   }
 
+  ants_path_.reset();
   invalidate_all();
   signal_view_changed_.emit();
 }
@@ -483,6 +495,8 @@ void CanvasView::update_area_size() {
   const int lh = std::max(ah, vh);
   const int x = std::max(0, (lw - aw) / 2);
   const int y = std::max(0, (lh - ah) / 2);
+  area_move_x_ = x;
+  area_move_y_ = y;
   updating_size_ = true;
   area_.set_size_request(aw, ah);
   layout_.set_size(static_cast<guint>(lw), static_cast<guint>(lh));
@@ -513,24 +527,24 @@ CanvasEvent CanvasView::make_event(double widget_x, double widget_y, unsigned bu
   return event;
 }
 
-void CanvasView::begin_pan(double widget_x, double widget_y) {
+void CanvasView::begin_pan(double root_x, double root_y) {
   panning_ = true;
-  pan_start_x_ = widget_x;
-  pan_start_y_ = widget_y;
+  pan_start_x_ = root_x;
+  pan_start_y_ = root_y;
   const auto hadj = get_hadjustment();
   const auto vadj = get_vadjustment();
   pan_hadj_ = hadj ? hadj->get_value() : 0.0;
   pan_vadj_ = vadj ? vadj->get_value() : 0.0;
 }
 
-void CanvasView::update_pan(double widget_x, double widget_y) {
+void CanvasView::update_pan(double root_x, double root_y) {
   const auto hadj = get_hadjustment();
   const auto vadj = get_vadjustment();
   if (hadj) {
-    hadj->set_value(pan_hadj_ - (widget_x - pan_start_x_));
+    hadj->set_value(pan_hadj_ - (root_x - pan_start_x_));
   }
   if (vadj) {
-    vadj->set_value(pan_vadj_ - (widget_y - pan_start_y_));
+    vadj->set_value(pan_vadj_ - (root_y - pan_start_y_));
   }
 }
 
@@ -554,7 +568,17 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   cr->save();
   cr->rectangle(ox, oy, dw, dh);
   cr->clip();
-  draw_checker(cr, ox, oy, dw, dh, checker_light_, checker_dark_);
+  if (!checker_pattern_) {
+    rebuild_checker();
+  }
+  if (checker_pattern_) {
+    cr->save();
+    cr->translate(ox, oy);
+    cr->set_source(checker_pattern_);
+    cr->rectangle(0, 0, dw, dh);
+    cr->fill();
+    cr->restore();
+  }
 
   if (document_ == nullptr) {
     cr->restore();
@@ -583,81 +607,46 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const int sw = vis_x1 - vis_x0;
   const int sh = vis_y1 - vis_y0;
   std::vector<std::uint8_t> flat(static_cast<std::size_t>(sw) * static_cast<std::size_t>(sh) * 4, 0);
-  document_->layers().composite_rect(flat.data(), sw * 4, Rect{vis_x0, vis_y0, sw, sh},
-                                     tool_override, tool_index);
-
-  auto sample_flat = [&](int sx, int sy) {
-    Color c;
-    if (sx < vis_x0 || sy < vis_y0 || sx >= vis_x1 || sy >= vis_y1) {
-      return Color::transparent();
-    }
-    const std::uint8_t* p =
-        flat.data() + static_cast<std::size_t>((sy - vis_y0) * sw + (sx - vis_x0)) * 4;
-    c = Color{p[0], p[1], p[2], p[3]};
-    return display_pixel(c, sx, sy);
-  };
-
-  const bool integer_up = zoom_ >= 1.0 - 1e-9;
-  if (integer_up) {
-    const int dest_x = static_cast<int>(std::floor(ox + vis_x0 * zoom_));
-    const int dest_y = static_cast<int>(std::floor(oy + vis_y0 * zoom_));
-    const int dest_w = static_cast<int>(std::ceil((vis_x1 - vis_x0) * zoom_));
-    const int dest_h = static_cast<int>(std::ceil((vis_y1 - vis_y0) * zoom_));
-    if (dest_w > 0 && dest_h > 0) {
-      auto surface = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, dest_w, dest_h);
-      std::uint8_t* dst = surface->get_data();
-      const int dst_stride = surface->get_stride();
-      const int iz = std::max(1, static_cast<int>(std::lround(zoom_)));
-      const bool exact = std::abs(zoom_ - static_cast<double>(iz)) < 1e-6;
-      for (int dy = 0; dy < dest_h; ++dy) {
-        int sy = vis_y0;
-        if (exact) {
-          sy = vis_y0 + dy / iz;
-        } else {
-          sy = vis_y0 + static_cast<int>(std::floor(dy / zoom_));
-        }
-        if (sy >= ch) {
-          sy = ch - 1;
-        }
-        std::uint8_t* drow = dst + static_cast<std::size_t>(dy) * dst_stride;
-        for (int dx = 0; dx < dest_w; ++dx) {
-          int sx = vis_x0;
-          if (exact) {
-            sx = vis_x0 + dx / iz;
-          } else {
-            sx = vis_x0 + static_cast<int>(std::floor(dx / zoom_));
-          }
-          if (sx >= cw) {
-            sx = cw - 1;
-          }
-          write_argb32(drow + static_cast<std::size_t>(dx) * 4, sample_flat(sx, sy));
-        }
-      }
-      surface->mark_dirty();
-      cr->set_source(surface, dest_x, dest_y);
-      cr->paint();
-    }
-  } else {
-    const int sw = vis_x1 - vis_x0;
-    const int sh = vis_y1 - vis_y0;
-    auto surface = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, sw, sh);
-    std::uint8_t* dst = surface->get_data();
-    const int dst_stride = surface->get_stride();
-    for (int y = 0; y < sh; ++y) {
-      std::uint8_t* drow = dst + static_cast<std::size_t>(y) * dst_stride;
-      for (int x = 0; x < sw; ++x) {
-        write_argb32(drow + static_cast<std::size_t>(x) * 4,
-                     sample_flat(vis_x0 + x, vis_y0 + y));
-      }
-    }
-    surface->mark_dirty();
-    cr->save();
-    cr->translate(ox + vis_x0 * zoom_, oy + vis_y0 * zoom_);
-    cr->scale(zoom_, zoom_);
-    cr->set_source(surface, 0, 0);
-    cr->paint();
-    cr->restore();
+  const Rect view{vis_x0, vis_y0, sw, sh};
+  document_->layers().composite_rect(flat.data(), sw * 4, view, tool_override, tool_index);
+  if (document_->selection().floating()) {
+    const Color canvas_bg = document_->canvas_background();
+    const Color well = document_->background();
+    const Color hole_clear = canvas_bg.a != 0 ? canvas_bg : Color::white();
+    const Color float_clear =
+        canvas_bg.a != 0 ? canvas_bg : (well.a != 0 ? well : Color::white());
+    paint_floating_selection(document_->layers(), document_->selection(), flat.data(), sw * 4, view,
+                             true, hole_clear, float_clear);
   }
+
+  if (!blit_surface_ || blit_w_ != sw || blit_h_ != sh) {
+    blit_surface_ = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, sw, sh);
+    blit_w_ = sw;
+    blit_h_ = sh;
+  }
+  blit_surface_->flush();
+  std::uint8_t* dst = blit_surface_->get_data();
+  const int dst_stride = blit_surface_->get_stride();
+  for (int y = 0; y < sh; ++y) {
+    const std::uint8_t* srow = flat.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(sw) * 4;
+    std::uint8_t* drow = dst + static_cast<std::size_t>(y) * static_cast<std::size_t>(dst_stride);
+    for (int x = 0; x < sw; ++x) {
+      const std::uint8_t* s = srow + static_cast<std::size_t>(x) * 4;
+      write_argb32(drow + static_cast<std::size_t>(x) * 4, Color{s[0], s[1], s[2], s[3]});
+    }
+  }
+  blit_surface_->mark_dirty();
+  cr->save();
+  cr->translate(ox + vis_x0 * zoom_, oy + vis_y0 * zoom_);
+  cr->scale(zoom_, zoom_);
+  cr->set_source(blit_surface_, 0, 0);
+  if (Cairo::RefPtr<Cairo::Pattern> src = cr->get_source()) {
+    cairo_pattern_set_filter(src->cobj(), CAIRO_FILTER_NEAREST);
+  }
+  cr->paint();
+  cr->restore();
+  (void)cw;
+  (void)ch;
 
   if (grid_visible_ && zoom_ + 1e-9 >= static_cast<double>(grid_threshold_) / 100.0) {
     draw_pixel_grid(cr, ox, oy, vis_x0, vis_y0, vis_x1, vis_y1);
@@ -692,7 +681,7 @@ bool CanvasView::on_area_motion(GdkEventMotion* event) {
   signal_pointer_moved_.emit(cx, cy);
 
   if (panning_) {
-    update_pan(event->x, event->y);
+    update_pan(event->x_root, event->y_root);
     return true;
   }
   if (tool_ != nullptr && tool_->is_stroking()) {
@@ -718,7 +707,7 @@ bool CanvasView::on_area_button_press(GdkEventButton* event) {
                          std::string(tool_->id()) == "hand";
   if (event->button == 2 || (event->button == 1 && space_down_) ||
       (event->button == 1 && hand_tool)) {
-    begin_pan(event->x, event->y);
+    begin_pan(event->x_root, event->y_root);
     return true;
   }
   if (tool_ != nullptr && (event->button == 1 || event->button == 3)) {
@@ -796,7 +785,18 @@ void CanvasView::set_grid_visible(bool visible) {
 void CanvasView::set_checker_colors(Color light, Color dark) {
   checker_light_ = light;
   checker_dark_ = dark;
+  checker_pattern_.clear();
   invalidate_all();
+}
+
+void CanvasView::rebuild_checker() {
+  auto tile = Cairo::ImageSurface::create(Cairo::FORMAT_RGB24, 16, 16);
+  tile->flush();
+  fill_checker_tile(tile->get_data(), tile->get_stride(), checker_light_, checker_dark_);
+  tile->mark_dirty();
+  checker_pattern_ = Cairo::SurfacePattern::create(tile);
+  checker_pattern_->set_extend(Cairo::EXTEND_REPEAT);
+  checker_pattern_->set_filter(Cairo::FILTER_NEAREST);
 }
 
 void CanvasView::set_grid_threshold(int percent) {
@@ -853,38 +853,37 @@ void CanvasView::draw_pixel_grid(const Cairo::RefPtr<Cairo::Context>& cr, int ox
   cr->restore();
 }
 
-void CanvasView::draw_marching_ants(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy) {
-  if (document_ == nullptr) {
+void CanvasView::rebuild_ants() {
+  ants_path_.reset();
+  ants_halos_.clear();
+  ants_generation_ = 0;
+  if (document_ == nullptr || document_->selection().empty()) {
     return;
   }
   const Selection& sel = document_->selection();
-  if (sel.empty()) {
-    return;
-  }
-  auto stroke_rect = [&](Rect r) {
+  ants_generation_ = sel.generation();
+  auto scratch = Cairo::ImageSurface::create(Cairo::FORMAT_A1, 1, 1);
+  auto cr = Cairo::Context::create(scratch);
+  const int pad = std::max(1, static_cast<int>(std::ceil(1.0 / std::max(zoom_, 0.125))));
+  auto add_halo = [&](Rect r) {
     if (r.empty()) {
       return;
     }
-    const double x = ox + r.x * zoom_ + 0.5;
-    const double y = oy + r.y * zoom_ + 0.5;
-    const double w = r.w * zoom_;
-    const double h = r.h * zoom_;
-    cr->save();
-    std::vector<double> dash{4.0, 4.0};
-    cr->set_line_width(1.0);
-    cr->set_dash(dash, static_cast<double>(ants_phase_));
-    cr->set_source_rgb(0.0, 0.0, 0.0);
-    cr->rectangle(x, y, w, h);
-    cr->stroke();
-    cr->set_dash(dash, static_cast<double>(ants_phase_) + 4.0);
-    cr->set_source_rgb(1.0, 1.0, 1.0);
-    cr->rectangle(x, y, w, h);
-    cr->stroke();
-    cr->restore();
+    const Rect h{r.x - pad, r.y - pad, r.w + pad * 2, r.h + pad * 2};
+    const int band = pad * 2 + 1;
+    ants_halos_.push_back(Rect{h.x, h.y, h.w, band});
+    ants_halos_.push_back(Rect{h.x, h.y + h.h - band, h.w, band});
+    ants_halos_.push_back(Rect{h.x, h.y, band, h.h});
+    ants_halos_.push_back(Rect{h.x + h.w - band, h.y, band, h.h});
+    cr->rectangle(r.x, r.y, r.w, r.h);
   };
-  auto stroke_mask = [&]() {
+
+  auto add_mask = [&](bool* used_bounds) {
+    if (used_bounds != nullptr) {
+      *used_bounds = false;
+    }
     if (!sel.has_mask() || sel.mask() == nullptr) {
-      stroke_rect(sel.bounds());
+      add_halo(sel.bounds());
       return;
     }
     const Rect b = sel.bounds();
@@ -898,90 +897,130 @@ void CanvasView::draw_marching_ants(const Cairo::RefPtr<Cairo::Context>& cr, int
       return mask[static_cast<std::size_t>(y) * static_cast<std::size_t>(mw) +
                   static_cast<std::size_t>(x)] != 0;
     };
-    cr->save();
-    std::vector<double> dash{4.0, 4.0};
-    cr->set_line_width(1.0);
-    cr->set_dash(dash, static_cast<double>(ants_phase_));
-    cr->set_source_rgb(0.0, 0.0, 0.0);
-    for (int y = 0; y < mh; ++y) {
-      for (int x = 0; x < mw; ++x) {
-        if (!inside(x, y)) {
-          continue;
-        }
-        const double px = ox + (b.x + x) * zoom_;
-        const double py = oy + (b.y + y) * zoom_;
-        if (!inside(x, y - 1)) {
-          cr->move_to(px, py + 0.5);
-          cr->line_to(px + zoom_, py + 0.5);
-        }
-        if (!inside(x, y + 1)) {
-          cr->move_to(px, py + zoom_ + 0.5);
-          cr->line_to(px + zoom_, py + zoom_ + 0.5);
-        }
-        if (!inside(x - 1, y)) {
-          cr->move_to(px + 0.5, py);
-          cr->line_to(px + 0.5, py + zoom_);
-        }
-        if (!inside(x + 1, y)) {
-          cr->move_to(px + zoom_ + 0.5, py);
-          cr->line_to(px + zoom_ + 0.5, py + zoom_);
+    int spans = 0;
+    for (int y = 0; y < mh && spans <= 512; ++y) {
+      for (int x = 0; x < mw && spans <= 512;) {
+        if (inside(x, y) && !inside(x, y - 1)) {
+          const int x0 = x;
+          while (x < mw && inside(x, y) && !inside(x, y - 1)) {
+            ++x;
+          }
+          cr->move_to(b.x + x0, b.y + y);
+          cr->line_to(b.x + x, b.y + y);
+          ++spans;
+        } else if (inside(x, y) && !inside(x, y + 1)) {
+          const int x0 = x;
+          while (x < mw && inside(x, y) && !inside(x, y + 1)) {
+            ++x;
+          }
+          cr->move_to(b.x + x0, b.y + y + 1);
+          cr->line_to(b.x + x, b.y + y + 1);
+          ++spans;
+        } else {
+          ++x;
         }
       }
     }
-    cr->stroke();
-    cr->set_dash(dash, static_cast<double>(ants_phase_) + 4.0);
-    cr->set_source_rgb(1.0, 1.0, 1.0);
-    for (int y = 0; y < mh; ++y) {
-      for (int x = 0; x < mw; ++x) {
-        if (!inside(x, y)) {
-          continue;
-        }
-        const double px = ox + (b.x + x) * zoom_;
-        const double py = oy + (b.y + y) * zoom_;
-        if (!inside(x, y - 1)) {
-          cr->move_to(px, py + 0.5);
-          cr->line_to(px + zoom_, py + 0.5);
-        }
-        if (!inside(x, y + 1)) {
-          cr->move_to(px, py + zoom_ + 0.5);
-          cr->line_to(px + zoom_, py + zoom_ + 0.5);
-        }
-        if (!inside(x - 1, y)) {
-          cr->move_to(px + 0.5, py);
-          cr->line_to(px + 0.5, py + zoom_);
-        }
-        if (!inside(x + 1, y)) {
-          cr->move_to(px + zoom_ + 0.5, py);
-          cr->line_to(px + zoom_ + 0.5, py + zoom_);
+    for (int x = 0; x < mw && spans <= 512; ++x) {
+      for (int y = 0; y < mh && spans <= 512;) {
+        if (inside(x, y) && !inside(x - 1, y)) {
+          const int y0 = y;
+          while (y < mh && inside(x, y) && !inside(x - 1, y)) {
+            ++y;
+          }
+          cr->move_to(b.x + x, b.y + y0);
+          cr->line_to(b.x + x, b.y + y);
+          ++spans;
+        } else if (inside(x, y) && !inside(x + 1, y)) {
+          const int y0 = y;
+          while (y < mh && inside(x, y) && !inside(x + 1, y)) {
+            ++y;
+          }
+          cr->move_to(b.x + x + 1, b.y + y0);
+          cr->line_to(b.x + x + 1, b.y + y);
+          ++spans;
+        } else {
+          ++y;
         }
       }
     }
-    cr->stroke();
-    cr->restore();
+    if (spans > 512) {
+      if (used_bounds != nullptr) {
+        *used_bounds = true;
+      }
+      cr->begin_new_path();
+      if (sel.inverted()) {
+        add_halo(Rect{0, 0, document_->width(), document_->height()});
+      }
+      add_halo(b);
+      return;
+    }
+    const Rect h{b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2};
+    const int band = pad * 2 + 1;
+    ants_halos_.push_back(Rect{h.x, h.y, h.w, band});
+    ants_halos_.push_back(Rect{h.x, h.y + h.h - band, h.w, band});
+    ants_halos_.push_back(Rect{h.x, h.y, band, h.h});
+    ants_halos_.push_back(Rect{h.x + h.w - band, h.y, band, h.h});
   };
 
   if (sel.inverted()) {
-    stroke_rect({0, 0, document_->width(), document_->height()});
-    if (sel.has_mask() && !sel.floating()) {
-      stroke_mask();
-    } else {
-      stroke_rect(sel.bounds());
-    }
-  } else if (sel.has_mask() && !sel.floating()) {
-    stroke_mask();
-  } else {
-    stroke_rect(sel.bounds());
+    add_halo(Rect{0, 0, document_->width(), document_->height()});
   }
+  if (sel.has_mask() && !sel.floating()) {
+    add_mask(nullptr);
+  } else if (!sel.inverted() || !sel.bounds().empty()) {
+    if (!(sel.has_mask() && !sel.floating())) {
+      add_halo(sel.bounds());
+    }
+  }
+  ants_path_.reset(cr->copy_path());
+}
+
+void CanvasView::draw_marching_ants(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy) {
+  if (document_ == nullptr || document_->selection().empty()) {
+    ants_path_.reset();
+    ants_halos_.clear();
+    return;
+  }
+  const Selection& sel = document_->selection();
+  if (!ants_path_ || ants_generation_ != sel.generation()) {
+    rebuild_ants();
+  }
+  if (!ants_path_) {
+    return;
+  }
+  const double z = std::max(zoom_, 0.125);
+  const double dash = 4.0 / z;
+  cr->save();
+  cr->translate(ox, oy);
+  cr->scale(zoom_, zoom_);
+  cr->set_line_width(1.0 / z);
+  std::vector<double> dashes{dash, dash};
+  cr->set_dash(dashes, static_cast<double>(ants_phase_) / z);
+  cr->set_source_rgb(0.0, 0.0, 0.0);
+  cr->append_path(*ants_path_);
+  cr->stroke();
+  cr->set_dash(dashes, static_cast<double>(ants_phase_) / z + dash);
+  cr->set_source_rgb(1.0, 1.0, 1.0);
+  cr->append_path(*ants_path_);
+  cr->stroke();
+  cr->restore();
 }
 
 void CanvasView::ensure_ants_timer() {
+  if (document_ == nullptr || document_->selection().empty()) {
+    if (ants_timer_.connected()) {
+      ants_timer_.disconnect();
+    }
+    return;
+  }
   if (ants_timer_.connected()) {
     return;
   }
   ants_timer_ = Glib::signal_timeout().connect(
       [this]() {
         if (document_ == nullptr || document_->selection().empty()) {
-          return true;
+          return false;
         }
         ants_phase_ = (ants_phase_ + 1) % 8;
         invalidate_ants();
@@ -992,14 +1031,17 @@ void CanvasView::ensure_ants_timer() {
 
 void CanvasView::invalidate_ants() {
   if (document_ == nullptr || document_->selection().empty()) {
+    if (ants_timer_.connected()) {
+      ants_timer_.disconnect();
+    }
     return;
   }
-  const Selection& sel = document_->selection();
-  if (sel.inverted()) {
-    invalidate_all();
-    return;
+  if (ants_halos_.empty() || ants_generation_ != document_->selection().generation()) {
+    rebuild_ants();
   }
-  invalidate_rect(sel.bounds());
+  for (const Rect& halo : ants_halos_) {
+    invalidate_rect(halo);
+  }
 }
 
 bool CanvasView::last_pointer(int& canvas_x, int& canvas_y) const {
@@ -1029,6 +1071,7 @@ void CanvasView::apply_zoom(double zoom) {
   }
   zoom_ = zoom;
   update_area_size();
+  ants_path_.reset();
   invalidate_all();
   signal_view_changed_.emit();
 }

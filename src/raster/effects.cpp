@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace lundukepaint {
@@ -191,64 +192,108 @@ void box_blur_rgba(const std::uint8_t* src, int width, int height, int src_strid
   if (radius > 16) {
     radius = 16;
   }
-  std::vector<std::uint8_t> tmp(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
-  const int tmp_stride = width * 4;
+  const int win = radius * 2 + 1;
+  const std::size_t n = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  // Horizontal sums of premultiplied color and alpha. The vertical pass divides once.
+  std::vector<std::int64_t> hsum(n * 4, 0);
+
+  auto sample = [&](int x, int y, std::int64_t& r, std::int64_t& g, std::int64_t& b, std::int64_t& a) {
+    if (x < 0) {
+      x = 0;
+    } else if (x >= width) {
+      x = width - 1;
+    }
+    const std::uint8_t* p = src + static_cast<std::size_t>(y) * static_cast<std::size_t>(src_stride) +
+                            static_cast<std::size_t>(x) * 4;
+    a = p[3];
+    r = static_cast<std::int64_t>(p[0]) * a;
+    g = static_cast<std::int64_t>(p[1]) * a;
+    b = static_cast<std::int64_t>(p[2]) * a;
+  };
 
   for (int y = 0; y < height; ++y) {
+    std::int64_t sr = 0;
+    std::int64_t sg = 0;
+    std::int64_t sb = 0;
+    std::int64_t sa = 0;
+    for (int dx = -radius; dx <= radius; ++dx) {
+      std::int64_t r = 0;
+      std::int64_t g = 0;
+      std::int64_t b = 0;
+      std::int64_t a = 0;
+      sample(dx, y, r, g, b, a);
+      sr += r;
+      sg += g;
+      sb += b;
+      sa += a;
+    }
     for (int x = 0; x < width; ++x) {
-      int sum[4] = {0, 0, 0, 0};
-      int count = 0;
-      for (int dx = -radius; dx <= radius; ++dx) {
-        int sx = x + dx;
-        if (sx < 0) {
-          sx = 0;
-        } else if (sx >= width) {
-          sx = width - 1;
-        }
-        const std::uint8_t* p =
-            src + static_cast<std::size_t>(y) * static_cast<std::size_t>(src_stride) +
-            static_cast<std::size_t>(sx) * 4;
-        sum[0] += p[0];
-        sum[1] += p[1];
-        sum[2] += p[2];
-        sum[3] += p[3];
-        ++count;
+      const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                             static_cast<std::size_t>(x)) *
+                            4;
+      hsum[i] = sr;
+      hsum[i + 1] = sg;
+      hsum[i + 2] = sb;
+      hsum[i + 3] = sa;
+      if (x + 1 >= width) {
+        break;
       }
-      std::uint8_t* o = tmp.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(tmp_stride) +
-                        static_cast<std::size_t>(x) * 4;
-      o[0] = static_cast<std::uint8_t>(sum[0] / count);
-      o[1] = static_cast<std::uint8_t>(sum[1] / count);
-      o[2] = static_cast<std::uint8_t>(sum[2] / count);
-      o[3] = static_cast<std::uint8_t>(sum[3] / count);
+      std::int64_t or_ = 0;
+      std::int64_t og = 0;
+      std::int64_t ob = 0;
+      std::int64_t oa = 0;
+      std::int64_t nr = 0;
+      std::int64_t ng = 0;
+      std::int64_t nb = 0;
+      std::int64_t na = 0;
+      sample(x - radius, y, or_, og, ob, oa);
+      sample(x + 1 + radius, y, nr, ng, nb, na);
+      sr += nr - or_;
+      sg += ng - og;
+      sb += nb - ob;
+      sa += na - oa;
     }
   }
 
-  for (int y = 0; y < height; ++y) {
-    for (int x = 0; x < width; ++x) {
-      int sum[4] = {0, 0, 0, 0};
-      int count = 0;
-      for (int dy = -radius; dy <= radius; ++dy) {
-        int sy = y + dy;
-        if (sy < 0) {
-          sy = 0;
-        } else if (sy >= height) {
-          sy = height - 1;
-        }
-        const std::uint8_t* p =
-            tmp.data() + static_cast<std::size_t>(sy) * static_cast<std::size_t>(tmp_stride) +
-            static_cast<std::size_t>(x) * 4;
-        sum[0] += p[0];
-        sum[1] += p[1];
-        sum[2] += p[2];
-        sum[3] += p[3];
-        ++count;
+  const std::int64_t area = static_cast<std::int64_t>(win) * static_cast<std::int64_t>(win);
+  for (int x = 0; x < width; ++x) {
+    std::int64_t sr = 0;
+    std::int64_t sg = 0;
+    std::int64_t sb = 0;
+    std::int64_t sa = 0;
+    auto add_row = [&](int y, int sign) {
+      if (y < 0) {
+        y = 0;
+      } else if (y >= height) {
+        y = height - 1;
       }
+      const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                             static_cast<std::size_t>(x)) *
+                            4;
+      sr += sign * hsum[i];
+      sg += sign * hsum[i + 1];
+      sb += sign * hsum[i + 2];
+      sa += sign * hsum[i + 3];
+    };
+    for (int dy = -radius; dy <= radius; ++dy) {
+      add_row(dy, 1);
+    }
+    for (int y = 0; y < height; ++y) {
       std::uint8_t* o = dest + static_cast<std::size_t>(y) * static_cast<std::size_t>(dest_stride) +
                         static_cast<std::size_t>(x) * 4;
-      o[0] = static_cast<std::uint8_t>(sum[0] / count);
-      o[1] = static_cast<std::uint8_t>(sum[1] / count);
-      o[2] = static_cast<std::uint8_t>(sum[2] / count);
-      o[3] = static_cast<std::uint8_t>(sum[3] / count);
+      if (sa <= 0) {
+        o[0] = o[1] = o[2] = o[3] = 0;
+      } else {
+        o[0] = static_cast<std::uint8_t>(std::clamp(sr / sa, std::int64_t{0}, std::int64_t{255}));
+        o[1] = static_cast<std::uint8_t>(std::clamp(sg / sa, std::int64_t{0}, std::int64_t{255}));
+        o[2] = static_cast<std::uint8_t>(std::clamp(sb / sa, std::int64_t{0}, std::int64_t{255}));
+        o[3] = static_cast<std::uint8_t>(std::clamp(sa / area, std::int64_t{0}, std::int64_t{255}));
+      }
+      if (y + 1 >= height) {
+        break;
+      }
+      add_row(y - radius, -1);
+      add_row(y + 1 + radius, 1);
     }
   }
 }

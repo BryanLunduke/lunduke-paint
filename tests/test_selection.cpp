@@ -118,6 +118,18 @@ int main() {
     masked.invert(8, 6);
     errors += expect(masked.contains(0, 0) && !masked.contains(1, 0), "second invert restores mask");
   }
+  {
+    auto doc = Document::create(4, 4, Color::white(), "Background");
+    Layer& layer = doc->layers().active_layer();
+    layer.set_offset(1, 1);
+    layer.set_pixel(0, 0, Color{0, 255, 0, 255});
+    Selection& sel = doc->selection();
+    sel.set_rect(Rect{1, 1, 1, 1});
+    errors += expect(sel.lift(layer, 0), "lift uses layer space");
+    errors += expect(sel.float_pixel(0, 0) == (Color{0, 255, 0, 255}), "lifted the offset pixel");
+    errors += expect(doc->commit_floating(), "commit back to the source layer");
+    errors += expect(layer.pixel(0, 0) == (Color{0, 255, 0, 255}), "commit writes layer space");
+  }
 
   if (errors != 0) {
     std::fprintf(stderr, "test_selection: %d failure(s)\n", errors);

@@ -153,8 +153,9 @@ void FreeformShapeTool::preview() {
   }
   Document& doc = host_->document();
   const Layer& active = doc.layers().active_layer();
-  doc.layers().copy_active_to_tool();
   Layer& tool = doc.layers().tool_layer();
+  const Rect previous = dirty_;
+  restore_shape_preview(tool, active, previous);
   std::vector<int> xs = xs_;
   std::vector<int> ys = ys_;
   const int ox = active.offset_x();
@@ -169,7 +170,8 @@ void FreeformShapeTool::preview() {
   draw_polygon(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
                static_cast<int>(xs.size()), (host_ != nullptr ? host_->stroke_size() : thickness_),
                stroke_color(button_), fill_mode_, false, &dirty_);
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(
+      layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
 }
 
 void FreeformShapeTool::finish() {

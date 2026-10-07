@@ -67,6 +67,11 @@ void FillTool::on_press(CanvasEvent event) {
     return;
   }
   Document& doc = host_->document();
+  const Layer& gate = doc.layers().active_layer();
+  if ((gate.width() > kSoftMaxSide || gate.height() > kSoftMaxSide) &&
+      !host_->confirm_large_canvas(gate.width(), gate.height())) {
+    return;
+  }
   doc.commit_floating();
   doc.layers().copy_active_to_tool();
   const Layer& active = doc.layers().active_layer();
@@ -85,8 +90,11 @@ void FillTool::on_press(CanvasEvent event) {
     Rect bounds{};
     flood_mask(tool.pixels(), tool.width(), tool.height(), tool.stride(), x, y, tolerance_, mask,
                &bounds);
-    apply_pattern_mask(tool.pixels(), tool.width(), tool.height(), tool.stride(), mask.data(),
-                       host_->active_pattern(), paint, other, &dirty);
+    if (!bounds.empty()) {
+      apply_pattern_mask(tool.pixels(), tool.width(), tool.height(), tool.stride(), mask.data(),
+                         bounds.x, bounds.y, bounds.w, bounds.h, host_->active_pattern(), paint,
+                         other, &dirty);
+    }
   }
   clip_rect_to_selection(tool, active, dirty, doc.selection());
   auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), tool, dirty, "Flood fill",

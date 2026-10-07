@@ -2,7 +2,10 @@
 
 #include "raster/fill.hpp"
 
+#include <glib.h>
+
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 
 namespace lundukepaint {
@@ -21,6 +24,131 @@ void set_pixel(std::uint8_t* rgba, int stride, int x, int y, Color c) {
   p[3] = c.a;
 }
 
+enum Seen : std::uint8_t { kUnseen = 0, kReject = 1, kMatch = 2, kFilled = 3 };
+
+struct Span {
+  int y = 0;
+  int x = 0;
+};
+
+void pump_if_slow(gint64& last_us) {
+  const gint64 now = g_get_monotonic_time();
+  if (now - last_us < 200000) {
+    return;
+  }
+  last_us = now;
+  while (g_main_context_pending(nullptr)) {
+    g_main_context_iteration(nullptr, false);
+  }
+}
+
+// Scanline flood. Rejected pixels are marked the first time they are tested.
+// `paint` writes replacement; otherwise only the filled state is recorded.
+bool scanline_flood(const std::uint8_t* src, std::uint8_t* dest, int width, int height, int stride,
+                    int x, int y, int tolerance, Color replacement, bool paint, Rect* bounds,
+                    std::vector<std::uint8_t>& state) {
+  if (bounds != nullptr) {
+    *bounds = {};
+  }
+  state.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), kUnseen);
+  if (src == nullptr || width < 1 || height < 1 || stride < width * 4) {
+    return false;
+  }
+  if (x < 0 || y < 0 || x >= width || y >= height) {
+    return false;
+  }
+  if (tolerance < 0) {
+    tolerance = 0;
+  }
+  const Color seed = get_pixel(src, stride, x, y);
+
+  auto classify = [&](int cx, int cy) -> std::uint8_t {
+    if (cx < 0 || cy < 0 || cx >= width || cy >= height) {
+      return kReject;
+    }
+    const std::size_t idx = static_cast<std::size_t>(cy) * static_cast<std::size_t>(width) +
+                            static_cast<std::size_t>(cx);
+    if (state[idx] != kUnseen) {
+      return state[idx];
+    }
+    const Color current = get_pixel(src, stride, cx, cy);
+    if (color_chebyshev(current, seed) > tolerance) {
+      state[idx] = kReject;
+      return kReject;
+    }
+    state[idx] = kMatch;
+    return kMatch;
+  };
+
+  if (classify(x, y) != kMatch) {
+    return false;
+  }
+
+  int minx = width;
+  int miny = height;
+  int maxx = -1;
+  int maxy = -1;
+  std::vector<Span> stack;
+  stack.push_back(Span{y, x});
+  gint64 last_us = g_get_monotonic_time();
+
+  while (!stack.empty()) {
+    pump_if_slow(last_us);
+    const Span span = stack.back();
+    stack.pop_back();
+    int left = span.x;
+    while (classify(left - 1, span.y) == kMatch) {
+      --left;
+    }
+    int right = left;
+    while (classify(right, span.y) == kMatch) {
+      const std::size_t idx = static_cast<std::size_t>(span.y) * static_cast<std::size_t>(width) +
+                              static_cast<std::size_t>(right);
+      state[idx] = kFilled;
+      if (paint && dest != nullptr) {
+        set_pixel(dest, stride, right, span.y, replacement);
+      }
+      if (right < minx) {
+        minx = right;
+      }
+      if (span.y < miny) {
+        miny = span.y;
+      }
+      if (right > maxx) {
+        maxx = right;
+      }
+      if (span.y > maxy) {
+        maxy = span.y;
+      }
+      ++right;
+    }
+    --right;
+    if (right < left) {
+      continue;
+    }
+    for (int ny : {span.y - 1, span.y + 1}) {
+      int sx = left;
+      while (sx <= right) {
+        if (classify(sx, ny) == kMatch) {
+          const int start = sx;
+          while (sx <= right && classify(sx, ny) == kMatch) {
+            ++sx;
+          }
+          stack.push_back(Span{ny, start});
+        } else {
+          ++sx;
+        }
+      }
+    }
+  }
+
+  if (maxx < minx || bounds == nullptr) {
+    return maxx >= minx;
+  }
+  *bounds = {minx, miny, maxx - minx + 1, maxy - miny + 1};
+  return true;
+}
+
 }  // namespace
 
 void flood_fill(std::uint8_t* rgba, int width, int height, int stride, int x, int y,
@@ -37,118 +165,46 @@ void flood_fill(std::uint8_t* rgba, int width, int height, int stride, int x, in
   if (tolerance < 0) {
     tolerance = 0;
   }
-
   const Color seed = get_pixel(rgba, stride, x, y);
   if (color_chebyshev(seed, replacement) <= 0) {
     return;
   }
-
-  std::vector<std::uint8_t> seen(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
-  std::vector<std::pair<int, int>> stack;
-  stack.reserve(static_cast<std::size_t>(width + height));
-  stack.emplace_back(x, y);
-
-  int minx = x;
-  int miny = y;
-  int maxx = x;
-  int maxy = y;
-
-  while (!stack.empty()) {
-    const int cx = stack.back().first;
-    const int cy = stack.back().second;
-    stack.pop_back();
-    if (cx < 0 || cy < 0 || cx >= width || cy >= height) {
-      continue;
-    }
-    const std::size_t idx = static_cast<std::size_t>(cy) * static_cast<std::size_t>(width) +
-                            static_cast<std::size_t>(cx);
-    if (seen[idx] != 0) {
-      continue;
-    }
-    const Color current = get_pixel(rgba, stride, cx, cy);
-    if (color_chebyshev(current, seed) > tolerance) {
-      continue;
-    }
-    seen[idx] = 1;
-    set_pixel(rgba, stride, cx, cy, replacement);
-    if (cx < minx) {
-      minx = cx;
-    }
-    if (cy < miny) {
-      miny = cy;
-    }
-    if (cx > maxx) {
-      maxx = cx;
-    }
-    if (cy > maxy) {
-      maxy = cy;
-    }
-    stack.emplace_back(cx + 1, cy);
-    stack.emplace_back(cx - 1, cy);
-    stack.emplace_back(cx, cy + 1);
-    stack.emplace_back(cx, cy - 1);
+  std::vector<std::uint8_t> state;
+  Rect bounds{};
+  if (!scanline_flood(rgba, rgba, width, height, stride, x, y, tolerance, replacement, true, &bounds,
+                      state)) {
+    return;
   }
-
   if (dirty != nullptr) {
-    *dirty = {minx, miny, maxx - minx + 1, maxy - miny + 1};
+    *dirty = bounds;
   }
 }
 
 void flood_mask(const std::uint8_t* rgba, int width, int height, int stride, int x, int y,
                 int tolerance, std::vector<std::uint8_t>& mask, Rect* bounds) {
-  mask.assign(static_cast<std::size_t>(std::max(0, width)) * static_cast<std::size_t>(std::max(0, height)),
-              0);
+  mask.clear();
   if (bounds != nullptr) {
     *bounds = {};
   }
-  if (rgba == nullptr || width < 1 || height < 1 || stride < width * 4) {
+  std::vector<std::uint8_t> state;
+  Rect tight{};
+  if (!scanline_flood(rgba, nullptr, width, height, stride, x, y, tolerance, Color::transparent(),
+                      false, &tight, state)) {
     return;
   }
-  if (x < 0 || y < 0 || x >= width || y >= height) {
-    return;
-  }
-  if (tolerance < 0) {
-    tolerance = 0;
-  }
-  const Color seed = get_pixel(rgba, stride, x, y);
-  std::vector<std::uint8_t> seen(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
-  std::vector<std::pair<int, int>> stack;
-  stack.emplace_back(x, y);
-  int minx = x;
-  int miny = y;
-  int maxx = x;
-  int maxy = y;
-  bool any = false;
-  while (!stack.empty()) {
-    const int cx = stack.back().first;
-    const int cy = stack.back().second;
-    stack.pop_back();
-    if (cx < 0 || cy < 0 || cx >= width || cy >= height) {
-      continue;
+  mask.assign(static_cast<std::size_t>(tight.w) * static_cast<std::size_t>(tight.h), 0);
+  for (int yy = 0; yy < tight.h; ++yy) {
+    for (int xx = 0; xx < tight.w; ++xx) {
+      const std::size_t src = static_cast<std::size_t>(tight.y + yy) * static_cast<std::size_t>(width) +
+                              static_cast<std::size_t>(tight.x + xx);
+      if (state[src] == kFilled) {
+        mask[static_cast<std::size_t>(yy) * static_cast<std::size_t>(tight.w) +
+             static_cast<std::size_t>(xx)] = 255;
+      }
     }
-    const std::size_t idx = static_cast<std::size_t>(cy) * static_cast<std::size_t>(width) +
-                            static_cast<std::size_t>(cx);
-    if (seen[idx] != 0) {
-      continue;
-    }
-    const Color current = get_pixel(rgba, stride, cx, cy);
-    if (color_chebyshev(current, seed) > tolerance) {
-      continue;
-    }
-    seen[idx] = 1;
-    mask[idx] = 255;
-    any = true;
-    if (cx < minx) minx = cx;
-    if (cy < miny) miny = cy;
-    if (cx > maxx) maxx = cx;
-    if (cy > maxy) maxy = cy;
-    stack.emplace_back(cx + 1, cy);
-    stack.emplace_back(cx - 1, cy);
-    stack.emplace_back(cx, cy + 1);
-    stack.emplace_back(cx, cy - 1);
   }
-  if (any && bounds != nullptr) {
-    *bounds = {minx, miny, maxx - minx + 1, maxy - miny + 1};
+  if (bounds != nullptr) {
+    *bounds = tight;
   }
 }
 

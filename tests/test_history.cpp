@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "doc/commands_layers.hpp"
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "raster/blend.hpp"
@@ -199,6 +200,52 @@ int main() {
     errors += expect(merged.blend() == lundukepaint::BlendMode::Normal, "merged blend is normal");
     errors += expect(merged.offset_x() == 0 && merged.offset_y() == 0, "merged offset is rebased");
     errors += expect(merged.width() == 4 && merged.height() == 3, "merged buffer is the canvas");
+  }
+
+  {
+    auto doc = Document::create(4, 3, Color::transparent(), "Lower");
+    Layer& lower = doc->layers().active_layer();
+    std::vector<std::uint8_t> red(4, 0);
+    red[0] = 255;
+    red[3] = 255;
+    lower.set_pixels(1, 1, red.data(), 4);
+    lower.set_opacity(0.5f);
+    lower.set_offset(1, 1);
+    doc->add_layer();
+    Layer& upper = doc->layers().active_layer();
+    std::vector<std::uint8_t> dot(4, 0);
+    dot[2] = 255;
+    dot[3] = 255;
+    upper.set_pixels(1, 1, dot.data(), 4);
+    upper.set_offset(2, 2);
+    errors += expect(doc->merge_down(), "normal merge down");
+    const Layer& merged = doc->layers().active_layer();
+    errors += expect(merged.blend() == lundukepaint::BlendMode::Normal, "normal merge keeps lower blend");
+    errors += expect(merged.opacity() > 0.49f && merged.opacity() < 0.51f, "normal merge keeps opacity");
+    errors += expect(merged.offset_x() == 1 && merged.offset_y() == 1, "normal merge keeps union origin");
+    errors += expect(merged.width() == 2 && merged.height() == 2, "normal merge is the union");
+  }
+
+  {
+    auto doc = Document::create(2, 1, Color::white(), "Background");
+    doc->layers().active_layer().set_pixel(0, 0, Color{255, 0, 0, 255});
+    lundukepaint::StackXform xform;
+    xform.kind = lundukepaint::StackXformKind::FlipH;
+    xform.old_w = 2;
+    xform.old_h = 1;
+    xform.new_w = 2;
+    xform.new_h = 1;
+    auto cmd = std::make_unique<lundukepaint::AllLayersBufferCommand>(
+        "Flip", doc->snapshot_layers(), 0, xform);
+    doc->commit(std::move(cmd));
+    errors += expect(doc->layers().active_layer().pixel(1, 0) == (Color{255, 0, 0, 255}),
+                     "flip redo via parameters");
+    doc->undo();
+    errors += expect(doc->layers().active_layer().pixel(0, 0) == (Color{255, 0, 0, 255}),
+                     "flip undo restores pre-image");
+    doc->redo();
+    errors += expect(doc->layers().active_layer().pixel(1, 0) == (Color{255, 0, 0, 255}),
+                     "flip redo matches");
   }
 
   if (errors != 0) {

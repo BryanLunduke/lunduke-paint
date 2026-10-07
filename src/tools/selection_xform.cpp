@@ -123,7 +123,7 @@ bool SelectionXform::on_press(ToolHost* host, CanvasEvent event, double zoom) {
     return true;
   }
   if (!sel.floating()) {
-    if (!sel.lift(doc.layers().active_layer())) {
+    if (!sel.lift(doc.layers().active_layer(), doc.layers().active_index())) {
       return true;
     }
   }
@@ -145,7 +145,7 @@ bool SelectionXform::on_press(ToolHost* host, CanvasEvent event, double zoom) {
     host->show_status_hint("Scale selection");
   }
   host->invalidate_canvas(sel.dirty_union());
-  doc.notify_changed();
+  doc.notify_selection();
   return true;
 }
 
@@ -247,12 +247,13 @@ void SelectionXform::on_motion(ToolHost* host, CanvasEvent event) {
     sel.transform_float(nx, ny, cw, ch, std::move(cur));
   }
   host->invalidate_canvas(rect_union(before, sel.dirty_union()));
-  doc.notify_changed();
+  doc.notify_selection();
 }
 
 void SelectionXform::on_release(ToolHost* host) {
   if (host != nullptr && mode_ != Mode::None) {
     host->document().notify_invalidated(host->document().selection().dirty_union());
+    host->document().notify_changed();
   }
   mode_ = Mode::None;
   orig_pixels_.clear();

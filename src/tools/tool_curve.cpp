@@ -100,7 +100,8 @@ void CurveTool::preview() {
   Document& doc = host_->document();
   const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
-  tool.copy_from(active);
+  const Rect previous = dirty_;
+  restore_shape_preview(tool, active, previous);
   dirty_ = {};
   const int ox = active.offset_x();
   const int oy = active.offset_y();
@@ -113,7 +114,8 @@ void CurveTool::preview() {
                       stroke_color(button_), antialias_, &dirty_);
   }
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(
+      layer_dirty_to_canvas(host_->document().layers().active_layer(), rect_union(previous, dirty_)));
 }
 
 void CurveTool::reset() {

@@ -3,6 +3,7 @@
 #define LUNDUKEPAINT_DOC_LAYER_STACK_HPP
 
 #include "doc/layer.hpp"
+#include "io/ora.hpp"
 
 #include <memory>
 #include <string>
@@ -34,9 +35,9 @@ public:
   void clear_tool_layer();
   void copy_active_to_tool();
 
-  Layer& selection_layer();
-  const Layer& selection_layer() const;
-  void clear_selection_layer();
+  // Copies the tree (or clears it). Used so a moved Document does not dangle.
+  void set_ora_stack(const OraNode* node);
+  bool has_ora_stack() const { return has_ora_stack_; }
 
   void replace_active(int width, int height, const std::uint8_t* rgba, int stride);
   void resize_scratch(int width, int height);
@@ -53,7 +54,8 @@ public:
   // If tool_index >= 0, that user layer is replaced by tool_override pixels
   // (same blend/opacity/visibility as the user layer).
   void composite_rect(std::uint8_t* dest, int dest_stride, Rect view,
-                      const Layer* tool_override = nullptr, int tool_index = -1) const;
+                      const Layer* tool_override = nullptr, int tool_index = -1,
+                      int skip_index = -1) const;
   Color composite_pixel(int x, int y, const Layer* tool_override = nullptr,
                         int tool_index = -1, int skip_index = -1) const;
 
@@ -68,10 +70,13 @@ public:
 
 private:
   const Layer* display_layer(int index, const Layer* tool_override, int tool_index) const;
+  void composite_node(const OraNode& node, std::uint8_t* dest, int dest_stride, Rect view,
+                      const Layer* tool_override, int tool_index, int skip_index) const;
 
   std::vector<std::unique_ptr<Layer>> layers_;
   std::unique_ptr<Layer> tool_layer_;
-  std::unique_ptr<Layer> selection_layer_;
+  OraNode ora_stack_{};
+  bool has_ora_stack_ = false;
   int active_ = 0;
   int width_ = 0;
   int height_ = 0;

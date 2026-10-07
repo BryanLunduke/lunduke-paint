@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <glibmm/ustring.h>
+#include <sigc++/connection.h>
 #include <gtkmm/checkbutton.h>
 #include <gtkmm/dialog.h>
 #include <gtkmm/grid.h>
@@ -21,6 +22,7 @@ namespace lundukepaint {
 class LivePreviewDialog : public Gtk::Dialog {
 public:
   LivePreviewDialog(const Glib::ustring& title, Gtk::Window& parent);
+  ~LivePreviewDialog() override;
 
   bool live_preview() const { return live_.get_active(); }
 
@@ -40,6 +42,7 @@ private:
   void fire_preview();
 
   Gtk::CheckButton live_{"Live Preview"};
+  sigc::connection preview_delay_;
 };
 
 class BrightnessContrastDialog : public LivePreviewDialog {

@@ -34,8 +34,11 @@ private:
   bool drawing_ = false;
   unsigned button_ = 1;
   int radius_ = 16;
+  // Left rail sets radius only. Density stays at this constant.
   int density_ = 40;
   std::uint32_t rng_ = 0xA5A5A5A5u;
+  double last_x_ = 0;
+  double last_y_ = 0;
   Rect dirty_{};
 };
 
@@ -79,6 +82,8 @@ void SprayTool::begin_stroke(CanvasEvent event) {
   drawing_ = true;
   button_ = event.button;
   dirty_ = {};
+  last_x_ = event.x;
+  last_y_ = event.y;
   host_->document().layers().copy_active_to_tool();
   stamp_to(event.x, event.y);
 }
@@ -91,10 +96,23 @@ void SprayTool::stamp_to(double x, double y) {
   const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
   const int radius = host_ != nullptr ? host_->spray_radius() : radius_;
-  spray_dots(tool.pixels(), tool.width(), tool.height(), tool.stride(), x - active.offset_x(),
-             y - active.offset_y(), radius, density_, stroke_color(button_), &rng_, &dirty_);
-  clip_rect_to_selection(tool, active, dirty_, doc.selection());
-  host_->invalidate_canvas(layer_dirty_to_canvas(active, dirty_));
+  Rect stamp{};
+  stroke_spray(tool.pixels(), tool.width(), tool.height(), tool.stride(),
+               last_x_ - active.offset_x(), last_y_ - active.offset_y(), x - active.offset_x(),
+               y - active.offset_y(), radius, density_, stroke_color(button_), &rng_, &stamp);
+  dirty_ = rect_union(dirty_, stamp);
+  clip_rect_to_selection(tool, active, stamp, doc.selection());
+  last_x_ = x;
+  last_y_ = y;
+  Rect halo = stamp;
+  if (!halo.empty()) {
+    halo.x -= 1;
+    halo.y -= 1;
+    halo.w += 2;
+    halo.h += 2;
+    halo = rect_intersect(halo, Rect{0, 0, tool.width(), tool.height()});
+  }
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, halo));
 }
 
 void SprayTool::finish_stroke() {

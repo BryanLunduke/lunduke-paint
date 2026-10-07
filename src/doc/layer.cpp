@@ -6,9 +6,12 @@
 #include <cstring>
 
 namespace lundukepaint {
-
+namespace {
+std::uint64_t next_layer_identity = 1;
+}
 Layer::Layer(int width, int height, Color fill, std::string name)
-    : name_(std::move(name)), width_(width), height_(height), stride_(width * 4) {
+    : name_(std::move(name)), width_(width), height_(height), stride_(width * 4),
+      identity_(next_layer_identity++) {
   if (width_ < 1) {
     width_ = 1;
   }
@@ -39,6 +42,11 @@ void Layer::invalidate_thumbnail() {
   thumb_valid_ = false;
 }
 
+void Layer::note_pixels() {
+  ++revision_;
+  thumb_valid_ = false;
+}
+
 Color Layer::pixel(int x, int y) const {
   if (x < 0 || y < 0 || x >= width_ || y >= height_) {
     return Color::transparent();
@@ -58,7 +66,7 @@ void Layer::set_pixel(int x, int y, Color color) {
   p[1] = color.g;
   p[2] = color.b;
   p[3] = color.a;
-  invalidate_thumbnail();
+  note_pixels();
 }
 
 void Layer::fill(Color color) {
@@ -72,12 +80,12 @@ void Layer::fill(Color color) {
       p[3] = color.a;
     }
   }
-  invalidate_thumbnail();
+  note_pixels();
 }
 
 void Layer::clear_transparent() {
   std::fill(pixels_.begin(), pixels_.end(), static_cast<std::uint8_t>(0));
-  invalidate_thumbnail();
+  note_pixels();
 }
 
 void Layer::fill_rect(Rect rect, Color color) {
@@ -95,7 +103,7 @@ void Layer::fill_rect(Rect rect, Color color) {
       p[3] = color.a;
     }
   }
-  invalidate_thumbnail();
+  note_pixels();
 }
 
 void Layer::set_pixels(int width, int height, const std::uint8_t* rgba, int stride) {
@@ -119,7 +127,7 @@ void Layer::set_pixels(int width, int height, const std::uint8_t* rgba, int stri
                 rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride),
                 static_cast<std::size_t>(row_bytes));
   }
-  invalidate_thumbnail();
+  note_pixels();
 }
 
 void Layer::copy_rect_from(const Layer& src, Rect rect) {
@@ -136,7 +144,7 @@ void Layer::copy_rect_from(const Layer& src, Rect rect) {
                       static_cast<std::size_t>(rect.x) * 4;
     std::memcpy(d, s, static_cast<std::size_t>(rect.w) * 4);
   }
-  invalidate_thumbnail();
+  note_pixels();
 }
 
 void Layer::write_rect(Rect rect, const std::uint8_t* rgba) {
@@ -150,7 +158,7 @@ void Layer::write_rect(Rect rect, const std::uint8_t* rgba) {
     const std::uint8_t* s = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(rect.w) * 4;
     std::memcpy(d, s, static_cast<std::size_t>(rect.w) * 4);
   }
-  invalidate_thumbnail();
+  note_pixels();
 }
 
 void Layer::read_rect(Rect rect, std::uint8_t* rgba) const {
@@ -171,7 +179,7 @@ void Layer::copy_from(const Layer& src) {
     return;
   }
   pixels_ = src.pixels_;
-  invalidate_thumbnail();
+  note_pixels();
 }
 
 std::unique_ptr<Layer> Layer::clone() const {

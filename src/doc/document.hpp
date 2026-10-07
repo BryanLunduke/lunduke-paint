@@ -40,6 +40,9 @@ public:
   void clear_ora_stack();
   const OraNode* ora_stack() const;
 
+  // Commits a floating selection onto its source layer, then switches.
+  void set_active_layer(int index);
+
   Color foreground() const { return fg_; }
   Color background() const { return bg_; }
   void set_foreground(Color color);
@@ -97,9 +100,12 @@ public:
 
   void set_on_changed(ChangedFn fn) { on_changed_ = std::move(fn); }
   void set_on_invalidated(InvalidatedFn fn) { on_invalidated_ = std::move(fn); }
+  void set_on_selection(ChangedFn fn) { on_selection_ = std::move(fn); }
 
   void notify_invalidated(Rect rect);
   void notify_changed();
+  // Selection geometry during a drag: status bar only, not the layer/history panels.
+  void notify_selection();
 
 private:
   Document(int width, int height, Color background, std::string layer_name);
@@ -120,6 +126,7 @@ private:
   History history_;
   Selection selection_;
   ChangedFn on_changed_;
+  ChangedFn on_selection_;
   InvalidatedFn on_invalidated_;
 };
 

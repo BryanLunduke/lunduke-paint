@@ -21,6 +21,11 @@
 #include "ui/intro_howdy.hpp"
 #include "tools/tools.hpp"
 
+#include <unistd.h>
+
+#include <mutex>
+#include <thread>
+
 #include <glibmm/error.h>
 #include <giomm/menu.h>
 #include <gtkmm/builder.h>
@@ -67,7 +72,21 @@ Gtk::Button* toolbar_button(const char* icon, const char* tooltip, const char* a
 
 }  // namespace
 
+struct MainWindow::RecoverySlot {
+  std::mutex mu;
+  MainWindow* window = nullptr;
+  bool busy = false;
+  bool pending = false;
+};
+
+struct RecoveryIdle {
+  std::shared_ptr<MainWindow::RecoverySlot> slot;
+};
+
 MainWindow::MainWindow() {
+  recovery_slot_ = std::make_shared<RecoverySlot>();
+  recovery_slot_->window = this;
+  last_edit_us_ = g_get_monotonic_time();
   prefs_.load();
   auto startup = Document::create(prefs_.default_width, prefs_.default_height, Color::white());
   startup->history().set_depth(prefs_.undo_limit);
@@ -201,6 +220,29 @@ MainWindow::MainWindow() {
 
 MainWindow::~MainWindow() {
   recovery_timer_.disconnect();
+  if (recovery_slot_) {
+    std::lock_guard<std::mutex> lock(recovery_slot_->mu);
+    recovery_slot_->window = nullptr;
+  }
+}
+
+gboolean MainWindow::recovery_idle_cb(gpointer data) {
+  std::unique_ptr<RecoveryIdle> args(static_cast<RecoveryIdle*>(data));
+  MainWindow* window = nullptr;
+  bool again = false;
+  {
+    std::lock_guard<std::mutex> lock(args->slot->mu);
+    window = args->slot->window;
+    args->slot->busy = false;
+    again = window != nullptr && args->slot->pending;
+    if (again) {
+      args->slot->pending = false;
+    }
+  }
+  if (again && window != nullptr) {
+    window->start_recovery_save();
+  }
+  return G_SOURCE_REMOVE;
 }
 
 void MainWindow::build_ui() {
@@ -419,7 +461,11 @@ void MainWindow::attach_active_document() {
     }
     document().jump_history(index);
   };
-  document().set_on_changed([this]() { update_chrome(); });
+  document().set_on_changed([this]() {
+    last_edit_us_ = g_get_monotonic_time();
+    update_chrome();
+  });
+  document().set_on_selection([this]() { update_selection_status(); });
   document().set_on_invalidated([this](Rect rect) { canvas_.invalidate_rect(rect); });
   pattern_strip_.set_colors(document().foreground(), document().background());
   update_chrome();
@@ -583,6 +629,38 @@ void MainWindow::on_redo() {
     active_tool_->on_cancel();
   }
   document().redo();
+}
+
+void MainWindow::update_selection_status() {
+  if (document_ptr() == nullptr) {
+    return;
+  }
+  const Selection& sel = document().selection();
+  const bool has_sel = !sel.empty();
+  if (cut_action_) {
+    cut_action_->set_enabled(has_sel);
+  }
+  if (copy_action_) {
+    copy_action_->set_enabled(has_sel);
+  }
+  if (delete_action_) {
+    delete_action_->set_enabled(has_sel);
+  }
+  if (duplicate_action_) {
+    duplicate_action_->set_enabled(has_sel && !sel.inverted());
+  }
+  if (deselect_action_) {
+    deselect_action_->set_enabled(has_sel);
+  }
+  if (crop_action_) {
+    crop_action_->set_enabled(has_sel && !sel.inverted());
+  }
+  if (has_sel) {
+    const Rect b = sel.bounds();
+    status_bar_.set_selection_size(b.w, b.h, true);
+  } else {
+    status_bar_.set_selection_size(0, 0, false);
+  }
 }
 
 void MainWindow::update_chrome() {
@@ -1039,6 +1117,10 @@ void MainWindow::composite_visible(std::vector<std::uint8_t>& dest) const {
   document().layers().composite_rect(dest.data(), w * 4, Rect{0, 0, w, h});
 }
 
+bool MainWindow::confirm_large_canvas(int width, int height) {
+  return warn_size(width, height);
+}
+
 bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
   document().commit_floating();
   if (format == ImageFormat::Ora) {
@@ -1054,6 +1136,16 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
   }
 
   const bool multi = document().layers().count() > 1;
+  std::vector<std::uint8_t> flat;
+  composite_visible(flat);
+  bool transparent = false;
+  const int pixel_count = document().width() * document().height();
+  for (int i = 0; i < pixel_count; ++i) {
+    if (flat[static_cast<std::size_t>(i) * 4 + 3] != 255) {
+      transparent = true;
+      break;
+    }
+  }
   if (multi && format == ImageFormat::Png) {
     Gtk::MessageDialog warn(*this,
                             "PNG will flatten visible layers (alpha is kept).",
@@ -1062,7 +1154,7 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
       return false;
     }
   }
-  if (format == ImageFormat::Jpeg && (layer_has_transparency() || multi)) {
+  if (format == ImageFormat::Jpeg && (transparent || multi)) {
     Gtk::MessageDialog warn(*this,
                             "JPEG cannot store transparency or layers. The image will be flattened onto white.",
                             false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
@@ -1070,7 +1162,7 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
       return false;
     }
   }
-  if (format == ImageFormat::Bmp && (layer_has_transparency() || multi)) {
+  if (format == ImageFormat::Bmp && (transparent || multi)) {
     Gtk::MessageDialog warn(*this,
                             "BMP cannot store transparency or layers. The image will be flattened onto white.",
                             false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
@@ -1078,8 +1170,6 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
       return false;
     }
   }
-  std::vector<std::uint8_t> flat;
-  composite_visible(flat);
   std::string error;
   if (format == ImageFormat::Gif) {
     Gtk::MessageDialog err(*this, "GIF save is not supported.", false, Gtk::MESSAGE_ERROR,
@@ -1502,30 +1592,10 @@ void MainWindow::commit_buffer_change(const char* name, int new_w, int new_h,
   canvas_.invalidate_all();
 }
 
-void MainWindow::commit_stack_transform(const char* name, int new_w, int new_h,
-                                        const std::function<PlacedPixels(const Layer&)>& xform) {
+void MainWindow::commit_stack_transform(const char* name, const StackXform& xform) {
   auto old_layers = document().snapshot_layers();
-  std::vector<LayerSnapshot> new_layers;
-  new_layers.reserve(old_layers.size());
-  for (int i = 0; i < document().layers().count(); ++i) {
-    const Layer& layer = document().layers().at(i);
-    PlacedPixels placed = xform(layer);
-    LayerSnapshot snap = snapshot_layer_props(layer);
-    snap.width = std::max(1, placed.width);
-    snap.height = std::max(1, placed.height);
-    snap.offset_x = placed.offset_x;
-    snap.offset_y = placed.offset_y;
-    snap.pixels = std::move(placed.pixels);
-    if (static_cast<int>(snap.pixels.size()) < snap.width * snap.height * 4) {
-      snap.pixels.resize(static_cast<std::size_t>(snap.width) * static_cast<std::size_t>(snap.height) *
-                         4);
-    }
-    new_layers.push_back(std::move(snap));
-  }
   auto cmd = std::make_unique<AllLayersBufferCommand>(
-      name, document().width(), document().height(), document().layers().active_index(),
-      std::move(old_layers), new_w, new_h, document().layers().active_index(),
-      std::move(new_layers));
+      name, std::move(old_layers), document().layers().active_index(), xform);
   document().commit(std::move(cmd));
   canvas_.refresh_size();
   canvas_.invalidate_all();
@@ -1543,12 +1613,14 @@ void MainWindow::action_canvas_size() {
     return;
   }
   const Color fill = dialog.fill_color(document().background());
-  const int ow = document().width();
-  const int oh = document().height();
-  commit_stack_transform("Canvas size", nw, nh, [&](const Layer& layer) {
-    return place_resize_canvas(layer.pixels(), layer.width(), layer.height(), layer.stride(),
-                               layer.offset_x(), layer.offset_y(), ow, oh, nw, nh, fill);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::ResizeCanvas;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = nw;
+  xform.new_h = nh;
+  xform.fill = fill;
+  commit_stack_transform("Canvas size", xform);
 }
 
 void MainWindow::action_scale() {
@@ -1562,13 +1634,14 @@ void MainWindow::action_scale() {
   if (!warn_size(nw, nh)) {
     return;
   }
-  const bool nearest = dialog.nearest();
-  const int ow = document().width();
-  const int oh = document().height();
-  commit_stack_transform("Scale", nw, nh, [&](const Layer& layer) {
-    return place_scale(layer.pixels(), layer.width(), layer.height(), layer.stride(),
-                       layer.offset_x(), layer.offset_y(), ow, oh, nw, nh, nearest);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::Scale;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = nw;
+  xform.new_h = nh;
+  xform.nearest = dialog.nearest();
+  commit_stack_transform("Scale", xform);
 }
 
 void MainWindow::action_crop() {
@@ -1581,10 +1654,14 @@ void MainWindow::action_crop() {
   if (r.empty()) {
     return;
   }
-  commit_stack_transform("Crop", r.w, r.h, [&](const Layer& layer) {
-    return place_crop(layer.pixels(), layer.width(), layer.height(), layer.stride(), layer.offset_x(),
-                      layer.offset_y(), r);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::Crop;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = r.w;
+  xform.new_h = r.h;
+  xform.crop = r;
+  commit_stack_transform("Crop", xform);
 }
 
 void MainWindow::action_autocrop() {
@@ -1597,63 +1674,69 @@ void MainWindow::action_autocrop() {
     return;
   }
   const Rect r{local.x + layer.offset_x(), local.y + layer.offset_y(), local.w, local.h};
-  commit_stack_transform("Autocrop", r.w, r.h, [&](const Layer& L) {
-    return place_crop(L.pixels(), L.width(), L.height(), L.stride(), L.offset_x(), L.offset_y(), r);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::Crop;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = r.w;
+  xform.new_h = r.h;
+  xform.crop = r;
+  commit_stack_transform("Autocrop", xform);
 }
 
 void MainWindow::action_rotate_90() {
   document().commit_floating();
-  const int nw = document().height();
-  const int nh = document().width();
-  const int ow = document().width();
-  const int oh = document().height();
-  commit_stack_transform("Rotate 90", nw, nh, [&](const Layer& layer) {
-    return place_rotate_90_cw(layer.pixels(), layer.width(), layer.height(), layer.stride(),
-                              layer.offset_x(), layer.offset_y(), ow, oh);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::Rotate90;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = document().height();
+  xform.new_h = document().width();
+  commit_stack_transform("Rotate 90", xform);
 }
 
 void MainWindow::action_rotate_180() {
   document().commit_floating();
-  const int w = document().width();
-  const int h = document().height();
-  commit_stack_transform("Rotate 180", w, h, [&](const Layer& layer) {
-    return place_rotate_180(layer.pixels(), layer.width(), layer.height(), layer.stride(),
-                            layer.offset_x(), layer.offset_y(), w, h);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::Rotate180;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = xform.old_w;
+  xform.new_h = xform.old_h;
+  commit_stack_transform("Rotate 180", xform);
 }
 
 void MainWindow::action_rotate_ccw() {
   document().commit_floating();
-  const int nw = document().height();
-  const int nh = document().width();
-  const int ow = document().width();
-  const int oh = document().height();
-  commit_stack_transform("Rotate 270", nw, nh, [&](const Layer& layer) {
-    return place_rotate_90_ccw(layer.pixels(), layer.width(), layer.height(), layer.stride(),
-                               layer.offset_x(), layer.offset_y(), ow, oh);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::Rotate270;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = document().height();
+  xform.new_h = document().width();
+  commit_stack_transform("Rotate 270", xform);
 }
 
 void MainWindow::action_flip_h() {
   document().commit_floating();
-  const int w = document().width();
-  const int h = document().height();
-  commit_stack_transform("Flip horizontal", w, h, [&](const Layer& layer) {
-    return place_flip_h(layer.pixels(), layer.width(), layer.height(), layer.stride(),
-                        layer.offset_x(), layer.offset_y(), w, h);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::FlipH;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = xform.old_w;
+  xform.new_h = xform.old_h;
+  commit_stack_transform("Flip horizontal", xform);
 }
 
 void MainWindow::action_flip_v() {
   document().commit_floating();
-  const int w = document().width();
-  const int h = document().height();
-  commit_stack_transform("Flip vertical", w, h, [&](const Layer& layer) {
-    return place_flip_v(layer.pixels(), layer.width(), layer.height(), layer.stride(),
-                        layer.offset_x(), layer.offset_y(), w, h);
-  });
+  StackXform xform;
+  xform.kind = StackXformKind::FlipV;
+  xform.old_w = document().width();
+  xform.old_h = document().height();
+  xform.new_w = xform.old_w;
+  xform.new_h = xform.old_h;
+  commit_stack_transform("Flip vertical", xform);
 }
 
 void MainWindow::action_clear() {
@@ -1716,6 +1799,12 @@ void MainWindow::action_layer_lower() {
 }
 
 void MainWindow::action_layer_merge_down() {
+  if (document().width() > kSoftMaxSide || document().height() > kSoftMaxSide) {
+    show_status("Merging layers…");
+    while (g_main_context_pending(nullptr)) {
+      g_main_context_iteration(nullptr, false);
+    }
+  }
   if (!document().merge_down()) {
     show_status("Nothing below to merge");
     return;
@@ -2220,18 +2309,66 @@ void MainWindow::offer_recovery() {
   }
 }
 
-bool MainWindow::on_recovery_tick() {
-  if (document_ptr() == nullptr) {
-    return true;
+void MainWindow::start_recovery_save() {
+  if (!recovery_slot_ || document_ptr() == nullptr || !document().dirty()) {
+    return;
   }
   if (document().selection().floating()) {
-    document().commit_floating();
+    return;
   }
-  if (!document().dirty()) {
+  if (active_tool_ != nullptr && active_tool_->is_stroking()) {
+    return;
+  }
+  const bool large = document().width() > 2048 || document().height() > 2048;
+  const gint64 now = g_get_monotonic_time();
+  const bool idle_long = last_edit_us_ == 0 || (now - last_edit_us_) >= 120LL * G_USEC_PER_SEC;
+  OraSnapshot snapshot = capture_ora_snapshot(document(), !large || idle_long);
+  {
+    std::lock_guard<std::mutex> lock(recovery_slot_->mu);
+    if (recovery_slot_->window == nullptr) {
+      return;
+    }
+    if (recovery_slot_->busy) {
+      recovery_slot_->pending = true;
+      return;
+    }
+    recovery_slot_->busy = true;
+  }
+  auto slot = recovery_slot_;
+  const std::string dest = crash_recovery::autosave_path();
+  try {
+    std::thread([slot, snapshot = std::move(snapshot), dest]() mutable {
+      g_mkdir_with_parents(crash_recovery::state_dir().c_str(), 0755);
+      const std::string tmp = dest + ".tmp";
+      std::string error;
+      if (!save_ora_snapshot(tmp, snapshot, error) || rename(tmp.c_str(), dest.c_str()) != 0) {
+        unlink(tmp.c_str());
+      }
+      g_idle_add(&MainWindow::recovery_idle_cb, new RecoveryIdle{slot});
+    }).detach();
+  } catch (...) {
+    std::lock_guard<std::mutex> lock(recovery_slot_->mu);
+    recovery_slot_->busy = false;
+  }
+}
+
+bool MainWindow::on_recovery_tick() {
+  if (document_ptr() == nullptr || !document().dirty()) {
     return true;
   }
-  std::string error;
-  crash_recovery::write_document(document(), error);
+  // Never commit a float or interrupt a stroke to write recovery.
+  if (document().selection().floating() ||
+      (active_tool_ != nullptr && active_tool_->is_stroking())) {
+    return true;
+  }
+  if (recovery_slot_) {
+    std::lock_guard<std::mutex> lock(recovery_slot_->mu);
+    if (recovery_slot_->busy) {
+      recovery_slot_->pending = true;
+      return true;
+    }
+  }
+  start_recovery_save();
   return true;
 }
 

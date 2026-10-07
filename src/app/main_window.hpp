@@ -3,6 +3,7 @@
 #define LUNDUKEPAINT_APP_MAIN_WINDOW_HPP
 
 #include "app/preferences.hpp"
+#include "doc/commands_layers.hpp"
 #include "doc/document.hpp"
 #include "doc/effect_preview.hpp"
 #include "doc/workspace.hpp"
@@ -38,6 +39,7 @@
 namespace lundukepaint {
 
 class LivePreviewDialog;
+struct RecoveryIdle;
 
 class MainWindow : public Gtk::ApplicationWindow, public ToolHost {
 public:
@@ -84,8 +86,10 @@ public:
   bool canvas_to_screen(int canvas_x, int canvas_y, int& screen_x, int& screen_y) override;
   double canvas_zoom() const override { return canvas_.zoom(); }
   Gtk::Window* host_window() override { return this; }
+  bool confirm_large_canvas(int width, int height) override;
 
   void update_chrome();
+  void update_selection_status();
   void on_undo();
   void on_redo();
   void action_cut();
@@ -161,8 +165,9 @@ private:
   bool on_delete_event(GdkEventAny* event) override;
   void commit_buffer_change(const char* name, int new_w, int new_h, const std::uint8_t* rgba,
                             int stride);
-  void commit_stack_transform(const char* name, int new_w, int new_h,
-                              const std::function<PlacedPixels(const Layer&)>& xform);
+  void commit_stack_transform(const char* name, const StackXform& xform);
+  void start_recovery_save();
+  static gboolean recovery_idle_cb(gpointer data);
   bool warn_size(int width, int height);
   void copy_selection_to_clipboard();
   void copy_merged_to_clipboard();
@@ -211,6 +216,10 @@ private:
   int spray_radius_{16};
   int jpeg_quality_{90};
   bool intro_played_{false};
+  friend struct RecoveryIdle;
+  struct RecoverySlot;
+  std::shared_ptr<RecoverySlot> recovery_slot_;
+  gint64 last_edit_us_{0};
   Glib::RefPtr<Gio::SimpleAction> undo_action_;
   Glib::RefPtr<Gio::SimpleAction> redo_action_;
   Glib::RefPtr<Gio::SimpleAction> cut_action_;

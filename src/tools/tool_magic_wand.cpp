@@ -77,27 +77,22 @@ void MagicWandTool::on_press(CanvasEvent event) {
     return;
   }
   const Layer& layer = doc.layers().active_layer();
+  if ((layer.width() > kSoftMaxSide || layer.height() > kSoftMaxSide) &&
+      !host_->confirm_large_canvas(layer.width(), layer.height())) {
+    return;
+  }
   const int lx = x - layer.offset_x();
   const int ly = y - layer.offset_y();
-  std::vector<std::uint8_t> full;
+  std::vector<std::uint8_t> tight;
   Rect bounds{};
   flood_mask(layer.pixels(), layer.width(), layer.height(), layer.stride(), lx, ly, tolerance_,
-             full, &bounds);
+             tight, &bounds);
   if (bounds.empty()) {
     const Rect dirty = doc.selection().bounds();
     doc.selection().clear();
     host_->invalidate_canvas(dirty);
     doc.notify_changed();
     return;
-  }
-  std::vector<std::uint8_t> tight(static_cast<std::size_t>(bounds.w) *
-                                      static_cast<std::size_t>(bounds.h),
-                                  0);
-  for (int yy = 0; yy < bounds.h; ++yy) {
-    for (int xx = 0; xx < bounds.w; ++xx) {
-      const int src = (bounds.y + yy) * layer.width() + (bounds.x + xx);
-      tight[static_cast<std::size_t>(yy) * bounds.w + static_cast<std::size_t>(xx)] = full[src];
-    }
   }
   bounds.x += layer.offset_x();
   bounds.y += layer.offset_y();

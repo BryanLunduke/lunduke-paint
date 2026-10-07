@@ -311,4 +311,23 @@ void spray_dots(std::uint8_t* rgba, int width, int height, int stride, double cx
   }
 }
 
+void stroke_spray(std::uint8_t* rgba, int width, int height, int stride, double x0, double y0,
+                  double x1, double y1, int radius, int density, Color color, std::uint32_t* rng,
+                  Rect* dirty) {
+  const double dx = x1 - x0;
+  const double dy = y1 - y0;
+  const double len = std::sqrt(dx * dx + dy * dy);
+  const double step = std::max(1.0, static_cast<double>(std::max(1, radius)) / 4.0);
+  if (len < 0.001) {
+    spray_dots(rgba, width, height, stride, x0, y0, radius, density, color, rng, dirty);
+    return;
+  }
+  const int n = std::max(1, static_cast<int>(std::ceil(len / step)));
+  for (int i = 0; i <= n; ++i) {
+    const double t = static_cast<double>(i) / static_cast<double>(n);
+    spray_dots(rgba, width, height, stride, x0 + dx * t, y0 + dy * t, radius, density, color, rng,
+               dirty);
+  }
+}
+
 }  // namespace lundukepaint

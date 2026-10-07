@@ -5,12 +5,18 @@
 #include "raster/types.hpp"
 #include "tools/tool.hpp"
 
+#include <cairomm/path.h>
+#include <cairomm/pattern.h>
+#include <cairomm/surface.h>
 #include <glibmm/refptr.h>
 #include <gtkmm/drawingarea.h>
 #include <gtkmm/layout.h>
 #include <gtkmm/scrolledwindow.h>
 #include <sigc++/connection.h>
 #include <sigc++/signal.h>
+
+#include <memory>
+#include <vector>
 
 namespace lundukepaint {
 
@@ -93,8 +99,10 @@ private:
   void update_area_size();
   unsigned modifiers_from_state(guint state) const;
   CanvasEvent make_event(double widget_x, double widget_y, unsigned button, guint state) const;
-  void begin_pan(double widget_x, double widget_y);
-  void update_pan(double widget_x, double widget_y);
+  void begin_pan(double root_x, double root_y);
+  void update_pan(double root_x, double root_y);
+  void rebuild_checker();
+  void rebuild_ants();
   double snapped_zoom(double zoom) const;
   void visible_center(double& x, double& y) const;
   int margin() const { return 24; }
@@ -122,6 +130,15 @@ private:
   int grid_threshold_{400};
   int ants_phase_{0};
   sigc::connection ants_timer_;
+  std::unique_ptr<Cairo::Path> ants_path_;
+  std::vector<Rect> ants_halos_;
+  unsigned ants_generation_{0};
+  int area_move_x_{0};
+  int area_move_y_{0};
+  Cairo::RefPtr<Cairo::ImageSurface> blit_surface_;
+  int blit_w_{0};
+  int blit_h_{0};
+  Cairo::RefPtr<Cairo::SurfacePattern> checker_pattern_;
   bool space_down_{false};
   bool panning_{false};
   double pan_start_x_{0};
