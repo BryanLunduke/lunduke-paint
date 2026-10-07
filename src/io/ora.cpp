@@ -14,7 +14,9 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <sstream>
+#include <utility>
 
 namespace lundukepaint {
 namespace {
@@ -313,6 +315,21 @@ void remap_layer_indices(OraNode& node, int count) {
   }
 }
 
+bool group_affects_load(const OraNode& node) {
+  if (!node.is_stack) {
+    return false;
+  }
+  if (!node.visible || node.opacity < 0.999f || node.blend != BlendMode::Normal) {
+    return true;
+  }
+  for (const OraNode& child : node.children) {
+    if (group_affects_load(child)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void bake_group_offsets(const OraNode& node, int ancestor_x, int ancestor_y,
                         std::vector<LayerSnapshot>& layers) {
   if (node.is_stack) {
@@ -331,11 +348,14 @@ void bake_group_offsets(const OraNode& node, int ancestor_x, int ancestor_y,
 
 }  // namespace
 
-bool save_ora(const std::string& path, const Document& document, std::string& error) {
-  if (document.width() < 1 || document.height() < 1 || document.layers().count() < 1) {
-    error = "Nothing to save";
-    return false;
-  }
+struct OraFileParts {
+  std::string stack_xml;
+  std::vector<std::vector<std::uint8_t>> layer_pngs;
+  std::vector<std::uint8_t> merged_png;
+  std::vector<std::uint8_t> thumb_png;
+};
+
+bool write_ora_parts(const std::string& path, const OraFileParts& parts, std::string& error) {
   archive* a = archive_write_new();
   if (a == nullptr) {
     error = "Could not allocate archive writer";
@@ -356,22 +376,15 @@ bool save_ora(const std::string& path, const Document& document, std::string& er
   }
   archive_write_zip_set_compression_deflate(a);
 
-  const std::string stack_xml = make_stack_xml(document);
-  if (!write_zip_entry(a, "stack.xml", stack_xml.data(), stack_xml.size())) {
+  if (!write_zip_entry(a, "stack.xml", parts.stack_xml.data(), parts.stack_xml.size())) {
     error = archive_err(a, "Could not write stack.xml");
     archive_write_free(a);
     return false;
   }
 
-  for (int i = 0; i < document.layers().count(); ++i) {
-    const Layer& layer = document.layers().at(i);
-    std::vector<std::uint8_t> png;
-    if (!encode_png_memory(layer.pixels(), layer.width(), layer.height(), layer.stride(), png,
-                           error)) {
-      archive_write_free(a);
-      return false;
-    }
+  for (std::size_t i = 0; i < parts.layer_pngs.size(); ++i) {
     const std::string name = "data/layer-" + std::to_string(i) + ".png";
+    const std::vector<std::uint8_t>& png = parts.layer_pngs[i];
     if (!write_zip_entry(a, name.c_str(), png.data(), png.size())) {
       error = archive_err(a, "Could not write layer PNG");
       archive_write_free(a);
@@ -379,51 +392,19 @@ bool save_ora(const std::string& path, const Document& document, std::string& er
     }
   }
 
-  std::vector<std::uint8_t> merged(
-      static_cast<std::size_t>(document.width()) * static_cast<std::size_t>(document.height()) * 4,
-      0);
-  document.layers().composite_rect(merged.data(), document.width() * 4,
-                                   Rect{0, 0, document.width(), document.height()});
-  std::vector<std::uint8_t> merged_png;
-  if (!encode_png_memory(merged.data(), document.width(), document.height(), document.width() * 4,
-                         merged_png, error)) {
-    archive_write_free(a);
-    return false;
-  }
-  if (!write_zip_entry(a, "mergedimage.png", merged_png.data(), merged_png.size())) {
-    error = archive_err(a, "Could not write mergedimage.png");
-    archive_write_free(a);
-    return false;
-  }
-
-  int tw = document.width();
-  int th = document.height();
-  if (tw > 256 || th > 256) {
-    if (tw >= th) {
-      th = std::max(1, th * 256 / tw);
-      tw = 256;
-    } else {
-      tw = std::max(1, tw * 256 / th);
-      th = 256;
+  if (!parts.merged_png.empty()) {
+    if (!write_zip_entry(a, "mergedimage.png", parts.merged_png.data(), parts.merged_png.size())) {
+      error = archive_err(a, "Could not write mergedimage.png");
+      archive_write_free(a);
+      return false;
     }
   }
-  std::vector<std::uint8_t> thumb(
-      static_cast<std::size_t>(tw) * static_cast<std::size_t>(th) * 4, 0);
-  if (tw == document.width() && th == document.height()) {
-    thumb = merged;
-  } else {
-    scale_bilinear(merged.data(), document.width(), document.height(), document.width() * 4,
-                   thumb.data(), tw, th, tw * 4);
-  }
-  std::vector<std::uint8_t> thumb_png;
-  if (!encode_png_memory(thumb.data(), tw, th, tw * 4, thumb_png, error)) {
-    archive_write_free(a);
-    return false;
-  }
-  if (!write_zip_entry(a, "Thumbnails/thumbnail.png", thumb_png.data(), thumb_png.size())) {
-    error = archive_err(a, "Could not write Thumbnails/thumbnail.png");
-    archive_write_free(a);
-    return false;
+  if (!parts.thumb_png.empty()) {
+    if (!write_zip_entry(a, "Thumbnails/thumbnail.png", parts.thumb_png.data(), parts.thumb_png.size())) {
+      error = archive_err(a, "Could not write Thumbnails/thumbnail.png");
+      archive_write_free(a);
+      return false;
+    }
   }
 
   if (archive_write_close(a) != ARCHIVE_OK) {
@@ -433,6 +414,150 @@ bool save_ora(const std::string& path, const Document& document, std::string& er
   }
   archive_write_free(a);
   return true;
+}
+
+namespace {
+
+std::mutex g_png_cache_mu;
+std::map<std::pair<std::uint64_t, std::uint64_t>, std::vector<std::uint8_t>> g_png_cache;
+
+std::vector<std::uint8_t> png_for_pixels(std::uint64_t identity, std::uint64_t revision,
+                                        const std::uint8_t* pixels, int width, int height,
+                                        int stride, std::string& error) {
+  const auto key = std::make_pair(identity, revision);
+  if (identity != 0) {
+    std::lock_guard<std::mutex> lock(g_png_cache_mu);
+    const auto it = g_png_cache.find(key);
+    if (it != g_png_cache.end()) {
+      return it->second;
+    }
+  }
+  std::vector<std::uint8_t> png;
+  if (!encode_png_memory(pixels, width, height, stride, png, error)) {
+    return {};
+  }
+  if (identity != 0) {
+    std::lock_guard<std::mutex> lock(g_png_cache_mu);
+    if (g_png_cache.size() > 64) {
+      g_png_cache.clear();
+    }
+    g_png_cache[key] = png;
+  }
+  return png;
+}
+
+void encode_merged(const OraSnapshot& snapshot, std::vector<std::uint8_t>& merged_png,
+                   std::vector<std::uint8_t>& thumb_png, std::string& error) {
+  if (!snapshot.write_merged || snapshot.width < 1 || snapshot.height < 1) {
+    return;
+  }
+  std::vector<std::uint8_t> merged(static_cast<std::size_t>(snapshot.width) *
+                                       static_cast<std::size_t>(snapshot.height) * 4,
+                                   0);
+  const Rect view{0, 0, snapshot.width, snapshot.height};
+  for (const OraSnapshotLayer& layer : snapshot.layers) {
+    if (!layer.visible || layer.pixels.empty()) {
+      continue;
+    }
+    blend_layer_rect(merged.data(), snapshot.width, snapshot.height, snapshot.width * 4,
+                     layer.pixels.data(), layer.width, layer.height, layer.stride, layer.offset_x,
+                     layer.offset_y, view, layer.blend, layer.opacity);
+  }
+  if (!encode_png_memory(merged.data(), snapshot.width, snapshot.height, snapshot.width * 4,
+                         merged_png, error)) {
+    return;
+  }
+  int tw = snapshot.width;
+  int th = snapshot.height;
+  if (tw > 256 || th > 256) {
+    if (tw >= th) {
+      th = std::max(1, th * 256 / tw);
+      tw = 256;
+    } else {
+      tw = std::max(1, tw * 256 / th);
+      th = 256;
+    }
+  }
+  std::vector<std::uint8_t> thumb(static_cast<std::size_t>(tw) * static_cast<std::size_t>(th) * 4, 0);
+  if (tw == snapshot.width && th == snapshot.height) {
+    thumb = merged;
+  } else {
+    scale_bilinear(merged.data(), snapshot.width, snapshot.height, snapshot.width * 4, thumb.data(),
+                   tw, th, tw * 4);
+  }
+  encode_png_memory(thumb.data(), tw, th, tw * 4, thumb_png, error);
+}
+
+}  // namespace
+
+bool save_ora(const std::string& path, const Document& document, std::string& error) {
+  if (document.width() < 1 || document.height() < 1 || document.layers().count() < 1) {
+    error = "Nothing to save";
+    return false;
+  }
+  OraSnapshot snapshot = capture_ora_snapshot(document, true);
+  return save_ora_snapshot(path, snapshot, error);
+}
+
+OraSnapshot capture_ora_snapshot(const Document& document, bool write_merged) {
+  OraSnapshot snapshot;
+  snapshot.width = document.width();
+  snapshot.height = document.height();
+  snapshot.write_merged = write_merged;
+  snapshot.stack_xml = make_stack_xml(document);
+  snapshot.layers.reserve(static_cast<std::size_t>(document.layers().count()));
+  for (int i = 0; i < document.layers().count(); ++i) {
+    const Layer& layer = document.layers().at(i);
+    OraSnapshotLayer item;
+    item.identity = layer.identity();
+    item.revision = layer.revision();
+    item.name = layer.name();
+    item.visible = layer.visible();
+    item.locked = layer.locked();
+    item.opacity = layer.opacity();
+    item.blend = layer.blend();
+    item.offset_x = layer.offset_x();
+    item.offset_y = layer.offset_y();
+    item.width = layer.width();
+    item.height = layer.height();
+    item.stride = layer.stride();
+    item.pixels.assign(layer.pixels(),
+                       layer.pixels() + static_cast<std::size_t>(layer.stride()) *
+                                            static_cast<std::size_t>(layer.height()));
+    snapshot.layers.push_back(std::move(item));
+  }
+  return snapshot;
+}
+
+bool save_ora_snapshot(const std::string& path, const OraSnapshot& snapshot, std::string& error) {
+  if (snapshot.width < 1 || snapshot.height < 1 || snapshot.layers.empty()) {
+    error = "Nothing to save";
+    return false;
+  }
+  OraFileParts parts;
+  parts.stack_xml = snapshot.stack_xml;
+  parts.layer_pngs.reserve(snapshot.layers.size());
+  for (const OraSnapshotLayer& layer : snapshot.layers) {
+    std::vector<std::uint8_t> png =
+        png_for_pixels(layer.identity, layer.revision, layer.pixels.data(), layer.width, layer.height,
+                       layer.stride, error);
+    if (png.empty()) {
+      if (error.empty()) {
+        error = "Could not encode layer PNG";
+      }
+      return false;
+    }
+    parts.layer_pngs.push_back(std::move(png));
+  }
+  encode_merged(snapshot, parts.merged_png, parts.thumb_png, error);
+  if (snapshot.write_merged && parts.merged_png.empty()) {
+    if (error.empty()) {
+      error = "Could not encode merged image";
+    }
+    return false;
+  }
+  error.clear();
+  return write_ora_parts(path, parts, error);
 }
 
 bool load_ora_preview_png(const std::string& path, std::vector<std::uint8_t>& png) {
@@ -583,9 +708,11 @@ LoadedOra load_ora(const std::string& path) {
   const int count = static_cast<int>(top_to_bottom.size());
   std::reverse(top_to_bottom.begin(), top_to_bottom.end());
   remap_layer_indices(root, count);
-  if (nested) {
-    bake_group_offsets(root, 0, 0, top_to_bottom);
-    out.nested_groups = true;
+  // Root x/y applies even when the file has a single stack and no nested groups.
+  bake_group_offsets(root, 0, 0, top_to_bottom);
+  const bool keep_tree = nested || root.x != 0 || root.y != 0 || group_affects_load(root);
+  if (keep_tree) {
+    out.nested_groups = nested;
     out.stack = std::move(root);
   }
   out.layers = std::move(top_to_bottom);

@@ -128,7 +128,7 @@ void LassoTool::preview_path() {
                        false);
   sel.set_mask({minx, miny, w, h}, std::move(mask));
   host_->invalidate_canvas(rect_union(before, sel.bounds()));
-  host_->document().notify_changed();
+  host_->document().notify_selection();
 }
 
 void LassoTool::finish_path() {
@@ -214,7 +214,7 @@ void LassoTool::on_press(CanvasEvent event) {
       return;
     }
     if (!sel.floating()) {
-      sel.lift(doc.layers().active_layer());
+      sel.lift(doc.layers().active_layer(), doc.layers().active_index());
     }
     sel.set_copy_mode(sel.copy_mode() || ctrl);
     moving_ = true;
@@ -223,7 +223,7 @@ void LassoTool::on_press(CanvasEvent event) {
     grab_dy_ = y - sel.float_y();
     prev_dirty_ = sel.dirty_union();
     host_->invalidate_canvas(prev_dirty_);
-    doc.notify_changed();
+    doc.notify_selection();
     return;
   }
 
@@ -256,7 +256,7 @@ void LassoTool::on_motion(CanvasEvent event) {
     const Rect before = sel.dirty_union();
     sel.move_float(x - grab_dx_, y - grab_dy_);
     host_->invalidate_canvas(rect_union(before, sel.dirty_union()));
-    doc.notify_changed();
+    doc.notify_selection();
     return;
   }
   if (dragging_) {
@@ -277,6 +277,7 @@ void LassoTool::on_release(CanvasEvent event) {
     }
     if (host_ != nullptr) {
       host_->document().notify_invalidated(host_->document().selection().dirty_union());
+      host_->document().notify_changed();
     }
     return;
   }

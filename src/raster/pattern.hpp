@@ -29,10 +29,11 @@ inline constexpr int kPatternCount = 38;
 const Pattern& pattern_at(int index);
 int clamp_pattern_index(int index);
 
-// Apply an 8×8 pattern over a 0/255 mask (same size as width*height).
+// Apply an 8×8 pattern over a 0/255 mask. The mask covers
+// [mask_x, mask_x+mask_w) × [mask_y, mask_y+mask_h) in buffer space.
 void apply_pattern_mask(std::uint8_t* rgba, int width, int height, int stride,
-                        const std::uint8_t* mask, const Pattern& pattern, Color fg, Color bg,
-                        Rect* dirty);
+                        const std::uint8_t* mask, int mask_x, int mask_y, int mask_w, int mask_h,
+                        const Pattern& pattern, Color fg, Color bg, Rect* dirty);
 
 }  // namespace lundukepaint
 

@@ -177,8 +177,7 @@ void LayersPanel::on_row_selected(Gtk::ListBoxRow* row) {
     return;
   }
   if (auto* layer_row = dynamic_cast<const LayerRow*>(row)) {
-    document_->layers().set_active_index(layer_row->stack_index);
-    document_->notify_changed();
+    document_->set_active_layer(layer_row->stack_index);
   }
 }
 
@@ -341,8 +340,7 @@ void LayersPanel::popup_row_menu(int stack_index, GdkEventButton* event) {
   if (document_ == nullptr) {
     return;
   }
-  document_->layers().set_active_index(stack_index);
-  document_->notify_changed();
+  document_->set_active_layer(stack_index);
 
   auto menu = std::make_shared<Gtk::Menu>();
   auto add_item = [&](const char* label, std::function<void()> fn) {

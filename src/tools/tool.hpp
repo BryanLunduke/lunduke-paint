@@ -18,6 +18,11 @@ class Window;
 namespace lundukepaint {
 
 class Document;
+class Layer;
+
+// Put the active layer's pixels back into the tool layer for the previous
+// preview rect. The full-layer copy happens once, on press.
+void restore_shape_preview(Layer& tool, const Layer& active, Rect previous);
 
 struct CanvasEvent {
   double x = 0;
@@ -63,6 +68,8 @@ public:
   virtual void set_brush_tip(int /*index*/) {}
   virtual int spray_radius() const { return 16; }
   virtual void set_spray_radius(int /*radius*/) {}
+  // False cancels a flood fill or magic wand on a canvas past the soft size limit.
+  virtual bool confirm_large_canvas(int /*width*/, int /*height*/) { return true; }
 };
 
 

@@ -37,14 +37,60 @@ void Document::mark_clean() {
   set_dirty(false);
 }
 
+namespace {
+
+void bake_group_appearance(const OraNode& node, float opacity, bool visible, LayerStack& layers) {
+  if (!node.is_stack) {
+    if (node.layer_index < 0 || node.layer_index >= layers.count()) {
+      return;
+    }
+    Layer& layer = layers.at(node.layer_index);
+    float next = layer.opacity() * opacity;
+    if (next < 0.0f) {
+      next = 0.0f;
+    }
+    if (next > 1.0f) {
+      next = 1.0f;
+    }
+    layer.set_opacity(next);
+    if (!visible) {
+      layer.set_visible(false);
+    }
+    return;
+  }
+  const float child_opacity = opacity * node.opacity;
+  const bool child_visible = visible && node.visible;
+  for (const OraNode& child : node.children) {
+    bake_group_appearance(child, child_opacity, child_visible, layers);
+  }
+}
+
+}  // namespace
+
 void Document::set_ora_stack(OraNode node) {
   ora_stack_ = std::move(node);
   has_ora_stack_ = true;
+  layers_.set_ora_stack(&ora_stack_);
 }
 
 void Document::clear_ora_stack() {
+  if (has_ora_stack_) {
+    bake_group_appearance(ora_stack_, 1.0f, true, layers_);
+  }
   has_ora_stack_ = false;
   ora_stack_ = {};
+  layers_.set_ora_stack(nullptr);
+}
+
+void Document::set_active_layer(int index) {
+  if (index < 0 || index >= layers_.count() || index == layers_.active_index()) {
+    return;
+  }
+  if (selection_.floating()) {
+    commit_floating();
+  }
+  layers_.set_active_index(index);
+  notify_changed();
 }
 
 const OraNode* Document::ora_stack() const {
@@ -143,6 +189,12 @@ void Document::notify_changed() {
   }
 }
 
+void Document::notify_selection() {
+  if (on_selection_) {
+    on_selection_();
+  }
+}
+
 
 void Document::select_all() {
   commit_floating();
@@ -174,21 +226,36 @@ bool Document::commit_floating(const char* name) {
   if (!selection_.floating()) {
     return false;
   }
-  if (layers_.active_layer().locked()) {
+  int index = selection_.source_layer();
+  if (index < 0 || index >= layers_.count()) {
+    index = layers_.active_index();
+  }
+  if (index < 0 || index >= layers_.count() || layers_.at(index).locked()) {
     return false;
   }
-  Layer& layer = layers_.active_layer();
+  Layer& layer = layers_.at(index);
+  const int ox = layer.offset_x();
+  const int oy = layer.offset_y();
+  const Rect layer_bounds{0, 0, layer.width(), layer.height()};
   Layer before(layer.width(), layer.height(), Color::transparent(), "before");
   before.copy_from(layer);
-  Rect dirty = selection_.dirty_union();
+  before.set_offset(ox, oy);
+  Rect dirty{};
   if (!selection_.copy_mode()) {
-    layer.fill_rect(selection_.origin_rect(), Color::transparent());
-    dirty = rect_union(dirty, selection_.origin_rect());
+    const Rect origin_canvas = selection_.origin_rect();
+    const Rect origin_layer =
+        rect_intersect(Rect{origin_canvas.x - ox, origin_canvas.y - oy, origin_canvas.w, origin_canvas.h},
+                       layer_bounds);
+    if (!origin_layer.empty()) {
+      layer.fill_rect(origin_layer, Color::transparent());
+      dirty = origin_layer;
+    }
   }
-  blit_rgba(layer, selection_.float_x(), selection_.float_y(), selection_.float_pixels(),
-            selection_.float_w(), selection_.float_h(), selection_.float_w() * 4,
-            selection_.transparent_move());
-  dirty = rect_union(dirty, selection_.float_rect());
+  const Rect float_layer{selection_.float_x() - ox, selection_.float_y() - oy, selection_.float_w(),
+                         selection_.float_h()};
+  blit_rgba(layer, float_layer.x, float_layer.y, selection_.float_pixels(), selection_.float_w(),
+            selection_.float_h(), selection_.float_w() * 4, selection_.transparent_move());
+  dirty = rect_union(dirty, rect_intersect(float_layer, layer_bounds));
   const Rect kept = selection_.float_rect();
   const bool transparent = selection_.transparent_move();
   selection_.drop_float();
@@ -198,11 +265,14 @@ bool Document::commit_floating(const char* name) {
   } else {
     selection_.clear();
   }
-  auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, name ? name : "Move selection",
-                                            layers_.active_index());
+  auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, name ? name : "Move selection", index);
   if (cmd && !cmd->empty()) {
     commit(std::move(cmd));
   } else {
+    if (!dirty.empty()) {
+      dirty.x += ox;
+      dirty.y += oy;
+    }
     notify_invalidated(dirty);
     notify_changed();
   }
@@ -213,29 +283,44 @@ void Document::delete_selection() {
   if (selection_.empty()) {
     return;
   }
-  if (layers_.active_layer().locked()) {
+  int index = selection_.source_layer();
+  if (index < 0 || index >= layers_.count()) {
+    index = layers_.active_index();
+  }
+  if (index < 0 || index >= layers_.count() || layers_.at(index).locked()) {
     notify_changed();
     return;
   }
-  Layer& layer = layers_.active_layer();
+  Layer& layer = layers_.at(index);
+  const int ox = layer.offset_x();
+  const int oy = layer.offset_y();
   Layer before(layer.width(), layer.height(), Color::transparent(), "before");
   before.copy_from(layer);
+  before.set_offset(ox, oy);
   Rect dirty{};
   if (selection_.floating()) {
     if (!selection_.copy_mode()) {
-      layer.fill_rect(selection_.origin_rect(), Color::transparent());
-      dirty = selection_.origin_rect();
+      const Rect origin_canvas = selection_.origin_rect();
+      const Rect origin_layer = rect_intersect(
+          Rect{origin_canvas.x - ox, origin_canvas.y - oy, origin_canvas.w, origin_canvas.h},
+          Rect{0, 0, layer.width(), layer.height()});
+      if (!origin_layer.empty()) {
+        layer.fill_rect(origin_layer, Color::transparent());
+        dirty = origin_layer;
+      }
     }
-    const Rect extra = selection_.dirty_union();
-    dirty = rect_union(dirty, extra);
     selection_.clear();
   } else {
     fill_selection(layer, selection_, Color::transparent(), &dirty);
   }
-  auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, "Delete", layers_.active_index());
+  auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, "Delete", index);
   if (cmd && !cmd->empty()) {
     commit(std::move(cmd));
   } else {
+    if (!dirty.empty()) {
+      dirty.x += ox;
+      dirty.y += oy;
+    }
     notify_invalidated(dirty);
     notify_changed();
   }
@@ -251,7 +336,7 @@ void Document::duplicate_selection() {
   if (selection_.empty() || selection_.inverted()) {
     return;
   }
-  if (!selection_.lift(layers_.active_layer())) {
+  if (!selection_.lift(layers_.active_layer(), layers_.active_index())) {
     return;
   }
   selection_.set_copy_mode(true);
@@ -263,6 +348,7 @@ void Document::duplicate_selection() {
 void Document::paste_floating(int x, int y, int w, int h, std::vector<std::uint8_t> rgba) {
   commit_floating();
   selection_.set_float_pixels(x, y, w, h, std::move(rgba));
+  selection_.set_source_layer(layers_.active_index());
   notify_invalidated(selection_.dirty_union());
   notify_changed();
 }

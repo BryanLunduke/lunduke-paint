@@ -107,7 +107,7 @@ void RectSelectTool::on_press(CanvasEvent event) {
       return;
     }
     if (!sel.floating()) {
-      sel.lift(doc.layers().active_layer());
+      sel.lift(doc.layers().active_layer(), doc.layers().active_index());
     }
     sel.set_copy_mode(sel.copy_mode() || ctrl);
     moving_ = true;
@@ -116,7 +116,7 @@ void RectSelectTool::on_press(CanvasEvent event) {
     grab_dy_ = y - sel.float_y();
     prev_dirty_ = sel.dirty_union();
     host_->invalidate_canvas(prev_dirty_);
-    doc.notify_changed();
+    doc.notify_selection();
     return;
   }
 
@@ -130,7 +130,7 @@ void RectSelectTool::on_press(CanvasEvent event) {
   prev_dirty_ = sel.bounds();
   sel.set_rect(Rect::from_points(start_x_, start_y_, start_x_, start_y_));
   host_->invalidate_canvas(rect_union(prev_dirty_, sel.bounds()));
-  doc.notify_changed();
+  doc.notify_selection();
 }
 
 void RectSelectTool::on_motion(CanvasEvent event) {
@@ -152,7 +152,7 @@ void RectSelectTool::on_motion(CanvasEvent event) {
     const Rect before = sel.dirty_union();
     sel.move_float(x - grab_dx_, y - grab_dy_);
     host_->invalidate_canvas(rect_union(before, sel.dirty_union()));
-    doc.notify_changed();
+    doc.notify_selection();
     return;
   }
   if (!dragging_) {
@@ -163,7 +163,7 @@ void RectSelectTool::on_motion(CanvasEvent event) {
   const Rect before = sel.bounds();
   sel.set_rect(Rect::from_points(start_x_, start_y_, last_x_, last_y_));
   host_->invalidate_canvas(rect_union(before, sel.bounds()));
-  doc.notify_changed();
+  doc.notify_selection();
 }
 
 void RectSelectTool::finish_rubber() {
@@ -185,6 +185,7 @@ void RectSelectTool::finish_rubber() {
   sel.set_rect(r);
   dragging_ = false;
   host_->invalidate_canvas(r);
+  doc.notify_changed();
 }
 
 void RectSelectTool::on_release(CanvasEvent event) {
@@ -199,6 +200,7 @@ void RectSelectTool::on_release(CanvasEvent event) {
     }
     if (host_ != nullptr) {
       host_->document().notify_invalidated(host_->document().selection().dirty_union());
+      host_->document().notify_changed();
     }
     return;
   }

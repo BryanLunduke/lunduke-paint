@@ -35,6 +35,13 @@ void color_erase_stroke(std::uint8_t* rgba, int width, int height, int stride, d
 void spray_dots(std::uint8_t* rgba, int width, int height, int stride, double cx, double cy,
                 int radius, int density, Color color, std::uint32_t* rng, Rect* dirty);
 
+// Dots stepped along the segment. Step is about radius/4 so a fast drag does not
+// leave gaps. density is the same 1–100 scale as spray_dots (the spray tool
+// keeps it at 40; the left rail sets radius only).
+void stroke_spray(std::uint8_t* rgba, int width, int height, int stride, double x0, double y0,
+                  double x1, double y1, int radius, int density, Color color, std::uint32_t* rng,
+                  Rect* dirty);
+
 }  // namespace lundukepaint
 
 #endif

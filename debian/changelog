@@ -1,3 +1,29 @@
+lunduke-paint (0.9-2) unstable; urgency=medium
+
+  * Selection move composites the visible rect once and blends the float
+    in bulk. Shape previews invalidate the previous outline and restore
+    only that rectangle.
+  * Hand, space, and middle-button pan use screen coordinates. Ctrl+wheel
+    zoom keeps the point under the cursor after scrolling.
+  * Crash recovery no longer commits a floating selection. Autosave encodes
+    a snapshot on a worker and skips mergedimage.png on a large canvas
+    until the document has been idle.
+  * Selection lift, delete, fill, and commit convert canvas space to the
+    source layer. Changing the active layer commits the float there.
+  * OpenRaster groups composite with group opacity, visibility, and blend,
+    including a root stack offset. Copy Merged keeps layers under a cut.
+  * Marching ants cache one path. Selection drag updates the status bar
+    without rebuilding the layers and history panels.
+  * Merge Down blends onto the lower layer and bakes a backdrop only when
+    that layer is non-Normal and partially transparent.
+  * Zoomed-in redraw uses the same nearest-neighbor scale as zoom-out.
+    Flood fill and the magic wand use a scanline fill and a tight mask.
+    Box blur is premultiplied. Spraycan steps along the stroke. Paint
+    inside a selection clips the latest stamp. Scale, rotate, and canvas
+    size store one pre-image. The checkerboard is a repeated pattern.
+
+ -- Phil <phil@brushpad.local>  Wed, 07 Oct 2026 06:30:00 -0500
+
 lunduke-paint (0.9-1) unstable; urgency=medium
 
   * LCOS 0.9 track identity bump (0.8 → 0.9 / Debian 0.9-1). Features

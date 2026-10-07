@@ -4,6 +4,7 @@
 
 #include "doc/command.hpp"
 #include "doc/layer.hpp"
+#include "raster/types.hpp"
 
 #include <memory>
 #include <string>
@@ -114,11 +115,33 @@ private:
   Rect dirty_;
 };
 
+enum class StackXformKind {
+  ResizeCanvas,
+  Scale,
+  Crop,
+  Rotate90,
+  Rotate180,
+  Rotate270,
+  FlipH,
+  FlipV
+};
+
+// Redo reruns this on the stored pre-image. The transformed pixels are not kept.
+struct StackXform {
+  StackXformKind kind = StackXformKind::FlipH;
+  int old_w = 0;
+  int old_h = 0;
+  int new_w = 0;
+  int new_h = 0;
+  bool nearest = false;
+  Color fill{};
+  Rect crop{};
+};
+
 class AllLayersBufferCommand : public Command {
 public:
-  AllLayersBufferCommand(std::string name, int old_w, int old_h, int old_active,
-                         std::vector<LayerSnapshot> old_layers, int new_w, int new_h,
-                         int new_active, std::vector<LayerSnapshot> new_layers);
+  AllLayersBufferCommand(std::string name, std::vector<LayerSnapshot> old_layers, int old_active,
+                         StackXform xform);
   std::string name() const override { return name_; }
   void apply(Document& document) override;
   void undo(Document& document) override;
@@ -126,14 +149,9 @@ public:
 
 private:
   std::string name_;
-  int old_w_ = 0;
-  int old_h_ = 0;
   int old_active_ = 0;
-  int new_w_ = 0;
-  int new_h_ = 0;
-  int new_active_ = 0;
+  StackXform xform_{};
   std::vector<LayerSnapshot> old_layers_;
-  std::vector<LayerSnapshot> new_layers_;
 };
 
 }  // namespace lundukepaint

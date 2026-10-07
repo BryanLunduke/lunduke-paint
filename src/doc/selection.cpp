@@ -4,11 +4,16 @@
 
 #include "doc/layer.hpp"
 #include "doc/layer_stack.hpp"
+#include "raster/blend.hpp"
 
 #include <algorithm>
 #include <cstring>
 
 namespace lundukepaint {
+
+void Selection::bump() {
+  ++generation_;
+}
 
 Rect Selection::bounds() const {
   if (empty_) {
@@ -57,6 +62,8 @@ void Selection::clear() {
   mask_.clear();
   mask_w_ = 0;
   mask_h_ = 0;
+  source_layer_ = -1;
+  bump();
 }
 
 void Selection::set_rect(Rect rect) {
@@ -71,6 +78,7 @@ void Selection::set_rect(Rect rect) {
   mask_.clear();
   mask_w_ = 0;
   mask_h_ = 0;
+  bump();
 }
 
 void Selection::set_mask(Rect bounds, std::vector<std::uint8_t> mask) {
@@ -86,6 +94,7 @@ void Selection::set_mask(Rect bounds, std::vector<std::uint8_t> mask) {
   mask_w_ = bounds.w;
   mask_h_ = bounds.h;
   mask_ = std::move(mask);
+  bump();
 }
 
 void Selection::select_all(int width, int height) {
@@ -100,6 +109,7 @@ void Selection::select_all(int width, int height) {
   mask_.clear();
   mask_w_ = 0;
   mask_h_ = 0;
+  bump();
 }
 
 void Selection::invert(int width, int height) {
@@ -123,6 +133,7 @@ void Selection::invert(int width, int height) {
   }
   inverted_ = !inverted_;
   empty_ = false;
+  bump();
 }
 
 Rect Selection::float_rect() const {
@@ -154,28 +165,31 @@ Color Selection::float_pixel(int x, int y) const {
   return {p[0], p[1], p[2], p[3]};
 }
 
-bool Selection::lift(const Layer& layer) {
+bool Selection::lift(const Layer& layer, int source_index) {
   if (empty_ || inverted_) {
     return false;
   }
-  Rect r = rect_intersect(rect_, Rect{0, 0, layer.width(), layer.height()});
-  if (r.empty()) {
+  const Rect layer_canvas{layer.offset_x(), layer.offset_y(), layer.width(), layer.height()};
+  const Rect canvas_r = rect_intersect(rect_, layer_canvas);
+  if (canvas_r.empty()) {
     return false;
   }
-  float_w_ = r.w;
-  float_h_ = r.h;
-  float_x_ = r.x;
-  float_y_ = r.y;
-  origin_x_ = r.x;
-  origin_y_ = r.y;
-  origin_w_ = r.w;
-  origin_h_ = r.h;
+  const Rect layer_r{canvas_r.x - layer.offset_x(), canvas_r.y - layer.offset_y(), canvas_r.w,
+                     canvas_r.h};
+  float_w_ = layer_r.w;
+  float_h_ = layer_r.h;
+  float_x_ = canvas_r.x;
+  float_y_ = canvas_r.y;
+  origin_x_ = canvas_r.x;
+  origin_y_ = canvas_r.y;
+  origin_w_ = canvas_r.w;
+  origin_h_ = canvas_r.h;
   float_pixels_.assign(static_cast<std::size_t>(float_w_) * static_cast<std::size_t>(float_h_) * 4, 0);
-  layer.read_rect(r, float_pixels_.data());
+  layer.read_rect(layer_r, float_pixels_.data());
   if (!mask_.empty()) {
     for (int y = 0; y < float_h_; ++y) {
       for (int x = 0; x < float_w_; ++x) {
-        if (!mask_at(r.x + x, r.y + y)) {
+        if (!mask_at(canvas_r.x + x, canvas_r.y + y)) {
           std::uint8_t* p =
               float_pixels_.data() +
               (static_cast<std::size_t>(y) * static_cast<std::size_t>(float_w_) +
@@ -187,7 +201,9 @@ bool Selection::lift(const Layer& layer) {
     }
   }
   floating_ = true;
+  source_layer_ = source_index;
   rect_ = float_rect();
+  bump();
   return true;
 }
 
@@ -211,6 +227,7 @@ void Selection::set_float_pixels(int x, int y, int w, int h, std::vector<std::ui
   origin_h_ = h;
   float_pixels_ = std::move(rgba);
   rect_ = float_rect();
+  bump();
 }
 
 void Selection::transform_float(int x, int y, int w, int h, std::vector<std::uint8_t> rgba) {
@@ -224,6 +241,7 @@ void Selection::transform_float(int x, int y, int w, int h, std::vector<std::uin
   float_h_ = h;
   float_pixels_ = std::move(rgba);
   rect_ = float_rect();
+  bump();
 }
 
 void Selection::move_float(int x, int y) {
@@ -233,6 +251,7 @@ void Selection::move_float(int x, int y) {
   float_x_ = x;
   float_y_ = y;
   rect_ = float_rect();
+  bump();
 }
 
 void Selection::drop_float() {
@@ -243,6 +262,8 @@ void Selection::drop_float() {
   float_h_ = 0;
   origin_w_ = 0;
   origin_h_ = 0;
+  source_layer_ = -1;
+  bump();
 }
 
 void clip_rect_to_selection(Layer& dest, const Layer& source, Rect rect, const Selection& sel) {
@@ -251,19 +272,52 @@ void clip_rect_to_selection(Layer& dest, const Layer& source, Rect rect, const S
   }
   rect = rect_intersect(rect, Rect{0, 0, dest.width(), dest.height()});
   rect = rect_intersect(rect, Rect{0, 0, source.width(), source.height()});
-  if (rect.empty()) {
+  if (rect.empty() || dest.stride() < dest.width() * 4 || source.stride() < source.width() * 4) {
     return;
   }
   const int ox = source.offset_x();
   const int oy = source.offset_y();
+  bool restored = false;
   for (int y = rect.y; y < rect.y2(); ++y) {
-    for (int x = rect.x; x < rect.x2(); ++x) {
-      if (!sel.contains(x + ox, y + oy)) {
-        dest.set_pixel(x, y, source.pixel(x, y));
+    int x = rect.x;
+    const int x1 = rect.x2();
+    while (x < x1) {
+      if (sel.contains(x + ox, y + oy)) {
+        ++x;
+        continue;
       }
+      const int x0 = x;
+      while (x < x1 && !sel.contains(x + ox, y + oy)) {
+        ++x;
+      }
+      const int n = x - x0;
+      std::uint8_t* d = dest.pixels() + static_cast<std::size_t>(y) * dest.stride() +
+                        static_cast<std::size_t>(x0) * 4;
+      const std::uint8_t* s = source.pixels() + static_cast<std::size_t>(y) * source.stride() +
+                              static_cast<std::size_t>(x0) * 4;
+      std::memcpy(d, s, static_cast<std::size_t>(n) * 4);
+      restored = true;
     }
   }
+  if (restored) {
+    dest.invalidate_thumbnail();
+  }
 }
+
+namespace {
+
+Rect layer_canvas_rect(const Layer& layer) {
+  return {layer.offset_x(), layer.offset_y(), layer.width(), layer.height()};
+}
+
+Rect canvas_to_layer_rect(const Layer& layer, Rect canvas) {
+  if (canvas.empty()) {
+    return {};
+  }
+  return {canvas.x - layer.offset_x(), canvas.y - layer.offset_y(), canvas.w, canvas.h};
+}
+
+}  // namespace
 
 void fill_selection(Layer& layer, const Selection& sel, Color color, Rect* dirty) {
   if (dirty != nullptr) {
@@ -272,12 +326,10 @@ void fill_selection(Layer& layer, const Selection& sel, Color color, Rect* dirty
   if (sel.empty()) {
     return;
   }
-  int minx = layer.width();
-  int miny = layer.height();
-  int maxx = -1;
-  int maxy = -1;
+  const Rect layer_bounds{0, 0, layer.width(), layer.height()};
   if (sel.floating()) {
-    const Rect r = rect_intersect(sel.float_rect(), Rect{0, 0, layer.width(), layer.height()});
+    const Rect canvas_r = rect_intersect(sel.float_rect(), layer_canvas_rect(layer));
+    const Rect r = rect_intersect(canvas_to_layer_rect(layer, canvas_r), layer_bounds);
     if (r.empty()) {
       return;
     }
@@ -288,7 +340,8 @@ void fill_selection(Layer& layer, const Selection& sel, Color color, Rect* dirty
     return;
   }
   if (!sel.inverted() && !sel.has_mask()) {
-    const Rect r = rect_intersect(sel.bounds(), Rect{0, 0, layer.width(), layer.height()});
+    const Rect canvas_r = rect_intersect(sel.bounds(), layer_canvas_rect(layer));
+    const Rect r = rect_intersect(canvas_to_layer_rect(layer, canvas_r), layer_bounds);
     if (r.empty()) {
       return;
     }
@@ -298,9 +351,15 @@ void fill_selection(Layer& layer, const Selection& sel, Color color, Rect* dirty
     }
     return;
   }
+  int minx = layer.width();
+  int miny = layer.height();
+  int maxx = -1;
+  int maxy = -1;
+  const int ox = layer.offset_x();
+  const int oy = layer.offset_y();
   for (int y = 0; y < layer.height(); ++y) {
     for (int x = 0; x < layer.width(); ++x) {
-      if (!sel.contains(x, y)) {
+      if (!sel.contains(x + ox, y + oy)) {
         continue;
       }
       layer.set_pixel(x, y, color);
@@ -347,7 +406,7 @@ void copy_selection_rgba(const Layer& layer, const Selection& sel, int canvas_w,
         if (!sel.contains(x, y)) {
           continue;
         }
-        const Color c = layer.pixel(x, y);
+        const Color c = layer.pixel(x - layer.offset_x(), y - layer.offset_y());
         std::uint8_t* p =
             out.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(out_w) +
                           static_cast<std::size_t>(x)) *
@@ -360,7 +419,9 @@ void copy_selection_rgba(const Layer& layer, const Selection& sel, int canvas_w,
     }
     return;
   }
-  Rect r = rect_intersect(sel.bounds(), Rect{0, 0, layer.width(), layer.height()});
+  const Rect canvas_r = rect_intersect(sel.bounds(), layer_canvas_rect(layer));
+  const Rect r = rect_intersect(canvas_to_layer_rect(layer, canvas_r),
+                                Rect{0, 0, layer.width(), layer.height()});
   if (r.empty()) {
     return;
   }
@@ -371,7 +432,7 @@ void copy_selection_rgba(const Layer& layer, const Selection& sel, int canvas_w,
   if (sel.has_mask()) {
     for (int y = 0; y < out_h; ++y) {
       for (int x = 0; x < out_w; ++x) {
-        if (!sel.mask_at(r.x + x, r.y + y)) {
+        if (!sel.mask_at(canvas_r.x + x, canvas_r.y + y)) {
           std::uint8_t* p =
               out.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(out_w) +
                             static_cast<std::size_t>(x)) *
@@ -408,6 +469,87 @@ void blit_rgba(Layer& dest, int dx, int dy, const std::uint8_t* src, int sw, int
   }
 }
 
+void paint_floating_selection(const LayerStack& layers, const Selection& sel, std::uint8_t* dest,
+                              int dest_stride, Rect view, bool substitute_clear, Color hole_clear,
+                              Color float_clear) {
+  if (dest == nullptr || view.empty() || !sel.floating() || sel.float_pixels() == nullptr) {
+    return;
+  }
+  int skip = sel.source_layer();
+  if (skip < 0 || skip >= layers.count()) {
+    skip = layers.active_index();
+  }
+  auto pixel_at = [&](int x, int y) -> std::uint8_t* {
+    const int lx = x - view.x;
+    const int ly = y - view.y;
+    if (lx < 0 || ly < 0 || lx >= view.w || ly >= view.h) {
+      return nullptr;
+    }
+    return dest + static_cast<std::size_t>(ly) * static_cast<std::size_t>(dest_stride) +
+           static_cast<std::size_t>(lx) * 4;
+  };
+  if (!sel.copy_mode()) {
+    const Rect hole = rect_intersect(sel.origin_rect(), view);
+    if (!hole.empty()) {
+      std::vector<std::uint8_t> below(static_cast<std::size_t>(hole.w) * static_cast<std::size_t>(hole.h) *
+                                      4);
+      layers.composite_rect(below.data(), hole.w * 4, hole, nullptr, -1, skip);
+      for (int y = 0; y < hole.h; ++y) {
+        for (int x = 0; x < hole.w; ++x) {
+          std::uint8_t* d = pixel_at(hole.x + x, hole.y + y);
+          if (d == nullptr) {
+            continue;
+          }
+          const std::uint8_t* s =
+              below.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(hole.w) +
+                              static_cast<std::size_t>(x)) *
+                                 4;
+          if (s[3] == 0 && substitute_clear) {
+            d[0] = hole_clear.r;
+            d[1] = hole_clear.g;
+            d[2] = hole_clear.b;
+            d[3] = hole_clear.a;
+          } else {
+            d[0] = s[0];
+            d[1] = s[1];
+            d[2] = s[2];
+            d[3] = s[3];
+          }
+        }
+      }
+    }
+  }
+  const Rect fr = sel.float_rect();
+  for (int y = 0; y < fr.h; ++y) {
+    const std::uint8_t* srow =
+        sel.float_pixels() + static_cast<std::size_t>(y) * static_cast<std::size_t>(fr.w) * 4;
+    for (int x = 0; x < fr.w; ++x) {
+      std::uint8_t* d = pixel_at(fr.x + x, fr.y + y);
+      if (d == nullptr) {
+        continue;
+      }
+      const std::uint8_t* s = srow + static_cast<std::size_t>(x) * 4;
+      if (s[3] == 0) {
+        if (!sel.transparent_move() && d[3] == 0 && substitute_clear) {
+          d[0] = float_clear.r;
+          d[1] = float_clear.g;
+          d[2] = float_clear.b;
+          d[3] = float_clear.a;
+        }
+        continue;
+      }
+      if (s[3] == 255) {
+        d[0] = s[0];
+        d[1] = s[1];
+        d[2] = s[2];
+        d[3] = s[3];
+      } else {
+        blend_pixel(d, s, BlendMode::Normal, 1.0f);
+      }
+    }
+  }
+}
+
 void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas_w, int canvas_h,
                       int& out_w, int& out_h, std::vector<std::uint8_t>& out) {
   out_w = 0;
@@ -416,58 +558,28 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
   if (canvas_w < 1 || canvas_h < 1) {
     return;
   }
-  std::vector<std::uint8_t> merged(
-      static_cast<std::size_t>(canvas_w) * static_cast<std::size_t>(canvas_h) * 4, 0);
-  layers.composite_rect(merged.data(), canvas_w * 4, Rect{0, 0, canvas_w, canvas_h});
-  if (sel.floating() && sel.float_pixels() != nullptr) {
-    const Rect fr = sel.float_rect();
-    for (int y = 0; y < fr.h; ++y) {
-      const int dy = fr.y + y;
-      if (dy < 0 || dy >= canvas_h) {
-        continue;
-      }
-      const std::uint8_t* srow =
-          sel.float_pixels() + static_cast<std::size_t>(y) * static_cast<std::size_t>(fr.w) * 4;
-      for (int x = 0; x < fr.w; ++x) {
-        const int dx = fr.x + x;
-        if (dx < 0 || dx >= canvas_w) {
-          continue;
-        }
-        const std::uint8_t* s = srow + static_cast<std::size_t>(x) * 4;
-        if (sel.transparent_move() && s[3] == 0) {
-          continue;
-        }
-        std::uint8_t* d =
-            merged.data() + (static_cast<std::size_t>(dy) * static_cast<std::size_t>(canvas_w) +
-                             static_cast<std::size_t>(dx)) *
-                                4;
-        d[0] = s[0];
-        d[1] = s[1];
-        d[2] = s[2];
-        d[3] = s[3];
-      }
+  const Rect canvas{0, 0, canvas_w, canvas_h};
+  Rect region = canvas;
+  if (!sel.empty() && !sel.inverted()) {
+    region = rect_intersect(sel.bounds(), canvas);
+    if (region.empty()) {
+      return;
     }
-    if (!sel.copy_mode()) {
-      const Rect hole = rect_intersect(sel.origin_rect(), Rect{0, 0, canvas_w, canvas_h});
-      for (int y = hole.y; y < hole.y2(); ++y) {
-        for (int x = hole.x; x < hole.x2(); ++x) {
-          if (fr.contains(x, y) && sel.float_pixel(x - fr.x, y - fr.y).a != 0) {
-            continue;
-          }
-          std::uint8_t* d =
-              merged.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(canvas_w) +
-                               static_cast<std::size_t>(x)) *
-                                  4;
-          d[0] = d[1] = d[2] = d[3] = 0;
-        }
-      }
-    }
+  }
+  std::vector<std::uint8_t> merged(static_cast<std::size_t>(region.w) * static_cast<std::size_t>(region.h) *
+                                   4, 0);
+  layers.composite_rect(merged.data(), region.w * 4, region);
+  if (sel.floating()) {
+    paint_floating_selection(layers, sel, merged.data(), region.w * 4, region, false,
+                             Color::transparent(), Color::transparent());
   }
 
   auto sample = [&](int x, int y) {
+    const int lx = x - region.x;
+    const int ly = y - region.y;
     const std::uint8_t* p =
-        merged.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(canvas_w) +
-                         static_cast<std::size_t>(x)) *
+        merged.data() + (static_cast<std::size_t>(ly) * static_cast<std::size_t>(region.w) +
+                         static_cast<std::size_t>(lx)) *
                             4;
     return Color{p[0], p[1], p[2], p[3]};
   };
@@ -500,17 +612,13 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
     }
     return;
   }
-  Rect r = rect_intersect(sel.bounds(), Rect{0, 0, canvas_w, canvas_h});
-  if (r.empty()) {
-    return;
-  }
-  out_w = r.w;
-  out_h = r.h;
+  out_w = region.w;
+  out_h = region.h;
   out.assign(static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h) * 4, 0);
   for (int y = 0; y < out_h; ++y) {
     for (int x = 0; x < out_w; ++x) {
-      const int cx = r.x + x;
-      const int cy = r.y + y;
+      const int cx = region.x + x;
+      const int cy = region.y + y;
       if (sel.has_mask() && !sel.mask_at(cx, cy) && !sel.floating()) {
         continue;
       }

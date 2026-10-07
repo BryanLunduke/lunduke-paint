@@ -14,8 +14,8 @@ namespace lundukepaint {
 void flood_fill(std::uint8_t* rgba, int width, int height, int stride, int x, int y,
                 Color replacement, int tolerance, Rect* dirty);
 
-// Contiguous color select (Chebyshev), writes 0/255 mask of size width*height.
-// *bounds is the tight rectangle of selected pixels (empty if none).
+// Contiguous color select (Chebyshev). `mask` is tight (bounds.w × bounds.h),
+// not a full-canvas buffer. *bounds is that rectangle in buffer space (empty if none).
 void flood_mask(const std::uint8_t* rgba, int width, int height, int stride, int x, int y,
                 int tolerance, std::vector<std::uint8_t>& mask, Rect* bounds);
 

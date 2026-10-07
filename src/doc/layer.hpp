@@ -77,6 +77,10 @@ public:
   std::unique_ptr<Layer> clone() const;
 
   void invalidate_thumbnail();
+  // Bumps whenever pixels change. Autosave reuses an encoded PNG while this matches.
+  std::uint64_t revision() const { return revision_; }
+  // Stable for the life of this layer object. Paired with revision() as a PNG cache key.
+  std::uint64_t identity() const { return identity_; }
   const std::uint8_t* thumbnail() const;
   int thumbnail_width() const { return kThumbWidth; }
   int thumbnail_height() const { return kThumbHeight; }
@@ -94,9 +98,13 @@ private:
   int width_ = 0;
   int height_ = 0;
   int stride_ = 0;
+  void note_pixels();
+
   std::vector<std::uint8_t> pixels_;
   mutable std::vector<std::uint8_t> thumb_;
   mutable bool thumb_valid_ = false;
+  std::uint64_t revision_ = 1;
+  std::uint64_t identity_ = 0;
 };
 
 inline void shift_to_layer(const Layer& layer, int& x, int& y) {

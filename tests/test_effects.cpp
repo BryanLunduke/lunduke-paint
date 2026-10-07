@@ -133,6 +133,22 @@ int main() {
     errors += expect(layer.pixel(1, 1) == blurred, "redo blur");
   }
 
+  // Premultiplied blur must not darken opaque color beside transparency.
+  {
+    const int w = 2;
+    const int h = 1;
+    const int stride = w * 4;
+    std::vector<std::uint8_t> src(static_cast<std::size_t>(stride * h), 0);
+    std::vector<std::uint8_t> dest(src.size(), 0);
+    set(src.data(), stride, 0, 0, Color{255, 0, 0, 255});
+    lundukepaint::box_blur_rgba(src.data(), w, h, stride, dest.data(), stride, 1);
+    const Color edge = get(dest.data(), stride, 0, 0);
+    errors += expect(edge.r == 255, "blur keeps red next to transparency");
+    errors += expect(edge.a > 0 && edge.a < 255, "blur softens alpha at the fringe");
+    const Color clear = get(dest.data(), stride, 1, 0);
+    errors += expect(clear.r == 255 || clear.a == 0, "transparent neighbor is not blackened");
+  }
+
   if (errors != 0) {
     std::fprintf(stderr, "test_effects: %d failure(s)\n", errors);
     return 1;

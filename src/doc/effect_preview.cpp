@@ -7,8 +7,11 @@
 #include "doc/layer.hpp"
 #include "doc/layer_stack.hpp"
 #include "doc/selection.hpp"
+#include "raster/transform.hpp"
 
+#include <algorithm>
 #include <utility>
+#include <vector>
 
 namespace lundukepaint {
 
@@ -41,10 +44,22 @@ Rect EffectPreview::render(Layer& out, const EffectFn& fn) const {
   if (!sel.empty()) {
     clip_rect_to_selection(out, *snapshot_, bounds, sel);
     if (!sel.inverted()) {
-      bounds = rect_intersect(sel.bounds(), bounds);
+      const Rect canvas_sel = sel.bounds();
+      const Rect local{canvas_sel.x - snapshot_->offset_x(), canvas_sel.y - snapshot_->offset_y(),
+                       canvas_sel.w, canvas_sel.h};
+      bounds = rect_intersect(local, bounds);
     }
   }
   return bounds;
+}
+
+Rect canvas_bounds_of(const Layer& layer, Rect local) {
+  if (local.empty()) {
+    return {};
+  }
+  local.x += layer.offset_x();
+  local.y += layer.offset_y();
+  return local;
 }
 
 Rect EffectPreview::preview(const EffectFn& fn) {
@@ -52,11 +67,40 @@ Rect EffectPreview::preview(const EffectFn& fn) {
   if (layer == nullptr || !fn) {
     return {};
   }
-  Layer scratch(snapshot_->width(), snapshot_->height(), Color::transparent(), "preview");
-  const Rect bounds = render(scratch, fn);
-  layer->copy_from(scratch);
+  Rect bounds{};
+  if (snapshot_->width() > 2048 || snapshot_->height() > 2048) {
+    int dw = snapshot_->width();
+    int dh = snapshot_->height();
+    constexpr int kPreviewMax = 1024;
+    if (dw >= dh) {
+      dh = std::max(1, dh * kPreviewMax / dw);
+      dw = kPreviewMax;
+    } else {
+      dw = std::max(1, dw * kPreviewMax / dh);
+      dh = kPreviewMax;
+    }
+    std::vector<std::uint8_t> small(static_cast<std::size_t>(dw) * static_cast<std::size_t>(dh) * 4, 0);
+    scale_bilinear(snapshot_->pixels(), snapshot_->width(), snapshot_->height(), snapshot_->stride(),
+                   small.data(), dw, dh, dw * 4);
+    fn(small.data(), dw, dh, dw * 4);
+    std::vector<std::uint8_t> up(static_cast<std::size_t>(snapshot_->width()) *
+                                     static_cast<std::size_t>(snapshot_->height()) * 4,
+                                 0);
+    scale_nearest(small.data(), dw, dh, dw * 4, up.data(), snapshot_->width(), snapshot_->height(),
+                  snapshot_->width() * 4);
+    layer->set_pixels(snapshot_->width(), snapshot_->height(), up.data(), snapshot_->width() * 4);
+    bounds = Rect{0, 0, snapshot_->width(), snapshot_->height()};
+    const Selection& sel = document_->selection();
+    if (!sel.empty()) {
+      clip_rect_to_selection(*layer, *snapshot_, bounds, sel);
+    }
+  } else {
+    Layer scratch(snapshot_->width(), snapshot_->height(), Color::transparent(), "preview");
+    bounds = render(scratch, fn);
+    layer->copy_from(scratch);
+  }
   previewing_ = true;
-  document_->notify_invalidated(Rect{0, 0, layer->width(), layer->height()});
+  document_->notify_invalidated(canvas_bounds_of(*layer, bounds));
   return bounds;
 }
 
@@ -70,7 +114,8 @@ bool EffectPreview::restore() {
     return false;
   }
   layer->copy_from(*snapshot_);
-  document_->notify_invalidated(Rect{0, 0, layer->width(), layer->height()});
+  document_->notify_invalidated(
+      canvas_bounds_of(*layer, Rect{0, 0, layer->width(), layer->height()}));
   return true;
 }
 

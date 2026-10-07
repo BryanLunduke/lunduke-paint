@@ -66,31 +66,39 @@ int clamp_pattern_index(int index) {
 }
 
 void apply_pattern_mask(std::uint8_t* rgba, int width, int height, int stride,
-                        const std::uint8_t* mask, const Pattern& pattern, Color fg, Color bg,
-                        Rect* dirty) {
-  if (rgba == nullptr || mask == nullptr || width < 1 || height < 1) {
+                        const std::uint8_t* mask, int mask_x, int mask_y, int mask_w, int mask_h,
+                        const Pattern& pattern, Color fg, Color bg, Rect* dirty) {
+  if (rgba == nullptr || mask == nullptr || width < 1 || height < 1 || mask_w < 1 || mask_h < 1) {
     return;
   }
   int minx = width;
   int miny = height;
   int maxx = -1;
   int maxy = -1;
-  for (int y = 0; y < height; ++y) {
-    for (int x = 0; x < width; ++x) {
-      if (mask[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+  for (int y = 0; y < mask_h; ++y) {
+    const int py = mask_y + y;
+    if (py < 0 || py >= height) {
+      continue;
+    }
+    for (int x = 0; x < mask_w; ++x) {
+      const int px = mask_x + x;
+      if (px < 0 || px >= width) {
+        continue;
+      }
+      if (mask[static_cast<std::size_t>(y) * static_cast<std::size_t>(mask_w) +
                static_cast<std::size_t>(x)] == 0) {
         continue;
       }
-      const Color c = pattern.color_at(x, y, fg, bg);
-      std::uint8_t* p = rgba + static_cast<std::size_t>(y) * stride + static_cast<std::size_t>(x) * 4;
+      const Color c = pattern.color_at(px, py, fg, bg);
+      std::uint8_t* p = rgba + static_cast<std::size_t>(py) * stride + static_cast<std::size_t>(px) * 4;
       p[0] = c.r;
       p[1] = c.g;
       p[2] = c.b;
       p[3] = c.a;
-      minx = std::min(minx, x);
-      miny = std::min(miny, y);
-      maxx = std::max(maxx, x);
-      maxy = std::max(maxy, y);
+      minx = std::min(minx, px);
+      miny = std::min(miny, py);
+      maxx = std::max(maxx, px);
+      maxy = std::max(maxy, py);
     }
   }
   if (dirty != nullptr && maxx >= minx) {

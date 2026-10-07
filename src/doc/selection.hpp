@@ -34,6 +34,9 @@ public:
   void clear();
   void set_rect(Rect rect);
   void set_mask(Rect bounds, std::vector<std::uint8_t> mask);
+  // Bumps when the outline geometry changes (marching ants rebuild from this).
+  unsigned generation() const { return generation_; }
+
   bool has_mask() const { return !mask_.empty(); }
   const std::uint8_t* mask() const { return mask_.empty() ? nullptr : mask_.data(); }
   int mask_w() const { return mask_w_; }
@@ -60,9 +63,14 @@ public:
   }
   Color float_pixel(int x, int y) const;
 
+  // Layer the pixels were lifted from. -1 until lift / paste.
+  int source_layer() const { return source_layer_; }
+  void set_source_layer(int index) { source_layer_ = index; }
+
   // Copy the current rect from the layer into a floating buffer. Does not
-  // modify the layer (the hole is previewed until commit).
-  bool lift(const Layer& layer);
+  // modify the layer (the hole is previewed until commit). Origin stays in
+  // canvas space. `source_index` is the layer the pixels must commit back to.
+  bool lift(const Layer& layer, int source_index = -1);
 
   void set_float_pixels(int x, int y, int w, int h, std::vector<std::uint8_t> rgba);
   void transform_float(int x, int y, int w, int h, std::vector<std::uint8_t> rgba);
@@ -88,6 +96,10 @@ private:
   std::vector<std::uint8_t> mask_;
   int mask_w_ = 0;
   int mask_h_ = 0;
+  int source_layer_ = -1;
+  unsigned generation_ = 0;
+
+  void bump();
 };
 
 void clip_rect_to_selection(Layer& dest, const Layer& source, Rect rect, const Selection& sel);
@@ -98,6 +110,13 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
                       int& out_w, int& out_h, std::vector<std::uint8_t>& out);
 void blit_rgba(Layer& dest, int dx, int dy, const std::uint8_t* src, int sw, int sh, int sstride,
                bool skip_transparent);
+
+// Composite `sel` onto a view-sized straight-RGBA buffer. `dest` row 0 is
+// `view.y`. The origin hole is composited once with the source layer skipped,
+// then the float is blended in bulk. Never samples the stack per pixel.
+void paint_floating_selection(const LayerStack& layers, const Selection& sel, std::uint8_t* dest,
+                              int dest_stride, Rect view, bool substitute_clear, Color hole_clear,
+                              Color float_clear);
 
 }  // namespace lundukepaint
 

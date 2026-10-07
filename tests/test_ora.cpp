@@ -258,6 +258,21 @@ int main() {
     unlink(float_path.c_str());
   }
 
+  {
+    auto doc = Document::create(1, 1, Color::transparent(), "Only");
+    doc->layers().active_layer().set_pixel(0, 0, Color{255, 0, 0, 255});
+    lundukepaint::OraNode root;
+    root.is_stack = true;
+    root.opacity = 0.5f;
+    lundukepaint::OraNode leaf;
+    leaf.layer_index = 0;
+    root.children.push_back(leaf);
+    doc->set_ora_stack(std::move(root));
+    std::vector<std::uint8_t> px(4, 0);
+    doc->layers().composite_rect(px.data(), 4, lundukepaint::Rect{0, 0, 1, 1});
+    errors += expect(px[0] == 255 && px[3] > 100 && px[3] < 160, "group opacity composites");
+  }
+
   if (errors != 0) {
     std::fprintf(stderr, "test_ora: %d failure(s)\n", errors);
     return 1;

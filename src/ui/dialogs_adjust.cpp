@@ -2,6 +2,7 @@
 
 #include "ui/dialogs_adjust.hpp"
 
+#include <glibmm/main.h>
 #include <gtkmm/grid.h>
 #include <gtkmm/label.h>
 
@@ -27,6 +28,10 @@ LivePreviewDialog::LivePreviewDialog(const Glib::ustring& title, Gtk::Window& pa
   live_.signal_toggled().connect(sigc::mem_fun(*this, &LivePreviewDialog::on_live_toggled));
 }
 
+LivePreviewDialog::~LivePreviewDialog() {
+  preview_delay_.disconnect();
+}
+
 void LivePreviewDialog::add_live_preview(Gtk::Grid& grid, int row, int width) {
   grid.attach(live_, 0, row, width, 1);
 }
@@ -48,9 +53,19 @@ void LivePreviewDialog::on_live_toggled() {
 }
 
 void LivePreviewDialog::fire_preview() {
-  if (live_.get_active() && on_preview) {
-    on_preview();
+  preview_delay_.disconnect();
+  if (!live_.get_active() || !on_preview) {
+    return;
   }
+  // The last slider value wins. A burst of ticks does not rerun the effect.
+  preview_delay_ = Glib::signal_timeout().connect(
+      [this]() {
+        if (live_.get_active() && on_preview) {
+          on_preview();
+        }
+        return false;
+      },
+      40);
 }
 
 BrightnessContrastDialog::BrightnessContrastDialog(Gtk::Window& parent)

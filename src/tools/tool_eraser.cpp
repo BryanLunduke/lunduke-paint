@@ -126,12 +126,22 @@ void EraserTool::stamp_to(double x, double y) {
   const double y0 = last_y_ - active.offset_y();
   const double x1 = x - active.offset_x();
   const double y1 = y - active.offset_y();
+  Rect stamp{};
   stroke_brush(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1, size,
-               erase_color(), false, &dirty_);
-  clip_rect_to_selection(tool, active, dirty_, host_->document().selection());
+               erase_color(), false, &stamp);
+  dirty_ = rect_union(dirty_, stamp);
+  clip_rect_to_selection(tool, active, stamp, host_->document().selection());
   last_x_ = x;
   last_y_ = y;
-  host_->invalidate_canvas(layer_dirty_to_canvas(active, dirty_));
+  Rect halo = stamp;
+  if (!halo.empty()) {
+    halo.x -= 1;
+    halo.y -= 1;
+    halo.w += 2;
+    halo.h += 2;
+    halo = rect_intersect(halo, Rect{0, 0, tool.width(), tool.height()});
+  }
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, halo));
 }
 
 void EraserTool::finish_stroke() {

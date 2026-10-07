@@ -2,6 +2,8 @@
 
 #include "doc/layer_stack.hpp"
 
+#include <glib.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -15,7 +17,8 @@ void LayerStack::reset(int width, int height, Color fill, const std::string& lay
   layers_.clear();
   layers_.push_back(std::make_unique<Layer>(width, height, fill, layer_name));
   tool_layer_ = std::make_unique<Layer>(width, height, Color::transparent(), "Tool");
-  selection_layer_ = std::make_unique<Layer>(width, height, Color::transparent(), "Selection");
+  has_ora_stack_ = false;
+  ora_stack_ = {};
   active_ = 0;
   name_serial_ = 1;
 }
@@ -65,6 +68,16 @@ void LayerStack::clear_tool_layer() {
   }
 }
 
+void LayerStack::set_ora_stack(const OraNode* node) {
+  if (node == nullptr) {
+    has_ora_stack_ = false;
+    ora_stack_ = {};
+    return;
+  }
+  ora_stack_ = *node;
+  has_ora_stack_ = true;
+}
+
 void LayerStack::copy_active_to_tool() {
   const Layer& src = active_layer();
   if (!tool_layer_ || tool_layer_->width() != src.width() || tool_layer_->height() != src.height()) {
@@ -72,23 +85,6 @@ void LayerStack::copy_active_to_tool() {
   }
   tool_layer_->set_offset(src.offset_x(), src.offset_y());
   tool_layer_->copy_from(src);
-}
-
-Layer& LayerStack::selection_layer() {
-  if (!selection_layer_) {
-    selection_layer_ = std::make_unique<Layer>(width_, height_, Color::transparent(), "Selection");
-  }
-  return *selection_layer_;
-}
-
-const Layer& LayerStack::selection_layer() const {
-  return *selection_layer_;
-}
-
-void LayerStack::clear_selection_layer() {
-  if (selection_layer_) {
-    selection_layer_->clear_transparent();
-  }
 }
 
 void LayerStack::replace_active(int width, int height, const std::uint8_t* rgba, int stride) {
@@ -126,7 +122,6 @@ void LayerStack::resize_scratch(int width, int height) {
   width_ = width;
   height_ = height;
   tool_layer_ = std::make_unique<Layer>(width, height, Color::transparent(), "Tool");
-  selection_layer_ = std::make_unique<Layer>(width, height, Color::transparent(), "Selection");
 }
 
 int LayerStack::insert(int index, std::unique_ptr<Layer> layer) {
@@ -208,8 +203,79 @@ const Layer* LayerStack::display_layer(int index, const Layer* tool_override, in
   return &at(index);
 }
 
+namespace {
+
+bool group_affects_composite(const OraNode& node) {
+  if (!node.is_stack) {
+    return false;
+  }
+  if (!node.visible || node.opacity < 0.999f || node.blend != BlendMode::Normal) {
+    return true;
+  }
+  for (const OraNode& child : node.children) {
+    if (group_affects_composite(child)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void copy_layer_into(std::uint8_t* dest, int dest_w, int dest_stride, Rect dest_canvas,
+                     const Layer& layer) {
+  const int ox = layer.offset_x();
+  const int oy = layer.offset_y();
+  for (int y = 0; y < layer.height(); ++y) {
+    const int dy = oy + y - dest_canvas.y;
+    if (dy < 0 || dy >= dest_canvas.h) {
+      continue;
+    }
+    const int src_x0 = std::max(0, dest_canvas.x - ox);
+    const int src_x1 = std::min(layer.width(), dest_canvas.x + dest_w - ox);
+    if (src_x1 <= src_x0) {
+      continue;
+    }
+    const int dx = ox + src_x0 - dest_canvas.x;
+    std::memcpy(dest + static_cast<std::size_t>(dy) * dest_stride + static_cast<std::size_t>(dx) * 4,
+                layer.pixels() + static_cast<std::size_t>(y) * layer.stride() +
+                    static_cast<std::size_t>(src_x0) * 4,
+                static_cast<std::size_t>(src_x1 - src_x0) * 4);
+  }
+}
+
+}  // namespace
+
+void LayerStack::composite_node(const OraNode& node, std::uint8_t* dest, int dest_stride, Rect view,
+                                const Layer* tool_override, int tool_index, int skip_index) const {
+  if (!node.is_stack) {
+    if (node.layer_index < 0 || node.layer_index >= count() || node.layer_index == skip_index) {
+      return;
+    }
+    const Layer& meta = at(node.layer_index);
+    if (!meta.visible()) {
+      return;
+    }
+    const Layer* src = display_layer(node.layer_index, tool_override, tool_index);
+    blend_layer_rect(dest, view.w, view.h, dest_stride, src->pixels(), src->width(), src->height(),
+                     src->stride(), meta.offset_x(), meta.offset_y(), view, meta.blend(),
+                     meta.opacity());
+    return;
+  }
+  if (!node.visible || node.opacity <= 0.0f) {
+    return;
+  }
+  std::vector<std::uint8_t> child(static_cast<std::size_t>(view.w) * static_cast<std::size_t>(view.h) * 4,
+                                  0);
+  const int child_stride = view.w * 4;
+  for (int i = static_cast<int>(node.children.size()) - 1; i >= 0; --i) {
+    composite_node(node.children[static_cast<std::size_t>(i)], child.data(), child_stride, view,
+                   tool_override, tool_index, skip_index);
+  }
+  blend_layer_rect(dest, view.w, view.h, dest_stride, child.data(), view.w, view.h, child_stride,
+                   view.x, view.y, view, node.blend, node.opacity);
+}
+
 void LayerStack::composite_rect(std::uint8_t* dest, int dest_stride, Rect view,
-                                const Layer* tool_override, int tool_index) const {
+                                const Layer* tool_override, int tool_index, int skip_index) const {
   if (dest == nullptr || view.empty()) {
     return;
   }
@@ -217,7 +283,14 @@ void LayerStack::composite_rect(std::uint8_t* dest, int dest_stride, Rect view,
     std::memset(dest + static_cast<std::size_t>(y) * dest_stride, 0,
                 static_cast<std::size_t>(view.w) * 4);
   }
+  if (has_ora_stack_ && group_affects_composite(ora_stack_)) {
+    composite_node(ora_stack_, dest, dest_stride, view, tool_override, tool_index, skip_index);
+    return;
+  }
   for (int i = 0; i < count(); ++i) {
+    if (i == skip_index) {
+      continue;
+    }
     const Layer& meta = at(i);
     if (!meta.visible()) {
       continue;
@@ -232,37 +305,11 @@ void LayerStack::composite_rect(std::uint8_t* dest, int dest_stride, Rect view,
 Color LayerStack::composite_pixel(int x, int y, const Layer* tool_override, int tool_index,
                                   int skip_index) const {
   std::uint8_t dest[4] = {0, 0, 0, 0};
-  for (int i = 0; i < count(); ++i) {
-    if (i == skip_index) {
-      continue;
-    }
-    const Layer& meta = at(i);
-    if (!meta.visible()) {
-      continue;
-    }
-    const Layer* src = display_layer(i, tool_override, tool_index);
-    const int sx = x - meta.offset_x();
-    const int sy = y - meta.offset_y();
-    if (sx < 0 || sy < 0 || sx >= src->width() || sy >= src->height()) {
-      continue;
-    }
-    const std::uint8_t* p = src->pixels() + static_cast<std::size_t>(sy) * src->stride() +
-                            static_cast<std::size_t>(sx) * 4;
-    blend_pixel(dest, p, meta.blend(), meta.opacity());
-  }
+  composite_rect(dest, 4, Rect{x, y, 1, 1}, tool_override, tool_index, skip_index);
   return {dest[0], dest[1], dest[2], dest[3]};
 }
 
 namespace {
-
-void blend_one(std::uint8_t* dest, int width, int height, const Layer& layer) {
-  if (!layer.visible()) {
-    return;
-  }
-  blend_layer_rect(dest, width, height, width * 4, layer.pixels(), layer.width(), layer.height(),
-                   layer.stride(), layer.offset_x(), layer.offset_y(), Rect{0, 0, width, height},
-                   layer.blend(), layer.opacity());
-}
 
 int forward_coverage(int src_a, int dest_a) {
   return src_a + (dest_a * (255 - src_a) + 127) / 255;
@@ -374,33 +421,78 @@ void uncomposite_normal(const std::uint8_t* below, const std::uint8_t* full, std
 
 }  // namespace
 
+void blend_into_view(std::uint8_t* dest, Rect view, const Layer& layer) {
+  if (!layer.visible() || view.empty()) {
+    return;
+  }
+  blend_layer_rect(dest, view.w, view.h, view.w * 4, layer.pixels(), layer.width(), layer.height(),
+                   layer.stride(), layer.offset_x(), layer.offset_y(), view, layer.blend(),
+                   layer.opacity());
+}
+
 bool LayerStack::merge_down(int index) {
   if (index <= 0 || index >= count()) {
     return false;
   }
-  const int width = width_;
-  const int height = height_;
-  const std::size_t pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-  std::vector<std::uint8_t> below(pixels * 4, 0);
-  for (int i = 0; i < index - 1; ++i) {
-    blend_one(below.data(), width, height, at(i));
-  }
-  std::vector<std::uint8_t> full = below;
-  const bool show = at(index - 1).visible() || at(index).visible();
-  blend_one(full.data(), width, height, at(index - 1));
-  blend_one(full.data(), width, height, at(index));
-
-  std::vector<std::uint8_t> baked(pixels * 4, 0);
-  for (std::size_t i = 0; i < pixels; ++i) {
-    uncomposite_normal(below.data() + i * 4, full.data() + i * 4, baked.data() + i * 4);
-  }
-
+  Layer& upper = at(index);
   Layer& lower = at(index - 1);
-  lower.set_pixels(width, height, baked.data(), width * 4);
-  lower.set_offset(0, 0);
-  lower.set_opacity(1.0f);
-  lower.set_blend(BlendMode::Normal);
-  lower.set_visible(show);
+  const Rect lower_r{lower.offset_x(), lower.offset_y(), lower.width(), lower.height()};
+  const Rect upper_r{upper.offset_x(), upper.offset_y(), upper.width(), upper.height()};
+  Rect uni = rect_union(lower_r, upper_r);
+  if (uni.empty()) {
+    uni = Rect{0, 0, 1, 1};
+  }
+  const bool show = lower.visible() || upper.visible();
+  // Backdrop bake only when the lower layer's own blend cannot be kept: a
+  // non-Normal mode at partial opacity. Restrict the search to the union of
+  // the two layers. Every other pair is a straight blend of the upper layer
+  // onto a copy of the lower, keeping the lower mode and opacity.
+  const bool backdrop = lower.visible() && lower.blend() != BlendMode::Normal &&
+                        lower.opacity() < 0.999f;
+  if (width_ > kSoftMaxSide || height_ > kSoftMaxSide) {
+    while (g_main_context_pending(nullptr)) {
+      g_main_context_iteration(nullptr, false);
+    }
+  }
+
+  const int stride = uni.w * 4;
+  std::vector<std::uint8_t> dest(static_cast<std::size_t>(uni.w) * static_cast<std::size_t>(uni.h) * 4,
+                                 0);
+  if (backdrop) {
+    std::vector<std::uint8_t> below(dest.size(), 0);
+    for (int i = 0; i < index - 1; ++i) {
+      blend_into_view(below.data(), uni, at(i));
+    }
+    std::vector<std::uint8_t> full = below;
+    blend_into_view(full.data(), uni, lower);
+    blend_into_view(full.data(), uni, upper);
+    for (int y = 0; y < uni.h; ++y) {
+      if ((y & 63) == 0 && (width_ > kSoftMaxSide || height_ > kSoftMaxSide) &&
+          g_main_context_pending(nullptr)) {
+        g_main_context_iteration(nullptr, false);
+      }
+      for (int x = 0; x < uni.w; ++x) {
+        const std::size_t i =
+            static_cast<std::size_t>(y) * static_cast<std::size_t>(uni.w) + static_cast<std::size_t>(x);
+        uncomposite_normal(below.data() + i * 4, full.data() + i * 4, dest.data() + i * 4);
+      }
+    }
+    lower.set_pixels(uni.w, uni.h, dest.data(), stride);
+    lower.set_offset(uni.x, uni.y);
+    lower.set_opacity(1.0f);
+    lower.set_blend(BlendMode::Normal);
+    lower.set_visible(show);
+  } else {
+    copy_layer_into(dest.data(), uni.w, stride, uni, lower);
+    if (upper.visible()) {
+      blend_layer_rect(dest.data(), uni.w, uni.h, stride, upper.pixels(), upper.width(),
+                       upper.height(), upper.stride(), upper.offset_x(), upper.offset_y(), uni,
+                       upper.blend(), upper.opacity());
+    }
+    lower.set_pixels(uni.w, uni.h, dest.data(), stride);
+    lower.set_offset(uni.x, uni.y);
+    lower.set_visible(show);
+  }
   take(index);
   active_ = index - 1;
   return true;

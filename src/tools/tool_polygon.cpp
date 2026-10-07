@@ -123,7 +123,8 @@ void PolygonTool::preview(bool closed) {
   Document& doc = host_->document();
   const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
-  tool.copy_from(active);
+  const Rect previous = dirty_;
+  restore_shape_preview(tool, active, previous);
   std::vector<int> xs = xs_;
   std::vector<int> ys = ys_;
   if (!closed && (hover_x_ != xs.back() || hover_y_ != ys.back())) {
@@ -149,7 +150,8 @@ void PolygonTool::preview(bool closed) {
                   &dirty_);
   }
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(
+      layer_dirty_to_canvas(host_->document().layers().active_layer(), rect_union(previous, dirty_)));
 }
 
 void PolygonTool::clear_preview() {

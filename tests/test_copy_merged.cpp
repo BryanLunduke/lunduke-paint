@@ -49,6 +49,17 @@ int main() {
   errors += expect(w == 1 && h == 1, "clipped size");
   errors += expect(get(rgba, w, 0, 0) == Color{0, 0, 255, 255}, "clipped pixel");
 
+  doc->selection().select_all(doc->width(), doc->height());
+  errors += expect(doc->selection().lift(doc->layers().active_layer(), doc->layers().active_index()),
+                   "lift the top layer");
+  lundukepaint::copy_merged_rgba(doc->layers(), doc->selection(), doc->width(), doc->height(), w, h,
+                             rgba);
+  errors += expect(w == 4 && h == 2, "floating copy is the selection");
+  if (w == 4 && h == 2) {
+    errors += expect(get(rgba, w, 0, 0) == Color{0, 0, 255, 255}, "float covers its pixel");
+    errors += expect(get(rgba, w, 1, 0) == Color{255, 0, 0, 255}, "hole keeps the layer below");
+  }
+
   if (errors != 0) {
     std::fprintf(stderr, "test_copy_merged: %d failure(s)\n", errors);
     return 1;

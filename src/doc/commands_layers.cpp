@@ -3,8 +3,10 @@
 #include "doc/commands_layers.hpp"
 
 #include "doc/document.hpp"
+#include "raster/transform.hpp"
 
 #include <algorithm>
+#include <memory>
 
 namespace lundukepaint {
 namespace {
@@ -135,30 +137,71 @@ void LayerPropsCommand::undo(Document& document) {
   apply_props(document.layers().at(index_), before_);
 }
 
-AllLayersBufferCommand::AllLayersBufferCommand(std::string name, int old_w, int old_h,
-                                               int old_active, std::vector<LayerSnapshot> old_layers,
-                                               int new_w, int new_h, int new_active,
-                                               std::vector<LayerSnapshot> new_layers)
+PlacedPixels run_stack_xform(const StackXform& xform, const Layer& layer) {
+  const std::uint8_t* src = layer.pixels();
+  const int w = layer.width();
+  const int h = layer.height();
+  const int stride = layer.stride();
+  const int ox = layer.offset_x();
+  const int oy = layer.offset_y();
+  switch (xform.kind) {
+    case StackXformKind::ResizeCanvas:
+      return place_resize_canvas(src, w, h, stride, ox, oy, xform.old_w, xform.old_h, xform.new_w,
+                                 xform.new_h, xform.fill);
+    case StackXformKind::Scale:
+      return place_scale(src, w, h, stride, ox, oy, xform.old_w, xform.old_h, xform.new_w,
+                         xform.new_h, xform.nearest);
+    case StackXformKind::Crop:
+      return place_crop(src, w, h, stride, ox, oy, xform.crop);
+    case StackXformKind::Rotate90:
+      return place_rotate_90_cw(src, w, h, stride, ox, oy, xform.old_w, xform.old_h);
+    case StackXformKind::Rotate180:
+      return place_rotate_180(src, w, h, stride, ox, oy, xform.old_w, xform.old_h);
+    case StackXformKind::Rotate270:
+      return place_rotate_90_ccw(src, w, h, stride, ox, oy, xform.old_w, xform.old_h);
+    case StackXformKind::FlipH:
+      return place_flip_h(src, w, h, stride, ox, oy, xform.old_w, xform.old_h);
+    case StackXformKind::FlipV:
+      return place_flip_v(src, w, h, stride, ox, oy, xform.old_w, xform.old_h);
+  }
+  return place_flip_h(src, w, h, stride, ox, oy, xform.old_w, xform.old_h);
+}
+
+AllLayersBufferCommand::AllLayersBufferCommand(std::string name, std::vector<LayerSnapshot> old_layers,
+                                               int old_active, StackXform xform)
     : name_(std::move(name)),
-      old_w_(old_w),
-      old_h_(old_h),
       old_active_(old_active),
-      new_w_(new_w),
-      new_h_(new_h),
-      new_active_(new_active),
-      old_layers_(std::move(old_layers)),
-      new_layers_(std::move(new_layers)) {}
+      xform_(xform),
+      old_layers_(std::move(old_layers)) {}
 
 void AllLayersBufferCommand::apply(Document& document) {
-  document.replace_stack(new_w_, new_h_, layers_from_snaps(new_layers_), new_active_);
+  std::vector<std::unique_ptr<Layer>> next;
+  next.reserve(static_cast<std::size_t>(document.layers().count()));
+  for (int i = 0; i < document.layers().count(); ++i) {
+    const Layer& layer = document.layers().at(i);
+    PlacedPixels placed = run_stack_xform(xform_, layer);
+    const int pw = std::max(1, placed.width);
+    const int ph = std::max(1, placed.height);
+    auto out = std::make_unique<Layer>(pw, ph, Color::transparent(), layer.name());
+    out->set_visible(layer.visible());
+    out->set_locked(layer.locked());
+    out->set_opacity(layer.opacity());
+    out->set_blend(layer.blend());
+    out->set_offset(placed.offset_x, placed.offset_y);
+    if (!placed.pixels.empty()) {
+      out->set_pixels(pw, ph, placed.pixels.data(), pw * 4);
+    }
+    next.push_back(std::move(out));
+  }
+  document.replace_stack(xform_.new_w, xform_.new_h, std::move(next), old_active_);
 }
 
 void AllLayersBufferCommand::undo(Document& document) {
-  document.replace_stack(old_w_, old_h_, layers_from_snaps(old_layers_), old_active_);
+  document.replace_stack(xform_.old_w, xform_.old_h, layers_from_snaps(old_layers_), old_active_);
 }
 
 Rect AllLayersBufferCommand::dirty_rect() const {
-  return {0, 0, std::max(old_w_, new_w_), std::max(old_h_, new_h_)};
+  return {0, 0, std::max(xform_.old_w, xform_.new_w), std::max(xform_.old_h, xform_.new_h)};
 }
 
 }  // namespace lundukepaint

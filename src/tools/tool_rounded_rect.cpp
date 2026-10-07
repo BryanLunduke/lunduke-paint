@@ -137,7 +137,8 @@ void RoundedRectTool::preview(int x1, int y1, bool constrain) {
   Document& doc = host_->document();
   const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();
-  tool.copy_from(active);
+  const Rect previous = dirty_;
+  restore_shape_preview(tool, active, previous);
   x1_ = x1;
   y1_ = y1;
   if (constrain) {
@@ -150,7 +151,8 @@ void RoundedRectTool::preview(int x1, int y1, bool constrain) {
                     x1_ - ox, y1_ - oy, thickness_, radius_, stroke_color(button_), fill_mode_,
                     antialias_, &dirty_);
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(
+      layer_dirty_to_canvas(host_->document().layers().active_layer(), rect_union(previous, dirty_)));
 }
 
 void RoundedRectTool::on_motion(CanvasEvent event) {
