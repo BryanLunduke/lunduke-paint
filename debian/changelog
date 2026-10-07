@@ -1,3 +1,19 @@
+lunduke-paint (0.9-3) unstable; urgency=medium
+
+  * Undo trim no longer treats a dropped baseline as the saved file.
+    Masked selections punch, stamp, and delete only covered pixels.
+  * Save, print, quit, and close stamp an open text box. A failed float
+    stamp aborts the save and keeps the recovery file. Saves write an
+    exclusive temporary file, fsync, and rename, and refuse a final symlink.
+  * Save As replaces the extension on the file name only. OpenRaster reads
+    reject oversized entries, and non-isolated groups composite against the
+    backdrop. Flood fill and merge down no longer pump the main loop.
+  * Crash recovery encodes without GdkPixbuf, skips a live effect preview,
+    and uses a private 0700 directory. Multi-frame GIFs warn on open.
+    Recent-file labels do not treat underscore as a mnemonic.
+
+ -- Phil <phil@brushpad.local>  Wed, 07 Oct 2026 13:00:00 -0500
+
 lunduke-paint (0.9-2) unstable; urgency=medium
 
   * Selection move composites the visible rect once and blends the float

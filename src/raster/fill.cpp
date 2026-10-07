@@ -2,8 +2,6 @@
 
 #include "raster/fill.hpp"
 
-#include <glib.h>
-
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -31,18 +29,9 @@ struct Span {
   int x = 0;
 };
 
-void pump_if_slow(gint64& last_us) {
-  const gint64 now = g_get_monotonic_time();
-  if (now - last_us < 200000) {
-    return;
-  }
-  last_us = now;
-  while (g_main_context_pending(nullptr)) {
-    g_main_context_iteration(nullptr, false);
-  }
-}
-
 // Scanline flood. Rejected pixels are marked the first time they are tested.
+// This does not pump the GTK main loop: a nested iteration can free the layer
+// buffer the fill is writing.
 // `paint` writes replacement; otherwise only the filled state is recorded.
 bool scanline_flood(const std::uint8_t* src, std::uint8_t* dest, int width, int height, int stride,
                     int x, int y, int tolerance, Color replacement, bool paint, Rect* bounds,
@@ -90,10 +79,8 @@ bool scanline_flood(const std::uint8_t* src, std::uint8_t* dest, int width, int 
   int maxy = -1;
   std::vector<Span> stack;
   stack.push_back(Span{y, x});
-  gint64 last_us = g_get_monotonic_time();
 
   while (!stack.empty()) {
-    pump_if_slow(last_us);
     const Span span = stack.back();
     stack.pop_back();
     int left = span.x;
@@ -150,6 +137,10 @@ bool scanline_flood(const std::uint8_t* src, std::uint8_t* dest, int width, int 
 }
 
 }  // namespace
+
+int mutation_main_loop_pumps() {
+  return 0;
+}
 
 void flood_fill(std::uint8_t* rgba, int width, int height, int stride, int x, int y,
                 Color replacement, int tolerance, Rect* dirty) {

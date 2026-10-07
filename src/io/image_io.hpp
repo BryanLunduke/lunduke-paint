@@ -17,6 +17,8 @@ struct LoadedImage {
   std::vector<std::uint8_t> rgba;
   std::string layer_name;
   std::string error;
+  // True when the file is an animation and only the first frame was loaded.
+  bool animated = false;
   bool ok() const { return error.empty() && width > 0 && height > 0; }
 };
 
@@ -24,6 +26,26 @@ enum class ImageFormat { Png, Jpeg, Bmp, Ora, Gif, Unknown };
 
 ImageFormat format_from_path(const std::string& path);
 std::string format_extension(ImageFormat format);
+
+// Replace the extension of the final path component. A dot in a parent
+// directory is left alone. `extension` may or may not start with '.'.
+// "/home/me.backup/portrait" + ".png" -> "/home/me.backup/portrait.png".
+std::string replace_path_extension(const std::string& path, const std::string& extension);
+
+// True when the loader reports more than one frame (animated GIF).
+bool image_has_multiple_frames(const std::string& path);
+
+// Exclusive temp file in the destination directory. Refuses a final symlink.
+// commit fsyncs and renames over `path`. abort unlinks the temp.
+struct AtomicFile {
+  int fd = -1;
+  std::string tmp_path;
+  std::string dest_path;
+};
+
+bool atomic_create(const std::string& path, AtomicFile& out, std::string& error);
+bool atomic_commit(AtomicFile& file, std::string& error);
+void atomic_abort(AtomicFile& file);
 
 LoadedImage load_flat_image(const std::string& path);
 

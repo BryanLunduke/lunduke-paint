@@ -30,9 +30,13 @@ public:
   double view_zoom() const { return view_zoom_; }
   void set_view_zoom(double zoom) { view_zoom_ = zoom; }
 
-  bool dirty() const { return dirty_; }
+  bool dirty() const { return dirty_ || unsaved_overlay_; }
   void set_dirty(bool dirty);
   void mark_clean();
+  // An open text box (or any overlay) that is not in the layer stack yet.
+  // Save must not mark the document clean while this is set.
+  void set_unsaved_overlay(bool on);
+  bool unsaved_overlay() const { return unsaved_overlay_; }
 
   // Nested OpenRaster stacks. Null when the file has no layer groups.
   // Cleared when layers are added, removed, or reordered.
@@ -117,6 +121,7 @@ private:
   std::string path_;
   double view_zoom_ = 1.0;
   bool dirty_ = false;
+  bool unsaved_overlay_ = false;
   bool has_ora_stack_ = false;
   OraNode ora_stack_{};
   Color fg_ = Color::black();

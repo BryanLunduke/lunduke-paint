@@ -15,6 +15,7 @@
 #include <sigc++/connection.h>
 #include <sigc++/signal.h>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -138,6 +139,13 @@ private:
   Cairo::RefPtr<Cairo::ImageSurface> blit_surface_;
   int blit_w_{0};
   int blit_h_{0};
+  // Straight composite of the floating selection's origin rect with the
+  // source layer omitted. Reused across ant ticks while that hole is unchanged.
+  std::vector<std::uint8_t> hole_cache_;
+  Rect hole_cache_origin_{};
+  int hole_cache_skip_{-2};
+  std::uint64_t hole_cache_fp_{0};
+  bool hole_cache_valid_{false};
   Cairo::RefPtr<Cairo::SurfacePattern> checker_pattern_;
   bool space_down_{false};
   bool panning_{false};

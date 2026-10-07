@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
+#include <list>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -55,20 +57,20 @@ bool write_zip_entry(archive* a, const char* path, const void* data, std::size_t
   return true;
 }
 
-bool read_zip(const std::string& path, std::map<std::string, std::vector<std::uint8_t>>& files,
-              std::string& error) {
+bool read_zip_capped(const std::string& path, std::map<std::string, std::vector<std::uint8_t>>& files,
+                     std::string& error, std::size_t entry_cap, std::size_t total_cap) {
   archive* a = archive_read_new();
   if (a == nullptr) {
     error = "Could not allocate archive reader";
     return false;
   }
   archive_read_support_format_zip(a);
-  archive_read_support_filter_all(a);
   if (archive_read_open_filename(a, path.c_str(), 16384) != ARCHIVE_OK) {
     error = archive_err(a, "Could not open OpenRaster file");
     archive_read_free(a);
     return false;
   }
+  std::size_t total = 0;
   archive_entry* entry = nullptr;
   while (true) {
     const int r = archive_read_next_header(a, &entry);
@@ -81,16 +83,19 @@ bool read_zip(const std::string& path, std::map<std::string, std::vector<std::ui
       return false;
     }
     const char* name = archive_entry_pathname(entry);
-    if (name == nullptr) {
-      continue;
-    }
-    if (archive_entry_filetype(entry) != AE_IFREG) {
+    if (name == nullptr || archive_entry_filetype(entry) != AE_IFREG) {
       archive_read_data_skip(a);
       continue;
     }
     std::vector<std::uint8_t> data;
     const la_int64_t sz = archive_entry_size(entry);
     if (sz > 0) {
+      if (static_cast<std::uint64_t>(sz) > entry_cap ||
+          total > total_cap || static_cast<std::size_t>(sz) > total_cap - total) {
+        error = "OpenRaster entry exceeds the size limit";
+        archive_read_free(a);
+        return false;
+      }
       data.resize(static_cast<std::size_t>(sz));
       std::size_t got = 0;
       while (got < data.size()) {
@@ -102,6 +107,7 @@ bool read_zip(const std::string& path, std::map<std::string, std::vector<std::ui
         }
         got += static_cast<std::size_t>(n);
       }
+      total += data.size();
     } else {
       std::uint8_t buf[4096];
       while (true) {
@@ -114,8 +120,17 @@ bool read_zip(const std::string& path, std::map<std::string, std::vector<std::ui
           archive_read_free(a);
           return false;
         }
-        data.insert(data.end(), buf, buf + n);
+        if (!ora_append_capped(data, buf, static_cast<std::size_t>(n), entry_cap, error)) {
+          archive_read_free(a);
+          return false;
+        }
+        if (total > total_cap || data.size() > total_cap - total) {
+          error = "OpenRaster file exceeds the size limit";
+          archive_read_free(a);
+          return false;
+        }
       }
+      total += data.size();
     }
     files[name] = std::move(data);
   }
@@ -319,7 +334,7 @@ bool group_affects_load(const OraNode& node) {
   if (!node.is_stack) {
     return false;
   }
-  if (!node.visible || node.opacity < 0.999f || node.blend != BlendMode::Normal) {
+  if (!node.visible || node.opacity < 0.999f || node.blend != BlendMode::Normal || node.isolate) {
     return true;
   }
   for (const OraNode& child : node.children) {
@@ -356,15 +371,21 @@ struct OraFileParts {
 };
 
 bool write_ora_parts(const std::string& path, const OraFileParts& parts, std::string& error) {
+  AtomicFile dest;
+  if (!atomic_create(path, dest, error)) {
+    return false;
+  }
   archive* a = archive_write_new();
   if (a == nullptr) {
     error = "Could not allocate archive writer";
+    atomic_abort(dest);
     return false;
   }
   archive_write_set_format_zip(a);
-  if (archive_write_open_filename(a, path.c_str()) != ARCHIVE_OK) {
+  if (archive_write_open_fd(a, dest.fd) != ARCHIVE_OK) {
     error = archive_err(a, "Could not create OpenRaster file");
     archive_write_free(a);
+    atomic_abort(dest);
     return false;
   }
 
@@ -372,6 +393,7 @@ bool write_ora_parts(const std::string& path, const OraFileParts& parts, std::st
   if (!write_zip_entry(a, "mimetype", kMimetype, std::strlen(kMimetype))) {
     error = archive_err(a, "Could not write mimetype");
     archive_write_free(a);
+    atomic_abort(dest);
     return false;
   }
   archive_write_zip_set_compression_deflate(a);
@@ -379,6 +401,7 @@ bool write_ora_parts(const std::string& path, const OraFileParts& parts, std::st
   if (!write_zip_entry(a, "stack.xml", parts.stack_xml.data(), parts.stack_xml.size())) {
     error = archive_err(a, "Could not write stack.xml");
     archive_write_free(a);
+    atomic_abort(dest);
     return false;
   }
 
@@ -388,6 +411,7 @@ bool write_ora_parts(const std::string& path, const OraFileParts& parts, std::st
     if (!write_zip_entry(a, name.c_str(), png.data(), png.size())) {
       error = archive_err(a, "Could not write layer PNG");
       archive_write_free(a);
+      atomic_abort(dest);
       return false;
     }
   }
@@ -396,6 +420,7 @@ bool write_ora_parts(const std::string& path, const OraFileParts& parts, std::st
     if (!write_zip_entry(a, "mergedimage.png", parts.merged_png.data(), parts.merged_png.size())) {
       error = archive_err(a, "Could not write mergedimage.png");
       archive_write_free(a);
+      atomic_abort(dest);
       return false;
     }
   }
@@ -403,6 +428,7 @@ bool write_ora_parts(const std::string& path, const OraFileParts& parts, std::st
     if (!write_zip_entry(a, "Thumbnails/thumbnail.png", parts.thumb_png.data(), parts.thumb_png.size())) {
       error = archive_err(a, "Could not write Thumbnails/thumbnail.png");
       archive_write_free(a);
+      atomic_abort(dest);
       return false;
     }
   }
@@ -410,16 +436,43 @@ bool write_ora_parts(const std::string& path, const OraFileParts& parts, std::st
   if (archive_write_close(a) != ARCHIVE_OK) {
     error = archive_err(a, "Could not finish OpenRaster file");
     archive_write_free(a);
+    atomic_abort(dest);
     return false;
   }
   archive_write_free(a);
-  return true;
+  return atomic_commit(dest, error);
 }
 
 namespace {
 
+struct PngCacheEntry {
+  std::vector<std::uint8_t> png;
+  std::list<std::pair<std::uint64_t, std::uint64_t>>::iterator lru;
+};
+
 std::mutex g_png_cache_mu;
-std::map<std::pair<std::uint64_t, std::uint64_t>, std::vector<std::uint8_t>> g_png_cache;
+std::list<std::pair<std::uint64_t, std::uint64_t>> g_png_lru;
+std::map<std::pair<std::uint64_t, std::uint64_t>, PngCacheEntry> g_png_cache;
+std::size_t g_png_bytes = 0;
+std::size_t g_png_cap = 32u * 1024u * 1024u;
+
+void png_cache_erase_locked(std::map<std::pair<std::uint64_t, std::uint64_t>, PngCacheEntry>::iterator it) {
+  g_png_bytes -= it->second.png.size();
+  g_png_lru.erase(it->second.lru);
+  g_png_cache.erase(it);
+}
+
+void png_cache_evict_locked(std::size_t incoming) {
+  while (!g_png_lru.empty() && g_png_bytes + incoming > g_png_cap) {
+    const auto key = g_png_lru.front();
+    const auto it = g_png_cache.find(key);
+    if (it == g_png_cache.end()) {
+      g_png_lru.pop_front();
+      continue;
+    }
+    png_cache_erase_locked(it);
+  }
+}
 
 std::vector<std::uint8_t> png_for_pixels(std::uint64_t identity, std::uint64_t revision,
                                         const std::uint8_t* pixels, int width, int height,
@@ -429,19 +482,25 @@ std::vector<std::uint8_t> png_for_pixels(std::uint64_t identity, std::uint64_t r
     std::lock_guard<std::mutex> lock(g_png_cache_mu);
     const auto it = g_png_cache.find(key);
     if (it != g_png_cache.end()) {
-      return it->second;
+      g_png_lru.splice(g_png_lru.end(), g_png_lru, it->second.lru);
+      return it->second.png;
     }
   }
   std::vector<std::uint8_t> png;
   if (!encode_png_memory(pixels, width, height, stride, png, error)) {
     return {};
   }
-  if (identity != 0) {
+  if (identity != 0 && png.size() <= g_png_cap) {
     std::lock_guard<std::mutex> lock(g_png_cache_mu);
-    if (g_png_cache.size() > 64) {
-      g_png_cache.clear();
+    png_cache_evict_locked(png.size());
+    if (g_png_bytes + png.size() <= g_png_cap) {
+      g_png_lru.push_back(key);
+      PngCacheEntry entry;
+      entry.png = png;
+      entry.lru = std::prev(g_png_lru.end());
+      g_png_bytes += png.size();
+      g_png_cache.emplace(key, std::move(entry));
     }
-    g_png_cache[key] = png;
   }
   return png;
 }
@@ -560,93 +619,35 @@ bool save_ora_snapshot(const std::string& path, const OraSnapshot& snapshot, std
   return write_ora_parts(path, parts, error);
 }
 
-bool load_ora_preview_png(const std::string& path, std::vector<std::uint8_t>& png) {
+bool load_ora_preview_png_limited(const std::string& path, std::vector<std::uint8_t>& png,
+                                  std::size_t entry_cap) {
   png.clear();
-  archive* a = archive_read_new();
-  if (a == nullptr) {
+  std::map<std::string, std::vector<std::uint8_t>> files;
+  std::string error;
+  if (!read_zip_capped(path, files, error, entry_cap, kMaxOraTotalBytes)) {
     return false;
   }
-  archive_read_support_format_zip(a);
-  archive_read_support_filter_all(a);
-  if (archive_read_open_filename(a, path.c_str(), 16384) != ARCHIVE_OK) {
-    archive_read_free(a);
-    return false;
-  }
-  std::vector<std::uint8_t> merged;
-  std::vector<std::uint8_t> thumb;
-  archive_entry* entry = nullptr;
-  bool failed = false;
-  while (!failed) {
-    const int r = archive_read_next_header(a, &entry);
-    if (r == ARCHIVE_EOF) {
-      break;
-    }
-    if (r != ARCHIVE_OK) {
-      failed = true;
-      break;
-    }
-    const char* name = archive_entry_pathname(entry);
-    const bool want_merged = name != nullptr && std::strcmp(name, "mergedimage.png") == 0;
-    const bool want_thumb = name != nullptr && std::strcmp(name, "Thumbnails/thumbnail.png") == 0;
-    if ((!want_merged && !want_thumb) || archive_entry_filetype(entry) != AE_IFREG) {
-      archive_read_data_skip(a);
-      continue;
-    }
-    std::vector<std::uint8_t> data;
-    const la_int64_t sz = archive_entry_size(entry);
-    if (sz > 0 && sz < 64 * 1024 * 1024) {
-      data.resize(static_cast<std::size_t>(sz));
-      std::size_t got = 0;
-      while (got < data.size()) {
-        const la_ssize_t n = archive_read_data(a, data.data() + got, data.size() - got);
-        if (n <= 0) {
-          failed = true;
-          break;
-        }
-        got += static_cast<std::size_t>(n);
-      }
-    } else if (sz <= 0) {
-      std::uint8_t buf[4096];
-      while (!failed) {
-        const la_ssize_t n = archive_read_data(a, buf, sizeof(buf));
-        if (n == 0) {
-          break;
-        }
-        if (n < 0) {
-          failed = true;
-          break;
-        }
-        data.insert(data.end(), buf, buf + n);
-      }
-    } else {
-      archive_read_data_skip(a);
-      continue;
-    }
-    if (failed) {
-      break;
-    }
-    if (want_merged) {
-      merged = std::move(data);
-    } else {
-      thumb = std::move(data);
-    }
-  }
-  archive_read_free(a);
-  if (!merged.empty()) {
-    png = std::move(merged);
+  const auto merged = files.find("mergedimage.png");
+  if (merged != files.end() && !merged->second.empty()) {
+    png = std::move(merged->second);
     return true;
   }
-  if (!thumb.empty()) {
-    png = std::move(thumb);
+  const auto thumb = files.find("Thumbnails/thumbnail.png");
+  if (thumb != files.end() && !thumb->second.empty()) {
+    png = std::move(thumb->second);
     return true;
   }
   return false;
 }
 
+bool load_ora_preview_png(const std::string& path, std::vector<std::uint8_t>& png) {
+  return load_ora_preview_png_limited(path, png, kMaxOraEntryBytes);
+}
+
 LoadedOra load_ora(const std::string& path) {
   LoadedOra out;
   std::map<std::string, std::vector<std::uint8_t>> files;
-  if (!read_zip(path, files, out.error)) {
+  if (!read_zip_capped(path, files, out.error, kMaxOraEntryBytes, kMaxOraTotalBytes)) {
     return out;
   }
   auto mit = files.find("mimetype");
@@ -691,6 +692,24 @@ LoadedOra load_ora(const std::string& path) {
     out.error = "OpenRaster file has no layers";
     return out;
   }
+  int layer_nodes = 0;
+  const auto count_layers = [&layer_nodes](auto&& self, const pugi::xml_node& node) -> void {
+    for (auto child : node.children()) {
+      if (child.type() != pugi::node_element) {
+        continue;
+      }
+      if (std::strcmp(child.name(), "layer") == 0) {
+        ++layer_nodes;
+      } else if (std::strcmp(child.name(), "stack") == 0) {
+        self(self, child);
+      }
+    }
+  };
+  count_layers(count_layers, stack);
+  if (layer_nodes > kHardMaxLayers) {
+    out.error = "OpenRaster file has too many layers";
+    return out;
+  }
   std::vector<LayerSnapshot> top_to_bottom;
   OraNode root;
   fill_stack_attrs(stack, root);
@@ -713,10 +732,68 @@ LoadedOra load_ora(const std::string& path) {
   const bool keep_tree = nested || root.x != 0 || root.y != 0 || group_affects_load(root);
   if (keep_tree) {
     out.nested_groups = nested;
+    out.has_stack = true;
     out.stack = std::move(root);
   }
   out.layers = std::move(top_to_bottom);
   return out;
+}
+
+bool ora_append_capped(std::vector<std::uint8_t>& data, const std::uint8_t* bytes, std::size_t n,
+                       std::size_t cap, std::string& error) {
+  if (bytes == nullptr && n > 0) {
+    error = "OpenRaster entry exceeds the size limit";
+    return false;
+  }
+  if (n > cap || data.size() > cap - n) {
+    error = "OpenRaster entry exceeds the size limit";
+    return false;
+  }
+  data.insert(data.end(), bytes, bytes + n);
+  return true;
+}
+
+std::size_t ora_max_entry_bytes() {
+  return kMaxOraEntryBytes;
+}
+
+std::size_t ora_max_total_bytes() {
+  return kMaxOraTotalBytes;
+}
+
+bool read_ora_zip(const std::string& path, std::map<std::string, std::vector<std::uint8_t>>& files,
+                  std::string& error, std::size_t entry_cap, std::size_t total_cap) {
+  return read_zip_capped(path, files, error, entry_cap, total_cap);
+}
+
+void forget_layer_png(std::uint64_t identity) {
+  if (identity == 0) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(g_png_cache_mu);
+  for (auto it = g_png_cache.begin(); it != g_png_cache.end();) {
+    if (it->first.first == identity) {
+      png_cache_erase_locked(it++);
+    } else {
+      ++it;
+    }
+  }
+}
+
+std::size_t ora_png_cache_entries() {
+  std::lock_guard<std::mutex> lock(g_png_cache_mu);
+  return g_png_cache.size();
+}
+
+std::size_t ora_png_cache_bytes() {
+  std::lock_guard<std::mutex> lock(g_png_cache_mu);
+  return g_png_bytes;
+}
+
+void ora_debug_set_png_cache_cap(std::size_t bytes) {
+  std::lock_guard<std::mutex> lock(g_png_cache_mu);
+  g_png_cap = bytes == 0 ? 1 : bytes;
+  png_cache_evict_locked(0);
 }
 
 }  // namespace lundukepaint

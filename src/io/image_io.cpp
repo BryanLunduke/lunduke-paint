@@ -6,12 +6,17 @@
 #include "raster/transform.hpp"
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <zlib.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cctype>
 #include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace lundukepaint {
 namespace {
@@ -92,7 +97,158 @@ GdkPixbuf* pixbuf_from_rgba(const std::uint8_t* rgba, int width, int height, int
   return pixbuf;
 }
 
+void append_be32(std::vector<std::uint8_t>& out, std::uint32_t value) {
+  out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xff));
+  out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xff));
+  out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xff));
+  out.push_back(static_cast<std::uint8_t>(value & 0xff));
+}
+
+void png_chunk(std::vector<std::uint8_t>& out, const char type[4], const std::uint8_t* data,
+               std::size_t size) {
+  append_be32(out, static_cast<std::uint32_t>(size));
+  const std::size_t type_at = out.size();
+  out.insert(out.end(), type, type + 4);
+  if (size > 0 && data != nullptr) {
+    out.insert(out.end(), data, data + size);
+  }
+  const uLong crc = crc32(0L, out.data() + type_at, static_cast<uInt>(4 + size));
+  append_be32(out, static_cast<std::uint32_t>(crc));
+}
+
+bool write_all_fd(int fd, const void* data, std::size_t size) {
+  const char* bytes = static_cast<const char*>(data);
+  std::size_t off = 0;
+  while (off < size) {
+    const ssize_t wrote = ::write(fd, bytes + off, size - off);
+    if (wrote < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return false;
+    }
+    off += static_cast<std::size_t>(wrote);
+  }
+  return true;
+}
+
 }  // namespace
+
+std::string replace_path_extension(const std::string& path, const std::string& extension) {
+  std::string ext = extension;
+  if (ext.empty()) {
+    ext = ".png";
+  } else if (ext[0] != '.') {
+    ext.insert(ext.begin(), '.');
+  }
+  const auto slash = path.find_last_of("/\\");
+  const std::string dir = slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+  std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+  const auto dot = name.find_last_of('.');
+  if (dot != std::string::npos && dot != 0) {
+    name.resize(dot);
+  }
+  return dir + name + ext;
+}
+
+bool image_has_multiple_frames(const std::string& path) {
+  GError* error = nullptr;
+  GdkPixbufAnimation* anim = gdk_pixbuf_animation_new_from_file(path.c_str(), &error);
+  if (anim == nullptr) {
+    if (error != nullptr) {
+      g_error_free(error);
+    }
+    return false;
+  }
+  const bool multi = gdk_pixbuf_animation_is_static_image(anim) == FALSE;
+  g_object_unref(anim);
+  return multi;
+}
+
+bool atomic_create(const std::string& path, AtomicFile& out, std::string& error) {
+  out = {};
+  if (path.empty()) {
+    error = "No path";
+    return false;
+  }
+  struct stat st;
+  if (lstat(path.c_str(), &st) == 0) {
+    if (S_ISLNK(st.st_mode)) {
+      error = "Refusing to follow a symbolic link";
+      return false;
+    }
+    if (!S_ISREG(st.st_mode)) {
+      error = "Destination is not a regular file";
+      return false;
+    }
+  }
+  const auto slash = path.find_last_of('/');
+  const std::string dir = slash == std::string::npos ? std::string(".") : path.substr(0, slash);
+  const std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
+  unsigned char rnd[8] = {};
+  const int urandom = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  if (urandom >= 0) {
+    const ssize_t got = ::read(urandom, rnd, sizeof(rnd));
+    ::close(urandom);
+    if (got != static_cast<ssize_t>(sizeof(rnd))) {
+      const unsigned mix = static_cast<unsigned>(::getpid());
+      std::memcpy(rnd, &mix, sizeof(mix));
+    }
+  }
+  char suffix[40];
+  std::snprintf(suffix, sizeof(suffix), ".%d.%02x%02x%02x%02x%02x%02x%02x%02x", ::getpid(), rnd[0],
+                rnd[1], rnd[2], rnd[3], rnd[4], rnd[5], rnd[6], rnd[7]);
+  out.dest_path = path;
+  out.tmp_path = dir + "/." + base + ".tmp" + suffix;
+  out.fd = ::open(out.tmp_path.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY | O_CLOEXEC, 0600);
+  if (out.fd < 0) {
+    error = "Could not create a temporary file";
+    out.tmp_path.clear();
+    return false;
+  }
+  return true;
+}
+
+bool atomic_commit(AtomicFile& file, std::string& error) {
+  if (file.fd < 0) {
+    error = "No temporary file";
+    return false;
+  }
+  if (::fsync(file.fd) != 0) {
+    error = "Could not flush the temporary file";
+    atomic_abort(file);
+    return false;
+  }
+  if (::close(file.fd) != 0) {
+    file.fd = -1;
+    error = "Could not close the temporary file";
+    if (!file.tmp_path.empty()) {
+      ::unlink(file.tmp_path.c_str());
+      file.tmp_path.clear();
+    }
+    return false;
+  }
+  file.fd = -1;
+  if (::rename(file.tmp_path.c_str(), file.dest_path.c_str()) != 0) {
+    error = "Could not replace the destination file";
+    ::unlink(file.tmp_path.c_str());
+    file.tmp_path.clear();
+    return false;
+  }
+  file.tmp_path.clear();
+  return true;
+}
+
+void atomic_abort(AtomicFile& file) {
+  if (file.fd >= 0) {
+    ::close(file.fd);
+    file.fd = -1;
+  }
+  if (!file.tmp_path.empty()) {
+    ::unlink(file.tmp_path.c_str());
+    file.tmp_path.clear();
+  }
+}
 
 ImageFormat format_from_path(const std::string& path) {
   const std::string ext = lower_ext(path);
@@ -134,14 +290,23 @@ std::string format_extension(ImageFormat format) {
 LoadedImage load_flat_image(const std::string& path) {
   LoadedImage out;
   GError* error = nullptr;
-  GdkPixbuf* pixbuf = gdk_pixbuf_new_from_file(path.c_str(), &error);
-  if (pixbuf == nullptr) {
+  GdkPixbufAnimation* anim = gdk_pixbuf_animation_new_from_file(path.c_str(), &error);
+  if (anim == nullptr) {
     out.error = error != nullptr ? error->message : "Could not open image";
     if (error != nullptr) {
       g_error_free(error);
     }
     return out;
   }
+  out.animated = gdk_pixbuf_animation_is_static_image(anim) == FALSE;
+  GdkPixbuf* pixbuf = gdk_pixbuf_animation_get_static_image(anim);
+  if (pixbuf == nullptr) {
+    out.error = "Could not read the first frame";
+    g_object_unref(anim);
+    return out;
+  }
+  g_object_ref(pixbuf);
+  g_object_unref(anim);
   out.width = gdk_pixbuf_get_width(pixbuf);
   out.height = gdk_pixbuf_get_height(pixbuf);
   if (out.width > kHardMaxSide || out.height > kHardMaxSide) {
@@ -161,62 +326,110 @@ bool save_flat_image(const std::string& path, ImageFormat format, const std::uin
     error = "Nothing to save";
     return false;
   }
-  const bool flatten = format == ImageFormat::Jpeg || format == ImageFormat::Bmp;
-  GdkPixbuf* pixbuf = pixbuf_from_rgba(rgba, width, height, stride, flatten);
-  if (pixbuf == nullptr) {
-    error = "Could not allocate image buffer";
-    return false;
+  std::vector<std::uint8_t> encoded;
+  if (format == ImageFormat::Png || format == ImageFormat::Ora || format == ImageFormat::Unknown ||
+      format == ImageFormat::Gif) {
+    if (format != ImageFormat::Png) {
+      error = "Unsupported flat image format";
+      return false;
+    }
+    if (!encode_png_memory(rgba, width, height, stride, encoded, error)) {
+      return false;
+    }
+  } else {
+    const bool flatten = format == ImageFormat::Jpeg || format == ImageFormat::Bmp;
+    GdkPixbuf* pixbuf = pixbuf_from_rgba(rgba, width, height, stride, flatten);
+    if (pixbuf == nullptr) {
+      error = "Could not allocate image buffer";
+      return false;
+    }
+    gchar* buf = nullptr;
+    gsize size = 0;
+    GError* gerror = nullptr;
+    gboolean ok = FALSE;
+    if (format == ImageFormat::Jpeg) {
+      if (jpeg_quality < 1) {
+        jpeg_quality = 1;
+      }
+      if (jpeg_quality > 100) {
+        jpeg_quality = 100;
+      }
+      char quality[8];
+      std::snprintf(quality, sizeof(quality), "%d", jpeg_quality);
+      ok = gdk_pixbuf_save_to_buffer(pixbuf, &buf, &size, "jpeg", &gerror, "quality", quality, nullptr);
+    } else {
+      ok = gdk_pixbuf_save_to_buffer(pixbuf, &buf, &size, "bmp", &gerror, nullptr);
+    }
+    g_object_unref(pixbuf);
+    if (!ok || buf == nullptr) {
+      error = gerror != nullptr ? gerror->message : "Save failed";
+      if (gerror != nullptr) {
+        g_error_free(gerror);
+      }
+      g_free(buf);
+      return false;
+    }
+    encoded.assign(reinterpret_cast<std::uint8_t*>(buf), reinterpret_cast<std::uint8_t*>(buf) + size);
+    g_free(buf);
   }
 
-  GError* gerror = nullptr;
-  gboolean ok = FALSE;
-  if (format == ImageFormat::Jpeg) {
-    if (jpeg_quality < 1) {
-      jpeg_quality = 1;
-    }
-    if (jpeg_quality > 100) {
-      jpeg_quality = 100;
-    }
-    char quality[8];
-    std::snprintf(quality, sizeof(quality), "%d", jpeg_quality);
-    ok = gdk_pixbuf_save(pixbuf, path.c_str(), "jpeg", &gerror, "quality", quality, nullptr);
-  } else if (format == ImageFormat::Bmp) {
-    ok = gdk_pixbuf_save(pixbuf, path.c_str(), "bmp", &gerror, nullptr);
-  } else {
-    ok = gdk_pixbuf_save(pixbuf, path.c_str(), "png", &gerror, nullptr);
-  }
-  g_object_unref(pixbuf);
-  if (!ok) {
-    error = gerror != nullptr ? gerror->message : "Save failed";
-    if (gerror != nullptr) {
-      g_error_free(gerror);
-    }
+  AtomicFile file;
+  if (!atomic_create(path, file, error)) {
     return false;
   }
-  return true;
+  if (!write_all_fd(file.fd, encoded.data(), encoded.size())) {
+    error = "Could not write the temporary file";
+    atomic_abort(file);
+    return false;
+  }
+  return atomic_commit(file, error);
 }
 
 bool encode_png_memory(const std::uint8_t* rgba, int width, int height, int stride,
                        std::vector<std::uint8_t>& out, std::string& error) {
-  GdkPixbuf* pixbuf = pixbuf_from_rgba(rgba, width, height, stride, false);
-  if (pixbuf == nullptr) {
+  out.clear();
+  if (rgba == nullptr || width < 1 || height < 1 || stride < width * 4) {
     error = "Could not allocate PNG buffer";
     return false;
   }
-  gchar* buf = nullptr;
-  gsize size = 0;
-  GError* gerror = nullptr;
-  const gboolean ok = gdk_pixbuf_save_to_buffer(pixbuf, &buf, &size, "png", &gerror, nullptr);
-  g_object_unref(pixbuf);
-  if (!ok || buf == nullptr) {
-    error = gerror != nullptr ? gerror->message : "PNG encode failed";
-    if (gerror != nullptr) {
-      g_error_free(gerror);
-    }
+  std::vector<std::uint8_t> raw(static_cast<std::size_t>(height) *
+                                (static_cast<std::size_t>(width) * 4 + 1));
+  for (int y = 0; y < height; ++y) {
+    std::uint8_t* row = raw.data() + static_cast<std::size_t>(y) * (static_cast<std::size_t>(width) * 4 + 1);
+    row[0] = 0;
+    std::memcpy(row + 1, rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride),
+                static_cast<std::size_t>(width) * 4);
+  }
+  uLongf bound = compressBound(static_cast<uLong>(raw.size()));
+  std::vector<std::uint8_t> compressed(bound);
+  const int z = compress2(compressed.data(), &bound, raw.data(), static_cast<uLong>(raw.size()),
+                          Z_DEFAULT_COMPRESSION);
+  if (z != Z_OK) {
+    error = "PNG encode failed";
     return false;
   }
-  out.assign(reinterpret_cast<std::uint8_t*>(buf), reinterpret_cast<std::uint8_t*>(buf) + size);
-  g_free(buf);
+  compressed.resize(bound);
+
+  std::uint8_t ihdr[13];
+  ihdr[0] = static_cast<std::uint8_t>((static_cast<unsigned>(width) >> 24) & 0xff);
+  ihdr[1] = static_cast<std::uint8_t>((static_cast<unsigned>(width) >> 16) & 0xff);
+  ihdr[2] = static_cast<std::uint8_t>((static_cast<unsigned>(width) >> 8) & 0xff);
+  ihdr[3] = static_cast<std::uint8_t>(static_cast<unsigned>(width) & 0xff);
+  ihdr[4] = static_cast<std::uint8_t>((static_cast<unsigned>(height) >> 24) & 0xff);
+  ihdr[5] = static_cast<std::uint8_t>((static_cast<unsigned>(height) >> 16) & 0xff);
+  ihdr[6] = static_cast<std::uint8_t>((static_cast<unsigned>(height) >> 8) & 0xff);
+  ihdr[7] = static_cast<std::uint8_t>(static_cast<unsigned>(height) & 0xff);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  static const std::uint8_t kSignature[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+  out.assign(kSignature, kSignature + 8);
+  png_chunk(out, "IHDR", ihdr, sizeof(ihdr));
+  png_chunk(out, "IDAT", compressed.data(), compressed.size());
+  png_chunk(out, "IEND", nullptr, 0);
   return true;
 }
 

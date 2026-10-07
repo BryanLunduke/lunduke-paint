@@ -248,6 +248,45 @@ int main() {
                      "flip redo matches");
   }
 
+  auto commit_dot = [](Document& doc, int x, Color color) {
+    Layer& layer = doc.layers().active_layer();
+    Layer before(layer.width(), layer.height(), Color::transparent(), "before");
+    before.copy_from(layer);
+    layer.set_pixel(x, 0, color);
+    Layer after(layer.width(), layer.height(), Color::transparent(), "after");
+    after.copy_from(layer);
+    doc.commit(PixelPatchCommand::from_layers(before, after, Rect{x, 0, 1, 1}, "Dot"));
+  };
+
+  // Depth 2 drops the oldest stroke. The saved checkpoint was the initial
+  // image (index -1), so that base is no longer the file on disk.
+  {
+    auto trimmed = Document::create(8, 2, Color::white(), "Background");
+    trimmed->mark_clean();
+    trimmed->history().set_depth(2);
+    commit_dot(*trimmed, 0, Color{255, 0, 0, 255});
+    commit_dot(*trimmed, 1, Color{0, 255, 0, 255});
+    commit_dot(*trimmed, 2, Color{0, 0, 255, 255});
+    trimmed->jump_history(-1);
+    errors += expect(trimmed->layers().active_layer().pixel(0, 0) == (Color{255, 0, 0, 255}),
+                     "trimmed base keeps the baked stroke");
+    errors += expect(trimmed->dirty(), "undo to trimmed base stays dirty");
+    errors += expect(!trimmed->history().matches_saved(), "trimmed base is not the saved image");
+  }
+  {
+    auto trimmed = Document::create(8, 2, Color::white(), "Background");
+    errors += expect(trimmed->history().index() == -1, "fresh history is the initial image");
+    trimmed->mark_clean();
+    errors += expect(trimmed->history().matches_saved(), "mark_clean at -1 matches");
+    trimmed->history().set_depth(2);
+    commit_dot(*trimmed, 0, Color{255, 0, 0, 255});
+    commit_dot(*trimmed, 1, Color{0, 255, 0, 255});
+    commit_dot(*trimmed, 2, Color{0, 0, 255, 255});
+    trimmed->jump_history(-1);
+    errors += expect(trimmed->dirty() && !trimmed->history().matches_saved(),
+                     "mark_clean at -1 then trim still disagrees with the file");
+  }
+
   if (errors != 0) {
     std::fprintf(stderr, "test_history: %d failure(s)\n", errors);
     return 1;

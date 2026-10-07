@@ -127,6 +127,10 @@ void History::trim() {
     } else if (saved_index_ == 0) {
       // The saved command itself fell off the front of the stack.
       saved_valid_ = false;
+    } else {
+      // saved_index_ < 0: the base no longer matches the snapshot that was
+      // marked saved. Those strokes are now baked in and cannot be undone.
+      saved_valid_ = false;
     }
   }
 }

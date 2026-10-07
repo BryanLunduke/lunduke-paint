@@ -93,6 +93,8 @@ constexpr int kDefaultUndoDepth = 50;
 constexpr int kMaxUndoDepth = 200;
 constexpr int kPatchTile = 32;
 constexpr int kSoftMaxLayers = 64;
+// OpenRaster loads above this fail closed (no "continue anyway" dialog).
+constexpr int kHardMaxLayers = 1024;
 constexpr int kThumbWidth = 48;
 constexpr int kThumbHeight = 36;
 

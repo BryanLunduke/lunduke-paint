@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <glibmm/fileutils.h>
 #include <glibmm/keyfile.h>
 #include <glibmm/miscutils.h>
@@ -151,7 +152,8 @@ bool Preferences::save() const {
     key.remove_group("recent");
   }
 
-  g_mkdir_with_parents(config_dir().c_str(), 0755);
+  g_mkdir_with_parents(config_dir().c_str(), 0700);
+  g_chmod(config_dir().c_str(), 0700);
   try {
     key.save_to_file(config_path());
     return true;

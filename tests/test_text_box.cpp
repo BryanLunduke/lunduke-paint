@@ -232,6 +232,33 @@ int main() {
     expect(!commit_text_box(*doc, empty), "empty text does not stamp");
     expect(doc->history().count() == count, "cancel-sized empty commit adds no history");
     expect(dump(doc->layers().active_layer()) == stamped, "empty commit leaves pixels");
+    expect(doc->dirty(), "empty commit does not clear an existing dirty flag");
+  }
+
+  {
+    auto doc = Document::create(32, 16, Color::white());
+    doc->mark_clean();
+    expect(!doc->dirty(), "fresh document is clean");
+    doc->set_unsaved_overlay(true);
+    expect(doc->unsaved_overlay() && doc->dirty(), "an open text box is unsaved");
+    doc->mark_clean();
+    expect(doc->dirty(), "mark_clean waits until the text box closes");
+    doc->set_unsaved_overlay(false);
+    expect(!doc->dirty(), "closing the overlay without other edits is clean");
+  }
+
+  {
+    auto doc = Document::create(80, 40, Color{20, 40, 60, 255});
+    TextBoxState state;
+    state.box = Rect{0, 0, 70, 36};
+    state.text = "Hi";
+    state.color = Color::white();
+    state.size_pt = 18;
+    doc->selection().set_rect(Rect{0, 0, 8, 8});
+    const Color outside = doc->layers().active_layer().pixel(40, 20);
+    commit_text_box(*doc, state);
+    expect(doc->layers().active_layer().pixel(40, 20) == outside,
+           "text commit leaves pixels outside the selection");
   }
 
   // Not calling commit (Esc) leaves the canvas unchanged. Checked directly:

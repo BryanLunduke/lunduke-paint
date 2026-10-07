@@ -2,8 +2,6 @@
 
 #include "doc/layer_stack.hpp"
 
-#include <glib.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -209,7 +207,7 @@ bool group_affects_composite(const OraNode& node) {
   if (!node.is_stack) {
     return false;
   }
-  if (!node.visible || node.opacity < 0.999f || node.blend != BlendMode::Normal) {
+  if (!node.visible || node.opacity < 0.999f || node.blend != BlendMode::Normal || node.isolate) {
     return true;
   }
   for (const OraNode& child : node.children) {
@@ -266,9 +264,70 @@ void LayerStack::composite_node(const OraNode& node, std::uint8_t* dest, int des
   std::vector<std::uint8_t> child(static_cast<std::size_t>(view.w) * static_cast<std::size_t>(view.h) * 4,
                                   0);
   const int child_stride = view.w * 4;
+  // Isolated groups composite against transparency. A non-isolated group
+  // (no isolation="isolate") lets child blend modes see the backdrop, then
+  // the group's opacity dissolves that result with the original backdrop.
+  if (!node.isolate) {
+    for (int y = 0; y < view.h; ++y) {
+      std::memcpy(child.data() + static_cast<std::size_t>(y) * child_stride,
+                  dest + static_cast<std::size_t>(y) * dest_stride,
+                  static_cast<std::size_t>(view.w) * 4);
+    }
+  }
   for (int i = static_cast<int>(node.children.size()) - 1; i >= 0; --i) {
     composite_node(node.children[static_cast<std::size_t>(i)], child.data(), child_stride, view,
                    tool_override, tool_index, skip_index);
+  }
+  if (!node.isolate && node.blend == BlendMode::Normal) {
+    if (node.opacity >= 0.999f) {
+      for (int y = 0; y < view.h; ++y) {
+        std::memcpy(dest + static_cast<std::size_t>(y) * dest_stride,
+                    child.data() + static_cast<std::size_t>(y) * child_stride,
+                    static_cast<std::size_t>(view.w) * 4);
+      }
+      return;
+    }
+    const float opacity = node.opacity;
+    const float inverse = 1.0f - opacity;
+    // Dissolve in premultiplied space so a half-opaque red stays red
+    // (alpha 128), matching a group blended over the original backdrop.
+    for (int y = 0; y < view.h; ++y) {
+      std::uint8_t* drow = dest + static_cast<std::size_t>(y) * dest_stride;
+      const std::uint8_t* srow = child.data() + static_cast<std::size_t>(y) * child_stride;
+      for (int x = 0; x < view.w; ++x) {
+        std::uint8_t* d = drow + static_cast<std::size_t>(x) * 4;
+        const std::uint8_t* s = srow + static_cast<std::size_t>(x) * 4;
+        const float sa = static_cast<float>(s[3]) / 255.0f;
+        const float da = static_cast<float>(d[3]) / 255.0f;
+        const float ra = da * inverse + sa * opacity;
+        int out_a = static_cast<int>(ra * 255.0f + 0.5f);
+        if (out_a < 0) {
+          out_a = 0;
+        }
+        if (out_a > 255) {
+          out_a = 255;
+        }
+        if (out_a == 0) {
+          d[0] = d[1] = d[2] = d[3] = 0;
+          continue;
+        }
+        for (int c = 0; c < 3; ++c) {
+          const float sp = static_cast<float>(s[c]) * sa;
+          const float dp = static_cast<float>(d[c]) * da;
+          const float mixed = (dp * inverse + sp * opacity) / ra;
+          int rounded = static_cast<int>(mixed + 0.5f);
+          if (rounded < 0) {
+            rounded = 0;
+          }
+          if (rounded > 255) {
+            rounded = 255;
+          }
+          d[c] = static_cast<std::uint8_t>(rounded);
+        }
+        d[3] = static_cast<std::uint8_t>(out_a);
+      }
+    }
+    return;
   }
   blend_layer_rect(dest, view.w, view.h, dest_stride, child.data(), view.w, view.h, child_stride,
                    view.x, view.y, view, node.blend, node.opacity);
@@ -449,11 +508,6 @@ bool LayerStack::merge_down(int index) {
   // onto a copy of the lower, keeping the lower mode and opacity.
   const bool backdrop = lower.visible() && lower.blend() != BlendMode::Normal &&
                         lower.opacity() < 0.999f;
-  if (width_ > kSoftMaxSide || height_ > kSoftMaxSide) {
-    while (g_main_context_pending(nullptr)) {
-      g_main_context_iteration(nullptr, false);
-    }
-  }
 
   const int stride = uni.w * 4;
   std::vector<std::uint8_t> dest(static_cast<std::size_t>(uni.w) * static_cast<std::size_t>(uni.h) * 4,
@@ -467,10 +521,6 @@ bool LayerStack::merge_down(int index) {
     blend_into_view(full.data(), uni, lower);
     blend_into_view(full.data(), uni, upper);
     for (int y = 0; y < uni.h; ++y) {
-      if ((y & 63) == 0 && (width_ > kSoftMaxSide || height_ > kSoftMaxSide) &&
-          g_main_context_pending(nullptr)) {
-        g_main_context_iteration(nullptr, false);
-      }
       for (int x = 0; x < uni.w; ++x) {
         const std::size_t i =
             static_cast<std::size_t>(y) * static_cast<std::size_t>(uni.w) + static_cast<std::size_t>(x);

@@ -34,6 +34,9 @@ std::unique_ptr<Layer> layer_from_snapshot(const LayerSnapshot& snap);
 class Layer {
 public:
   Layer(int width, int height, Color fill, std::string name);
+  ~Layer();
+  Layer(const Layer&) = delete;
+  Layer& operator=(const Layer&) = delete;
 
   const std::string& name() const { return name_; }
   void set_name(std::string name) { name_ = std::move(name); }

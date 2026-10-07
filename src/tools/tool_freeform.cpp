@@ -24,7 +24,7 @@ public:
 
   const char* id() const override { return id_; }
   const char* name() const override { return name_; }
-  char shortcut() const override { return fill_mode_ == ShapeFillMode::Fill ? 'O' : 'D'; }
+  char shortcut() const override { return fill_mode_ == ShapeFillMode::Fill ? 'O' : 'K'; }
   const char* hint() const override {
     return "Freeform shape: drag a freehand outline; right uses BG";
   }

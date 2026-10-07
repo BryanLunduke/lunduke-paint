@@ -9,7 +9,10 @@
 #include "doc/effect_preview.hpp"
 #include "doc/layer.hpp"
 #include "doc/layer_stack.hpp"
+#include "io/crash_recovery.hpp"
 #include "raster/effects.hpp"
+
+#include <cstring>
 
 #include <cstdio>
 #include <vector>
@@ -169,6 +172,32 @@ int main() {
     expect(doc->layers().active_layer().pixel(7, 0) == outside_before,
            "commit leaves pixels outside the selection alone");
     expect(doc->history().count() == 1, "selection commit is one entry");
+  }
+
+  // Wider than 2048: preview and commit run the same full-resolution blur.
+  {
+    auto doc = Document::create(2049, 2, Color::black(), "Wide");
+    Layer& layer = doc->layers().active_layer();
+    for (int x = 0; x < 1024; ++x) {
+      layer.set_pixel(x, 0, Color::white());
+      layer.set_pixel(x, 1, Color::white());
+    }
+    auto blur = [](std::uint8_t* rgba, int width, int height, int stride) {
+      std::vector<std::uint8_t> src(static_cast<std::size_t>(stride) * static_cast<std::size_t>(height));
+      std::memcpy(src.data(), rgba, src.size());
+      lundukepaint::box_blur_rgba(src.data(), width, height, stride, rgba, stride, 1);
+    };
+    EffectPreview effect(*doc);
+    effect.preview(blur);
+    expect(effect.previewing(), "wide preview is installed");
+    expect(!lundukepaint::crash_recovery::recovery_snapshot_allowed(true),
+           "a live preview blocks a recovery snapshot");
+    expect(!lundukepaint::crash_recovery::recovery_snapshot_allowed(effect.previewing()),
+           "previewing() blocks a recovery snapshot");
+    const std::vector<std::uint8_t> previewed = dump(doc->layers().active_layer());
+    effect.restore();
+    expect(effect.commit("Blur", blur), "wide blur commits");
+    expect(dump(doc->layers().active_layer()) == previewed, "wide preview matches commit");
   }
 
   if (errors != 0) {

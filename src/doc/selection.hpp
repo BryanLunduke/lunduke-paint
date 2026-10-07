@@ -61,6 +61,13 @@ public:
   const std::uint8_t* float_pixels() const {
     return float_pixels_.empty() ? nullptr : float_pixels_.data();
   }
+  // Local to the float. Empty means every float pixel is covered (a rectangle).
+  // A non-empty buffer is 0 outside the lasso / wand / ellipse.
+  const std::uint8_t* float_coverage() const {
+    return float_coverage_.empty() ? nullptr : float_coverage_.data();
+  }
+  bool has_float_coverage() const { return !float_coverage_.empty(); }
+  bool float_covers(int local_x, int local_y) const;
   Color float_pixel(int x, int y) const;
 
   // Layer the pixels were lifted from. -1 until lift / paste.
@@ -93,6 +100,7 @@ private:
   int origin_w_ = 0;
   int origin_h_ = 0;
   std::vector<std::uint8_t> float_pixels_;
+  std::vector<std::uint8_t> float_coverage_;
   std::vector<std::uint8_t> mask_;
   int mask_w_ = 0;
   int mask_h_ = 0;
@@ -109,14 +117,18 @@ void copy_selection_rgba(const Layer& layer, const Selection& sel, int canvas_w,
 void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas_w, int canvas_h,
                       int& out_w, int& out_h, std::vector<std::uint8_t>& out);
 void blit_rgba(Layer& dest, int dx, int dy, const std::uint8_t* src, int sw, int sh, int sstride,
-               bool skip_transparent);
+               bool skip_transparent, const std::uint8_t* coverage = nullptr);
 
 // Composite `sel` onto a view-sized straight-RGBA buffer. `dest` row 0 is
 // `view.y`. The origin hole is composited once with the source layer skipped,
 // then the float is blended in bulk. Never samples the stack per pixel.
+// Only pixels inside the float coverage are punched or blitted.
+// `hole_rgba`, when set, is the straight composite of `origin_rect()` (the
+// source layer already omitted) so a redraw can reuse it.
 void paint_floating_selection(const LayerStack& layers, const Selection& sel, std::uint8_t* dest,
                               int dest_stride, Rect view, bool substitute_clear, Color hole_clear,
-                              Color float_clear);
+                              Color float_clear, const std::uint8_t* hole_rgba = nullptr,
+                              int hole_stride = 0);
 
 }  // namespace lundukepaint
 

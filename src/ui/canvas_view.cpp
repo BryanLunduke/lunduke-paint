@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -39,6 +40,62 @@ void write_argb32(std::uint8_t* dst, Color c) {
   dst[1] = static_cast<std::uint8_t>((static_cast<int>(c.g) * a + 127) / 255);
   dst[2] = static_cast<std::uint8_t>((static_cast<int>(c.r) * a + 127) / 255);
   dst[3] = c.a;
+}
+
+void premultiply_rows(std::uint8_t* pixels, int width, int height, int stride) {
+  for (int y = 0; y < height; ++y) {
+    std::uint8_t* row = pixels + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+    for (int x = 0; x < width; ++x) {
+      std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
+      const Color straight{p[0], p[1], p[2], p[3]};
+      write_argb32(p, straight);
+    }
+  }
+}
+
+void mix_u64(std::uint64_t& h, std::uint64_t v) {
+  h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+}
+
+void mix_ora_node(std::uint64_t& h, const OraNode& node) {
+  mix_u64(h, node.is_stack ? 1 : 0);
+  mix_u64(h, node.visible ? 1 : 0);
+  mix_u64(h, node.isolate ? 1 : 0);
+  mix_u64(h, static_cast<std::uint64_t>(node.opacity * 100000.0f));
+  mix_u64(h, static_cast<std::uint64_t>(node.blend));
+  mix_u64(h, static_cast<std::uint32_t>(node.x));
+  mix_u64(h, static_cast<std::uint32_t>(node.y));
+  mix_u64(h, static_cast<std::uint64_t>(node.layer_index));
+  for (const OraNode& child : node.children) {
+    mix_ora_node(h, child);
+  }
+}
+
+std::uint64_t hole_fingerprint(const Document& document, int skip) {
+  const LayerStack& layers = document.layers();
+  std::uint64_t h = 0;
+  mix_u64(h, static_cast<std::uint64_t>(layers.count()));
+  mix_u64(h, static_cast<std::uint64_t>(layers.width()));
+  mix_u64(h, static_cast<std::uint64_t>(layers.height()));
+  mix_u64(h, static_cast<std::uint64_t>(skip));
+  for (int i = 0; i < layers.count(); ++i) {
+    if (i == skip) {
+      continue;
+    }
+    const Layer& layer = layers.at(i);
+    mix_u64(h, layer.identity());
+    mix_u64(h, layer.revision());
+    mix_u64(h, layer.visible() ? 1 : 0);
+    mix_u64(h, static_cast<std::uint64_t>(layer.opacity() * 100000.0f));
+    mix_u64(h, static_cast<std::uint64_t>(layer.blend()));
+    mix_u64(h, static_cast<std::uint32_t>(layer.offset_x()));
+    mix_u64(h, static_cast<std::uint32_t>(layer.offset_y()));
+  }
+  if (const OraNode* stack = document.ora_stack()) {
+    mix_u64(h, 1);
+    mix_ora_node(h, *stack);
+  }
+  return h;
 }
 
 
@@ -157,6 +214,8 @@ CanvasView::CanvasView() {
 void CanvasView::set_document(Document* document) {
   cancel_intro();
   document_ = document;
+  hole_cache_valid_ = false;
+  hole_cache_.clear();
   ants_path_.reset();
   ants_halos_.clear();
   ants_generation_ = 0;
@@ -606,18 +665,7 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const int tool_index = tool_preview ? document_->layers().active_index() : -1;
   const int sw = vis_x1 - vis_x0;
   const int sh = vis_y1 - vis_y0;
-  std::vector<std::uint8_t> flat(static_cast<std::size_t>(sw) * static_cast<std::size_t>(sh) * 4, 0);
   const Rect view{vis_x0, vis_y0, sw, sh};
-  document_->layers().composite_rect(flat.data(), sw * 4, view, tool_override, tool_index);
-  if (document_->selection().floating()) {
-    const Color canvas_bg = document_->canvas_background();
-    const Color well = document_->background();
-    const Color hole_clear = canvas_bg.a != 0 ? canvas_bg : Color::white();
-    const Color float_clear =
-        canvas_bg.a != 0 ? canvas_bg : (well.a != 0 ? well : Color::white());
-    paint_floating_selection(document_->layers(), document_->selection(), flat.data(), sw * 4, view,
-                             true, hole_clear, float_clear);
-  }
 
   if (!blit_surface_ || blit_w_ != sw || blit_h_ != sh) {
     blit_surface_ = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, sw, sh);
@@ -627,14 +675,48 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   blit_surface_->flush();
   std::uint8_t* dst = blit_surface_->get_data();
   const int dst_stride = blit_surface_->get_stride();
-  for (int y = 0; y < sh; ++y) {
-    const std::uint8_t* srow = flat.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(sw) * 4;
-    std::uint8_t* drow = dst + static_cast<std::size_t>(y) * static_cast<std::size_t>(dst_stride);
-    for (int x = 0; x < sw; ++x) {
-      const std::uint8_t* s = srow + static_cast<std::size_t>(x) * 4;
-      write_argb32(drow + static_cast<std::size_t>(x) * 4, Color{s[0], s[1], s[2], s[3]});
+  document_->layers().composite_rect(dst, dst_stride, view, tool_override, tool_index);
+  if (document_->selection().floating()) {
+    const Color canvas_bg = document_->canvas_background();
+    const Color well = document_->background();
+    const Color hole_clear = canvas_bg.a != 0 ? canvas_bg : Color::white();
+    const Color float_clear =
+        canvas_bg.a != 0 ? canvas_bg : (well.a != 0 ? well : Color::white());
+    const Selection& sel = document_->selection();
+    const std::uint8_t* hole_rgba = nullptr;
+    int hole_stride = 0;
+    if (!sel.copy_mode()) {
+      int skip = sel.source_layer();
+      if (skip < 0 || skip >= document_->layers().count()) {
+        skip = document_->layers().active_index();
+      }
+      const Rect origin = sel.origin_rect();
+      const std::uint64_t fp = hole_fingerprint(*document_, skip);
+      const std::size_t bytes =
+          static_cast<std::size_t>(origin.w) * static_cast<std::size_t>(origin.h) * 4;
+      if (!hole_cache_valid_ || hole_cache_origin_.x != origin.x ||
+          hole_cache_origin_.y != origin.y || hole_cache_origin_.w != origin.w ||
+          hole_cache_origin_.h != origin.h || hole_cache_skip_ != skip || hole_cache_fp_ != fp ||
+          hole_cache_.size() != bytes) {
+        hole_cache_.assign(bytes, 0);
+        if (!origin.empty()) {
+          document_->layers().composite_rect(hole_cache_.data(), origin.w * 4, origin, nullptr, -1,
+                                              skip);
+        }
+        hole_cache_origin_ = origin;
+        hole_cache_skip_ = skip;
+        hole_cache_fp_ = fp;
+        hole_cache_valid_ = true;
+      }
+      hole_rgba = hole_cache_.data();
+      hole_stride = origin.w * 4;
     }
+    paint_floating_selection(document_->layers(), sel, dst, dst_stride, view, true, hole_clear,
+                             float_clear, hole_rgba, hole_stride);
+  } else {
+    hole_cache_valid_ = false;
   }
+  premultiply_rows(dst, sw, sh, dst_stride);
   blit_surface_->mark_dirty();
   cr->save();
   cr->translate(ox + vis_x0 * zoom_, oy + vis_y0 * zoom_);
