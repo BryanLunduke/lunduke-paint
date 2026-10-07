@@ -19,6 +19,10 @@ void flood_fill(std::uint8_t* rgba, int width, int height, int stride, int x, in
 void flood_mask(const std::uint8_t* rgba, int width, int height, int stride, int x, int y,
                 int tolerance, std::vector<std::uint8_t>& mask, Rect* bounds);
 
+// Times flood fill or merge-down has pumped the GTK main loop. Both must leave
+// this at zero: document mutation must not re-enter the main context.
+int mutation_main_loop_pumps();
+
 }  // namespace lundukepaint
 
 #endif

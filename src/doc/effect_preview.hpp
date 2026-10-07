@@ -38,8 +38,9 @@ public:
   bool previewing() const { return previewing_; }
   int layer_index() const { return layer_index_; }
 
-  // Repaints the layer with the effect applied to the snapshot. No history.
-  // Returns the changed rectangle (clipped to the selection, if any).
+  // Repaints the layer with the effect applied to the snapshot at full
+  // resolution. No history. Returns the changed rectangle (clipped to the
+  // selection, if any). Autosave must not run while previewing() is true.
   Rect preview(const EffectFn& fn);
 
   // Puts the snapshot back. Returns false when there was nothing to undo.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "doc/document.hpp"
 #include "raster/fill.hpp"
 
 #include <cstdio>
@@ -80,6 +81,15 @@ int main() {
     errors += expect(get(buf, w, 6, 0) == red, "red wall not filled");
     errors += expect(get(buf, w, 7, 0) == Color{0, 0, 0, 255},
                      "pixels beyond wall stay seed-unlike / unfilled");
+  }
+
+  errors += expect(lundukepaint::mutation_main_loop_pumps() == 0, "flood fill does not pump the main loop");
+  {
+    auto doc = lundukepaint::Document::create(4, 4, Color::white(), "Lower");
+    doc->add_layer();
+    errors += expect(doc->merge_down(), "merge down for the pump hook");
+    errors += expect(lundukepaint::mutation_main_loop_pumps() == 0,
+                     "merge down does not pump the main loop");
   }
 
   if (errors != 0) {

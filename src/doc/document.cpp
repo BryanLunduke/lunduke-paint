@@ -6,6 +6,7 @@
 #include "doc/commands_pixels.hpp"
 #include "doc/layer.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace lundukepaint {
@@ -34,7 +35,18 @@ void Document::set_dirty(bool dirty) {
 }
 
 void Document::mark_clean() {
+  if (unsaved_overlay_) {
+    return;
+  }
   set_dirty(false);
+}
+
+void Document::set_unsaved_overlay(bool on) {
+  if (unsaved_overlay_ == on) {
+    return;
+  }
+  unsaved_overlay_ = on;
+  notify_changed();
 }
 
 namespace {
@@ -241,26 +253,55 @@ bool Document::commit_floating(const char* name) {
   before.copy_from(layer);
   before.set_offset(ox, oy);
   Rect dirty{};
+  auto note = [&](int lx, int ly) {
+    if (dirty.empty()) {
+      dirty = {lx, ly, 1, 1};
+      return;
+    }
+    const int x0 = std::min(dirty.x, lx);
+    const int y0 = std::min(dirty.y, ly);
+    const int x1 = std::max(dirty.x2(), lx + 1);
+    const int y1 = std::max(dirty.y2(), ly + 1);
+    dirty = {x0, y0, x1 - x0, y1 - y0};
+  };
   if (!selection_.copy_mode()) {
     const Rect origin_canvas = selection_.origin_rect();
-    const Rect origin_layer =
-        rect_intersect(Rect{origin_canvas.x - ox, origin_canvas.y - oy, origin_canvas.w, origin_canvas.h},
-                       layer_bounds);
-    if (!origin_layer.empty()) {
-      layer.fill_rect(origin_layer, Color::transparent());
-      dirty = origin_layer;
+    for (int y = 0; y < origin_canvas.h; ++y) {
+      for (int x = 0; x < origin_canvas.w; ++x) {
+        if (!selection_.float_covers(x, y)) {
+          continue;
+        }
+        const int lx = origin_canvas.x - ox + x;
+        const int ly = origin_canvas.y - oy + y;
+        if (!layer_bounds.contains(lx, ly)) {
+          continue;
+        }
+        layer.set_pixel(lx, ly, Color::transparent());
+        note(lx, ly);
+      }
     }
   }
   const Rect float_layer{selection_.float_x() - ox, selection_.float_y() - oy, selection_.float_w(),
                          selection_.float_h()};
   blit_rgba(layer, float_layer.x, float_layer.y, selection_.float_pixels(), selection_.float_w(),
-            selection_.float_h(), selection_.float_w() * 4, selection_.transparent_move());
+            selection_.float_h(), selection_.float_w() * 4, selection_.transparent_move(),
+            selection_.float_coverage());
   dirty = rect_union(dirty, rect_intersect(float_layer, layer_bounds));
   const Rect kept = selection_.float_rect();
   const bool transparent = selection_.transparent_move();
+  std::vector<std::uint8_t> kept_mask;
+  if (selection_.has_float_coverage() && selection_.float_coverage() != nullptr) {
+    const std::size_t n = static_cast<std::size_t>(selection_.float_w()) *
+                          static_cast<std::size_t>(selection_.float_h());
+    kept_mask.assign(selection_.float_coverage(), selection_.float_coverage() + n);
+  }
   selection_.drop_float();
   if (!kept.empty()) {
-    selection_.set_rect(kept);
+    if (!kept_mask.empty()) {
+      selection_.set_mask(kept, std::move(kept_mask));
+    } else {
+      selection_.set_rect(kept);
+    }
     selection_.set_transparent_move(transparent);
   } else {
     selection_.clear();
@@ -301,12 +342,28 @@ void Document::delete_selection() {
   if (selection_.floating()) {
     if (!selection_.copy_mode()) {
       const Rect origin_canvas = selection_.origin_rect();
-      const Rect origin_layer = rect_intersect(
-          Rect{origin_canvas.x - ox, origin_canvas.y - oy, origin_canvas.w, origin_canvas.h},
-          Rect{0, 0, layer.width(), layer.height()});
-      if (!origin_layer.empty()) {
-        layer.fill_rect(origin_layer, Color::transparent());
-        dirty = origin_layer;
+      const Rect layer_bounds{0, 0, layer.width(), layer.height()};
+      for (int y = 0; y < origin_canvas.h; ++y) {
+        for (int x = 0; x < origin_canvas.w; ++x) {
+          if (!selection_.float_covers(x, y)) {
+            continue;
+          }
+          const int lx = origin_canvas.x - ox + x;
+          const int ly = origin_canvas.y - oy + y;
+          if (!layer_bounds.contains(lx, ly)) {
+            continue;
+          }
+          layer.set_pixel(lx, ly, Color::transparent());
+          if (dirty.empty()) {
+            dirty = {lx, ly, 1, 1};
+          } else {
+            const int x0 = std::min(dirty.x, lx);
+            const int y0 = std::min(dirty.y, ly);
+            const int x1 = std::max(dirty.x2(), lx + 1);
+            const int y1 = std::max(dirty.y2(), ly + 1);
+            dirty = {x0, y0, x1 - x0, y1 - y0};
+          }
+        }
       }
     }
     selection_.clear();
@@ -474,8 +531,10 @@ bool Document::merge_down() {
 }
 
 void Document::flatten() {
+  if (selection_.floating() && !commit_floating()) {
+    return;
+  }
   clear_ora_stack();
-  commit_floating();
   if (layers_.count() <= 1) {
     return;
   }

@@ -131,6 +131,100 @@ int main() {
     errors += expect(layer.pixel(0, 0) == (Color{0, 255, 0, 255}), "commit writes layer space");
   }
 
+  // Mask covers only (0,0) inside an 8x6 selection. Stamp, delete, and
+  // copy-blit must leave (1,0) alone and must not promote the mask to a rect.
+  {
+    auto doc = Document::create(8, 6, Color::white(), "Background");
+    Layer& layer = doc->layers().active_layer();
+    layer.fill(Color{200, 0, 0, 255});
+    layer.set_pixel(0, 0, Color{0, 180, 0, 255});
+    layer.set_pixel(1, 0, Color{0, 0, 180, 255});
+    const Color outside = layer.pixel(1, 0);
+    Selection& sel = doc->selection();
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(8 * 6), 0);
+    mask[0] = 255;
+    sel.set_mask({0, 0, 8, 6}, mask);
+    errors += expect(sel.lift(layer, 0), "masked lift");
+    errors += expect(doc->commit_floating(), "masked commit");
+    errors += expect(layer.pixel(1, 0) == outside, "commit leaves (1,0)");
+    errors += expect(sel.has_mask(), "commit keeps the mask");
+    errors += expect(sel.contains(0, 0) && !sel.contains(1, 0), "mask still covers only (0,0)");
+  }
+  {
+    auto doc = Document::create(8, 6, Color::white(), "Background");
+    Layer& layer = doc->layers().active_layer();
+    layer.fill(Color{200, 0, 0, 255});
+    layer.set_pixel(0, 0, Color{0, 180, 0, 255});
+    layer.set_pixel(1, 0, Color{0, 0, 180, 255});
+    const Color outside = layer.pixel(1, 0);
+    Selection& sel = doc->selection();
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(8 * 6), 0);
+    mask[0] = 255;
+    sel.set_mask({0, 0, 8, 6}, mask);
+    errors += expect(sel.lift(layer, 0), "masked lift for delete");
+    doc->delete_selection();
+    errors += expect(layer.pixel(1, 0) == outside, "delete leaves (1,0)");
+    errors += expect(layer.pixel(0, 0).a == 0, "delete clears the covered pixel");
+  }
+  {
+    auto doc = Document::create(8, 6, Color::white(), "Background");
+    Layer& layer = doc->layers().active_layer();
+    layer.fill(Color{200, 0, 0, 255});
+    layer.set_pixel(0, 0, Color{0, 180, 0, 255});
+    layer.set_pixel(1, 0, Color{0, 0, 180, 255});
+    const Color kept = layer.pixel(1, 0);
+    const Color neighbor = layer.pixel(3, 0);
+    Selection& sel = doc->selection();
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(8 * 6), 0);
+    mask[0] = 255;
+    sel.set_mask({0, 0, 8, 6}, mask);
+    errors += expect(sel.lift(layer, 0), "masked lift for copy");
+    sel.set_copy_mode(true);
+    sel.move_float(2, 0);
+    errors += expect(doc->commit_floating(), "copy-mode commit");
+    errors += expect(layer.pixel(0, 0) == (Color{0, 180, 0, 255}), "copy leaves the origin");
+    errors += expect(layer.pixel(1, 0) == kept, "copy leaves (1,0)");
+    errors += expect(layer.pixel(2, 0) == (Color{0, 180, 0, 255}), "copy writes the covered pixel");
+    errors += expect(layer.pixel(3, 0) == neighbor, "copy leaves the rest of the bbox");
+  }
+  {
+    auto doc = Document::create(8, 6, Color::white(), "Background");
+    Layer& layer = doc->layers().active_layer();
+    layer.fill(Color{200, 0, 0, 255});
+    layer.set_pixel(0, 0, Color{0, 180, 0, 255});
+    Selection& sel = doc->selection();
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(8 * 6), 0);
+    mask[0] = 255;
+    sel.set_mask({0, 0, 8, 6}, std::move(mask));
+    errors += expect(sel.lift(layer, 0), "masked lift for preview");
+    const Rect view{0, 0, 8, 6};
+    std::vector<std::uint8_t> flat(static_cast<std::size_t>(8 * 6 * 4), 0);
+    doc->layers().composite_rect(flat.data(), 8 * 4, view);
+    const Color composite_outside{flat[4], flat[5], flat[6], flat[7]};
+    lundukepaint::paint_floating_selection(doc->layers(), sel, flat.data(), 8 * 4, view, false,
+                                           Color::transparent(), Color::transparent());
+    errors += expect((Color{flat[4], flat[5], flat[6], flat[7]}) == composite_outside,
+                     "preview leaves outside-mask pixel equal to the composite");
+  }
+  {
+    auto doc = Document::create(8, 6, Color::white(), "Background");
+    doc->set_dirty(true);
+    Layer& layer = doc->layers().active_layer();
+    layer.fill(Color{10, 20, 30, 255});
+    const Color outside = layer.pixel(1, 0);
+    Selection& sel = doc->selection();
+    sel.set_rect({0, 0, 2, 1});
+    errors += expect(sel.lift(layer, 0), "lift before lock");
+    doc->set_layer_locked(0, true);
+    errors += expect(!doc->commit_floating(), "locked layer refuses the stamp");
+    errors += expect(sel.floating(), "float stays up");
+    errors += expect(layer.pixel(1, 0) == outside, "failed stamp leaves outside pixels");
+    if (doc->commit_floating()) {
+      doc->mark_clean();
+    }
+    errors += expect(doc->dirty(), "failed stamp does not clear dirty");
+  }
+
   if (errors != 0) {
     std::fprintf(stderr, "test_selection: %d failure(s)\n", errors);
     return 1;

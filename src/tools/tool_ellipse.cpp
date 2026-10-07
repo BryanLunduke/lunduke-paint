@@ -25,7 +25,7 @@ public:
       : fill_mode_(mode), id_(tool_id), name_(tool_name) {}
   const char* id() const override { return id_; }
   const char* name() const override { return name_; }
-  char shortcut() const override { return 'E'; }
+  char shortcut() const override { return fill_mode_ == ShapeFillMode::Fill ? 'Z' : 'E'; }
   const char* hint() const override { return "Ellipse: drag; Shift makes a circle; right uses BG"; }
   bool is_stroking() const override { return drawing_; }
   Gtk::Widget* options_widget() override;

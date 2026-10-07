@@ -18,6 +18,7 @@ gdkpixbuf_dep = dependency('gdk-pixbuf-2.0')
 glib_dep = dependency('glib-2.0')
 libarchive_dep = dependency('libarchive')
 pugixml_dep = dependency('pugixml')
+zlib_dep = dependency('zlib')
 pangocairo_dep = dependency('pangocairo')
 
 gnome = import('gnome')
@@ -60,7 +61,7 @@ lunduke_paint_core = static_library(
   'lunduke_paint_core',
   lunduke_paint_core_sources,
   include_directories: lunduke_paint_inc,
-  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, pangocairo_dep],
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, pangocairo_dep, zlib_dep],
 )
 
 lunduke_paint_sources = files(
@@ -198,10 +199,10 @@ test('effects', test_effects)
 
 test_crash_recovery = executable(
   'test_crash_recovery',
-  files('tests/test_crash_recovery.cpp'),
+  files('tests/test_crash_recovery.cpp', 'src/app/preferences.cpp'),
   include_directories: lunduke_paint_inc,
   link_with: lunduke_paint_core,
-  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  dependencies: [gdkpixbuf_dep, glib_dep, gtkmm_dep, libarchive_dep, pugixml_dep],
   install: false,
 )
 test('crash_recovery', test_crash_recovery)
@@ -260,6 +261,14 @@ test_text_box = executable(
   install: false,
 )
 test('text_box', test_text_box)
+
+test_shortcuts = executable(
+  'test_shortcuts',
+  files('tests/test_shortcuts.cpp'),
+  include_directories: lunduke_paint_inc,
+  install: false,
+)
+test('shortcuts', test_shortcuts)
 
 install_data(
   'data/org.lunduke.LundukePaint.desktop',

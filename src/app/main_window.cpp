@@ -3,6 +3,7 @@
 #include "app/main_window.hpp"
 
 #include "app/actions.hpp"
+#include "app/shortcut_dispatch.hpp"
 #include "doc/commands_image.hpp"
 #include "doc/commands_layers.hpp"
 #include "doc/commands_pixels.hpp"
@@ -282,15 +283,15 @@ void MainWindow::build_ui() {
   toolbox_.add_tool_button("line", "Line (L)", "tool-line-symbolic");
   toolbox_.add_tool_button("eraser", "Eraser (A)", "tool-eraser-symbolic");
   toolbox_.add_tool_button("rectangle", "Rectangle outline (R)", "tool-rectangle-symbolic");
-  toolbox_.add_tool_button("rectangle-fill", "Rectangle filled", "tool-rectangle-filled-symbolic");
+  toolbox_.add_tool_button("rectangle-fill", "Rectangle filled (J)", "tool-rectangle-filled-symbolic");
   toolbox_.add_tool_button("rounded-rect", "Rounded rectangle outline (U)", "tool-rectangle-rounded-symbolic");
-  toolbox_.add_tool_button("rounded-rect-fill", "Rounded rectangle filled", "tool-rectangle-rounded-filled-symbolic");
+  toolbox_.add_tool_button("rounded-rect-fill", "Rounded rectangle filled (U)", "tool-rectangle-rounded-filled-symbolic");
   toolbox_.add_tool_button("ellipse", "Ellipse outline (E)", "tool-ellipse-symbolic");
-  toolbox_.add_tool_button("ellipse-fill", "Ellipse filled", "tool-ellipse-filled-symbolic");
-  toolbox_.add_tool_button("freeform", "Freeform outline (D)", "tool-freeformshape-symbolic");
-  toolbox_.add_tool_button("freeform-fill", "Freeform filled", "tool-freeformshape-filled-symbolic");
+  toolbox_.add_tool_button("ellipse-fill", "Ellipse filled (Z)", "tool-ellipse-filled-symbolic");
+  toolbox_.add_tool_button("freeform", "Freeform outline (K)", "tool-freeformshape-symbolic");
+  toolbox_.add_tool_button("freeform-fill", "Freeform filled (O)", "tool-freeformshape-filled-symbolic");
   toolbox_.add_tool_button("polygon", "Polygon outline (G)", "tool-select-lasso-polygon-symbolic");
-  toolbox_.add_tool_button("polygon-fill", "Polygon filled", "tool-polygon-filled-symbolic");
+  toolbox_.add_tool_button("polygon-fill", "Polygon filled (Q)", "tool-polygon-filled-symbolic");
   toolbox_.on_tool_chosen = [this](const std::string& id) {
     set_active_tool(id);
     canvas_.focus_canvas();
@@ -823,19 +824,25 @@ bool MainWindow::on_key_press(GdkEventKey* event) {
     return false;
   }
   const guint32 ch = gdk_keyval_to_unicode(gdk_keyval_to_upper(event->keyval));
-  if (ch == 'X') {
+  std::vector<ToolKey> keys;
+  keys.reserve(tools_.size());
+  for (const auto& tool : tools_) {
+    keys.push_back(ToolKey{tool->id(), tool->shortcut()});
+  }
+  const CanvasKeyResult resolved = resolve_canvas_key(
+      static_cast<char>(ch), keys.data(), static_cast<int>(keys.size()),
+      active_tool_ != nullptr ? active_tool_->id() : nullptr);
+  if (resolved.action == CanvasKeyAction::SwapColors) {
     document().swap_colors();
     return true;
   }
-  if (ch == 'D') {
+  if (resolved.action == CanvasKeyAction::ResetColors) {
     document().reset_colors();
     return true;
   }
-  for (auto& tool : tools_) {
-    if (tool->shortcut() == static_cast<char>(ch)) {
-      set_active_tool(tool->id());
-      return true;
-    }
+  if (resolved.action == CanvasKeyAction::SelectTool && resolved.tool_id != nullptr) {
+    set_active_tool(resolved.tool_id);
+    return true;
   }
   return false;
 }
@@ -933,7 +940,7 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
                                 loaded.layers.front().name);
     doc->replace_stack(loaded.width, loaded.height, std::move(layers),
                        static_cast<int>(loaded.layers.size()) - 1);
-    if (loaded.nested_groups) {
+    if (loaded.has_stack) {
       doc->set_ora_stack(loaded.stack);
     }
     doc->set_path(path);
@@ -961,6 +968,12 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
     err.set_secondary_text(loaded.error);
     err.run();
     return false;
+  }
+  if (loaded.animated) {
+    Gtk::MessageDialog warn(*this,
+                            "This GIF has more than one frame. Only the first frame was opened.",
+                            false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
+    warn.run();
   }
   if (loaded.width > kSoftMaxSide || loaded.height > kSoftMaxSide) {
     Gtk::MessageDialog warn(*this,
@@ -1027,12 +1040,7 @@ void MainWindow::action_save_as() {
   }
   if (save_to_path(path, format)) {
     if (also_ora) {
-      std::string ora_path = path;
-      auto dot = ora_path.find_last_of('.');
-      if (dot != std::string::npos) {
-        ora_path = ora_path.substr(0, dot);
-      }
-      ora_path += ".ora";
+      const std::string ora_path = replace_path_extension(path, ".ora");
       std::string error;
       if (!save_ora(ora_path, document(), error)) {
         Gtk::MessageDialog err(*this, "Saved the flat file, but could not write the .ora copy.",
@@ -1051,10 +1059,26 @@ void MainWindow::action_save_as() {
 }
 
 bool MainWindow::confirm_close() {
+  const int original = workspace_.active_index();
+  if (active_tool_ != nullptr && active_tool_->captures_keys()) {
+    active_tool_->on_commit();
+  }
   for (int i = 0; i < workspace_.count(); ++i) {
-    workspace_.set_active(i);
-    attach_active_document();
+    if (workspace_.active_index() != i) {
+      if (active_tool_ != nullptr && active_tool_->is_stroking()) {
+        active_tool_->on_cancel();
+      }
+      workspace_.set_active(i);
+      attach_active_document();
+    }
     if (!confirm_lose_document(workspace_.at(i))) {
+      if (workspace_.active_index() != original) {
+        if (active_tool_ != nullptr && active_tool_->is_stroking()) {
+          active_tool_->on_cancel();
+        }
+        workspace_.set_active(original);
+        attach_active_document();
+      }
       return false;
     }
   }
@@ -1095,6 +1119,17 @@ bool MainWindow::confirm_lose_document(Document& document) {
     action_save();
     return !document.dirty();
   }
+  bool other_dirty = false;
+  for (int i = 0; i < workspace_.count(); ++i) {
+    if (&workspace_.at(i) == &document) {
+      continue;
+    }
+    if (workspace_.at(i).dirty()) {
+      other_dirty = true;
+      break;
+    }
+  }
+  crash_recovery::clear_after_discard(other_dirty);
   return true;
 }
 
@@ -1121,8 +1156,31 @@ bool MainWindow::confirm_large_canvas(int width, int height) {
   return warn_size(width, height);
 }
 
+bool MainWindow::commit_live_edits() {
+  if (active_tool_ != nullptr && active_tool_->captures_keys()) {
+    active_tool_->on_commit();
+  }
+  if (document_ptr() != nullptr && document().unsaved_overlay()) {
+    show_status("Could not stamp the text");
+    return false;
+  }
+  if (document_ptr() != nullptr && document().selection().floating() &&
+      !document().commit_floating()) {
+    show_status("Could not stamp the selection (layer is locked)");
+    return false;
+  }
+  return true;
+}
+
 bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    Gtk::MessageDialog err(*this, "Could not save.", false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK,
+                           true);
+    err.set_secondary_text(
+        "A floating selection or text box could not be stamped, so the file was left unchanged.");
+    err.run();
+    return false;
+  }
   if (format == ImageFormat::Ora) {
     std::string error;
     if (!save_ora(path, document(), error)) {
@@ -1392,30 +1450,25 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
   }
   if (format == ImageFormat::Unknown) {
     format = forced == ImageFormat::Unknown ? ImageFormat::Ora : forced;
-    path += format_extension(format);
+    path = replace_path_extension(path, format_extension(format));
   } else if (forced != ImageFormat::Unknown && forced != format) {
     format = forced;
-    auto dot = path.find_last_of('.');
-    if (dot != std::string::npos) {
-      path = path.substr(0, dot);
-    }
-    path += format_extension(format);
+    path = replace_path_extension(path, format_extension(format));
   }
   // Never write a flat image over an existing .ora path.
   if (format != ImageFormat::Ora && format_from_path(path) == ImageFormat::Ora) {
-    auto dot = path.find_last_of('.');
-    if (dot != std::string::npos) {
-      path = path.substr(0, dot);
-    }
-    path += format_extension(format);
+    path = replace_path_extension(path, format_extension(format));
   }
   if (format != ImageFormat::Ora && !document().path().empty() &&
       format_from_path(document().path()) == ImageFormat::Ora && path == document().path()) {
-    auto dot = path.find_last_of('.');
-    if (dot != std::string::npos) {
-      path = path.substr(0, dot);
+    path = replace_path_extension(path, format_extension(format));
+  }
+  if (format_from_path(path) == ImageFormat::Gif) {
+    if (forced == ImageFormat::Unknown) {
+      forced = ImageFormat::Png;
     }
-    path += format_extension(format);
+    format = forced;
+    path = replace_path_extension(path, format_extension(format));
   }
   return true;
 }
@@ -1541,7 +1594,9 @@ void MainWindow::action_select_all() {
 }
 
 void MainWindow::action_deselect() {
-  if (active_tool_ != nullptr && active_tool_->is_stroking()) {
+  if (active_tool_ != nullptr && active_tool_->captures_keys()) {
+    active_tool_->on_commit();
+  } else if (active_tool_ != nullptr && active_tool_->is_stroking()) {
     active_tool_->on_cancel();
   }
   document().deselect();
@@ -1602,7 +1657,9 @@ void MainWindow::commit_stack_transform(const char* name, const StackXform& xfor
 }
 
 void MainWindow::action_canvas_size() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   CanvasSizeDialog dialog(*this, document().width(), document().height());
   if (dialog.run() != Gtk::RESPONSE_OK) {
     return;
@@ -1624,7 +1681,9 @@ void MainWindow::action_canvas_size() {
 }
 
 void MainWindow::action_scale() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   ScaleImageDialog dialog(*this, document().width(), document().height());
   if (dialog.run() != Gtk::RESPONSE_OK) {
     return;
@@ -1645,7 +1704,9 @@ void MainWindow::action_scale() {
 }
 
 void MainWindow::action_crop() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   const Selection& sel = document().selection();
   if (sel.empty() || sel.inverted()) {
     return;
@@ -1665,7 +1726,9 @@ void MainWindow::action_crop() {
 }
 
 void MainWindow::action_autocrop() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   const Layer& layer = document().layers().active_layer();
   const Rect local = autocrop_bounds(layer.pixels(), layer.width(), layer.height(), layer.stride());
   if (local.empty() ||
@@ -1685,7 +1748,9 @@ void MainWindow::action_autocrop() {
 }
 
 void MainWindow::action_rotate_90() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   StackXform xform;
   xform.kind = StackXformKind::Rotate90;
   xform.old_w = document().width();
@@ -1696,7 +1761,9 @@ void MainWindow::action_rotate_90() {
 }
 
 void MainWindow::action_rotate_180() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   StackXform xform;
   xform.kind = StackXformKind::Rotate180;
   xform.old_w = document().width();
@@ -1707,7 +1774,9 @@ void MainWindow::action_rotate_180() {
 }
 
 void MainWindow::action_rotate_ccw() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   StackXform xform;
   xform.kind = StackXformKind::Rotate270;
   xform.old_w = document().width();
@@ -1718,7 +1787,9 @@ void MainWindow::action_rotate_ccw() {
 }
 
 void MainWindow::action_flip_h() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   StackXform xform;
   xform.kind = StackXformKind::FlipH;
   xform.old_w = document().width();
@@ -1729,7 +1800,9 @@ void MainWindow::action_flip_h() {
 }
 
 void MainWindow::action_flip_v() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   StackXform xform;
   xform.kind = StackXformKind::FlipV;
   xform.old_w = document().width();
@@ -1744,7 +1817,9 @@ void MainWindow::action_clear() {
     show_status("Layer is locked");
     return;
   }
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   document().deselect();
   Layer& layer = document().layers().active_layer();
   Layer before(layer.width(), layer.height(), Color::transparent(), "before");
@@ -1801,9 +1876,6 @@ void MainWindow::action_layer_lower() {
 void MainWindow::action_layer_merge_down() {
   if (document().width() > kSoftMaxSide || document().height() > kSoftMaxSide) {
     show_status("Merging layers…");
-    while (g_main_context_pending(nullptr)) {
-      g_main_context_iteration(nullptr, false);
-    }
   }
   if (!document().merge_down()) {
     show_status("Nothing below to merge");
@@ -1814,6 +1886,9 @@ void MainWindow::action_layer_merge_down() {
 
 void MainWindow::action_layer_flatten() {
   if (document().layers().count() <= 1) {
+    return;
+  }
+  if (!commit_live_edits()) {
     return;
   }
   document().flatten();
@@ -1895,9 +1970,25 @@ bool MainWindow::close_document_at(int index) {
   if (index < 0 || index >= workspace_.count()) {
     return false;
   }
-  workspace_.set_active(index);
-  attach_active_document();
+  const int original = workspace_.active_index();
+  if (active_tool_ != nullptr && active_tool_->captures_keys()) {
+    active_tool_->on_commit();
+  }
+  if (workspace_.active_index() != index) {
+    if (active_tool_ != nullptr && active_tool_->is_stroking()) {
+      active_tool_->on_cancel();
+    }
+    workspace_.set_active(index);
+    attach_active_document();
+  }
   if (!confirm_lose_document(workspace_.at(index))) {
+    if (workspace_.active_index() != original) {
+      if (active_tool_ != nullptr && active_tool_->is_stroking()) {
+        active_tool_->on_cancel();
+      }
+      workspace_.set_active(original);
+      attach_active_document();
+    }
     return false;
   }
   if (active_tool_ != nullptr) {
@@ -1926,7 +2017,9 @@ void MainWindow::apply_layer_effect(const char* name,
     show_status("Layer is locked");
     return;
   }
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   EffectPreview effect(document());
   if (!effect.valid()) {
     return;
@@ -1940,7 +2033,9 @@ bool MainWindow::run_adjust_dialog(LivePreviewDialog& dialog, const char* name,
     show_status("Layer is locked");
     return false;
   }
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return false;
+  }
   EffectPreview effect(document());
   if (!effect.valid()) {
     return false;
@@ -1954,14 +2049,17 @@ bool MainWindow::run_adjust_dialog(LivePreviewDialog& dialog, const char* name,
     } else {
       effect.restore();
     }
+    live_effect_preview_ = effect.previewing();
     canvas_.invalidate_all();
   };
   dialog.on_preview_reset = [this, &effect]() {
     effect.restore();
+    live_effect_preview_ = false;
     canvas_.invalidate_all();
   };
 
   const int response = dialog.run();
+  live_effect_preview_ = false;
   const EffectPreview::EffectFn fn = build_effect();
   dialog.hide();
   // The callbacks captured locals; make sure a late signal cannot reach them.
@@ -2113,8 +2211,12 @@ void MainWindow::action_shortcuts() {
       {"Pencil / Brush / Eraser", "P / B / A"},
       {"Rectangle select / Lasso / Ellipse select", "S / M / I"},
       {"Magic wand / Fill / Picker", "W / F / C"},
-      {"Line / Rectangle / Ellipse", "L / R / E"},
-      {"Text / Curve / Polygon", "T / V / G"},
+      {"Line / Rectangle outline / filled", "L / R / J"},
+      {"Ellipse outline / filled", "E / Z"},
+      {"Freeform outline / filled", "K / O"},
+      {"Polygon outline / filled", "G / Q"},
+      {"Rounded rectangle (U again for filled)", "U"},
+      {"Text / Curve", "T / V"},
       {"Spray / Rounded rect / Polyline", "Y / U / N"},
   };
   const int nrows = static_cast<int>(sizeof(rows) / sizeof(rows[0]));
@@ -2145,7 +2247,9 @@ void MainWindow::action_about() {
 }
 
 void MainWindow::action_print() {
-  document().commit_floating();
+  if (!commit_live_edits()) {
+    return;
+  }
   auto op = Gtk::PrintOperation::create();
   op->set_n_pages(1);
   op->set_embed_page_setup(true);
@@ -2224,7 +2328,11 @@ void MainWindow::action_revert() {
     show_status("Nothing to revert");
     return;
   }
-  if (document().dirty()) {
+  if (document().selection().floating() && !document().commit_floating()) {
+    show_status("Could not stamp the selection (layer is locked)");
+    return;
+  }
+  if (document().dirty() || (active_tool_ != nullptr && active_tool_->captures_keys())) {
     Gtk::MessageDialog dialog(*this, "Revert to last saved file? Unsaved changes will be lost.",
                               false, Gtk::MESSAGE_QUESTION, Gtk::BUTTONS_NONE, true);
     dialog.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
@@ -2265,7 +2373,7 @@ void MainWindow::rebuild_recent_menu() {
   } else {
     int i = 0;
     for (const auto& path : prefs_.recent_files) {
-      auto* item = Gtk::manage(new Gtk::MenuItem(path));
+      auto* item = Gtk::manage(new Gtk::MenuItem(path, false));
       item->signal_activate().connect([this, path]() { open_path(path); });
       submenu->append(*item);
       ++i;
@@ -2313,6 +2421,9 @@ void MainWindow::start_recovery_save() {
   if (!recovery_slot_ || document_ptr() == nullptr || !document().dirty()) {
     return;
   }
+  if (!crash_recovery::recovery_snapshot_allowed(live_effect_preview_)) {
+    return;
+  }
   if (document().selection().floating()) {
     return;
   }
@@ -2338,11 +2449,12 @@ void MainWindow::start_recovery_save() {
   const std::string dest = crash_recovery::autosave_path();
   try {
     std::thread([slot, snapshot = std::move(snapshot), dest]() mutable {
-      g_mkdir_with_parents(crash_recovery::state_dir().c_str(), 0755);
-      const std::string tmp = dest + ".tmp";
-      std::string error;
-      if (!save_ora_snapshot(tmp, snapshot, error) || rename(tmp.c_str(), dest.c_str()) != 0) {
-        unlink(tmp.c_str());
+      try {
+        std::string error;
+        if (!crash_recovery::prepare_state_dir(error) || !save_ora_snapshot(dest, snapshot, error)) {
+          // Leave any previous recovery file in place.
+        }
+      } catch (...) {
       }
       g_idle_add(&MainWindow::recovery_idle_cb, new RecoveryIdle{slot});
     }).detach();

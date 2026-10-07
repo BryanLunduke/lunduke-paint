@@ -282,6 +282,7 @@ void TextTool::begin_box(int x, int y, unsigned button) {
   const int width = std::max(160, state_.size_pt * 10);
   state_.box = Rect{x, y, width, height};
   editing_ = true;
+  host_->document().set_unsaved_overlay(true);
   drag_ = Drag::None;
   rebuild_pixels();
   start_blink();
@@ -293,6 +294,9 @@ void TextTool::close_box() {
   const bool was = editing_;
   const Rect box = state_.box;
   editing_ = false;
+  if (was && host_ != nullptr) {
+    host_->document().set_unsaved_overlay(false);
+  }
   drag_ = Drag::None;
   blink_.disconnect();
   pixels_.clear();

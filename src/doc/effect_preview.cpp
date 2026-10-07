@@ -67,38 +67,11 @@ Rect EffectPreview::preview(const EffectFn& fn) {
   if (layer == nullptr || !fn) {
     return {};
   }
-  Rect bounds{};
-  if (snapshot_->width() > 2048 || snapshot_->height() > 2048) {
-    int dw = snapshot_->width();
-    int dh = snapshot_->height();
-    constexpr int kPreviewMax = 1024;
-    if (dw >= dh) {
-      dh = std::max(1, dh * kPreviewMax / dw);
-      dw = kPreviewMax;
-    } else {
-      dw = std::max(1, dw * kPreviewMax / dh);
-      dh = kPreviewMax;
-    }
-    std::vector<std::uint8_t> small(static_cast<std::size_t>(dw) * static_cast<std::size_t>(dh) * 4, 0);
-    scale_bilinear(snapshot_->pixels(), snapshot_->width(), snapshot_->height(), snapshot_->stride(),
-                   small.data(), dw, dh, dw * 4);
-    fn(small.data(), dw, dh, dw * 4);
-    std::vector<std::uint8_t> up(static_cast<std::size_t>(snapshot_->width()) *
-                                     static_cast<std::size_t>(snapshot_->height()) * 4,
-                                 0);
-    scale_nearest(small.data(), dw, dh, dw * 4, up.data(), snapshot_->width(), snapshot_->height(),
-                  snapshot_->width() * 4);
-    layer->set_pixels(snapshot_->width(), snapshot_->height(), up.data(), snapshot_->width() * 4);
-    bounds = Rect{0, 0, snapshot_->width(), snapshot_->height()};
-    const Selection& sel = document_->selection();
-    if (!sel.empty()) {
-      clip_rect_to_selection(*layer, *snapshot_, bounds, sel);
-    }
-  } else {
-    Layer scratch(snapshot_->width(), snapshot_->height(), Color::transparent(), "preview");
-    bounds = render(scratch, fn);
-    layer->copy_from(scratch);
-  }
+  // Full resolution, same path as commit(). A downscaled nearest-neighbor
+  // proxy does not match blur, sharpen, or emboss.
+  Layer scratch(snapshot_->width(), snapshot_->height(), Color::transparent(), "preview");
+  const Rect bounds = render(scratch, fn);
+  layer->copy_from(scratch);
   previewing_ = true;
   document_->notify_invalidated(canvas_bounds_of(*layer, bounds));
   return bounds;

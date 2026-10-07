@@ -26,7 +26,7 @@ public:
       : fill_mode_(mode), id_(tool_id), name_(tool_name) {}
   const char* id() const override { return id_; }
   const char* name() const override { return name_; }
-  char shortcut() const override { return 'G'; }
+  char shortcut() const override { return fill_mode_ == ShapeFillMode::Fill ? 'Q' : 'G'; }
   const char* hint() const override {
     return "Polygon: click vertices; Enter or double-click closes; Esc cancels";
   }

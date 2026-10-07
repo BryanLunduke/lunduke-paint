@@ -158,6 +158,9 @@ private:
   void update_title();
   bool confirm_lose_changes();
   bool save_to_path(const std::string& path, ImageFormat format);
+  // Stamps an open text box, then a floating selection. False leaves both
+  // the dirty flag and any crash-recovery file alone.
+  bool commit_live_edits();
   std::string choose_open_path();
   bool choose_save_path(std::string& path, ImageFormat& format);
   bool layer_has_transparency() const;
@@ -220,6 +223,7 @@ private:
   struct RecoverySlot;
   std::shared_ptr<RecoverySlot> recovery_slot_;
   gint64 last_edit_us_{0};
+  bool live_effect_preview_{false};
   Glib::RefPtr<Gio::SimpleAction> undo_action_;
   Glib::RefPtr<Gio::SimpleAction> redo_action_;
   Glib::RefPtr<Gio::SimpleAction> cut_action_;

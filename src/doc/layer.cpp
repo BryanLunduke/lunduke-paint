@@ -2,6 +2,8 @@
 
 #include "doc/layer.hpp"
 
+#include "io/ora.hpp"
+
 #include <algorithm>
 #include <cstring>
 
@@ -21,6 +23,10 @@ Layer::Layer(int width, int height, Color fill, std::string name)
   stride_ = width_ * 4;
   pixels_.assign(static_cast<std::size_t>(stride_) * static_cast<std::size_t>(height_), 0);
   this->fill(fill);
+}
+
+Layer::~Layer() {
+  forget_layer_png(identity_);
 }
 
 void Layer::set_opacity(float v) {
