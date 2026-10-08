@@ -202,6 +202,25 @@ void AllLayersBufferCommand::apply(Document& document) {
     if (!placed.pixels.empty()) {
       out->set_pixels(pw, ph, placed.pixels.data(), pw * 4);
     }
+    if (xform_.kind == StackXformKind::Crop && !xform_.crop_mask.empty() && xform_.new_w > 0 &&
+        xform_.new_h > 0) {
+      const int mw = xform_.new_w;
+      const int mh = xform_.new_h;
+      for (int ly = 0; ly < out->height(); ++ly) {
+        for (int lx = 0; lx < out->width(); ++lx) {
+          const int cx = lx + out->offset_x();
+          const int cy = ly + out->offset_y();
+          if (cx < 0 || cy < 0 || cx >= mw || cy >= mh) {
+            continue;
+          }
+          const std::size_t index = static_cast<std::size_t>(cy) * static_cast<std::size_t>(mw) +
+                                    static_cast<std::size_t>(cx);
+          if (index < xform_.crop_mask.size() && xform_.crop_mask[index] == 0) {
+            out->set_pixel(lx, ly, Color::transparent());
+          }
+        }
+      }
+    }
     next.push_back(std::move(out));
   }
   document.replace_stack(xform_.new_w, xform_.new_h, std::move(next), old_active_);

@@ -58,7 +58,7 @@ void Document::set_dirty(bool dirty) {
 }
 
 void Document::mark_clean() {
-  if (unsaved_overlay_) {
+  if (unsaved_overlay_ || selection_.floating()) {
     return;
   }
   set_dirty(false);
@@ -338,7 +338,7 @@ bool Document::commit_floating(const char* name) {
     const Rect origin_canvas = selection_.origin_rect();
     for (int y = 0; y < origin_canvas.h; ++y) {
       for (int x = 0; x < origin_canvas.w; ++x) {
-        if (!selection_.float_covers(x, y)) {
+        if (!selection_.origin_covers(x, y)) {
           continue;
         }
         const int lx = origin_canvas.x - ox + x;
@@ -377,7 +377,9 @@ bool Document::commit_floating(const char* name) {
     selection_.clear();
   }
   auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, name ? name : "Move selection", index);
-  if (cmd && !cmd->empty()) {
+  // A float that misses the layer has an empty pixel patch. It is still a
+  // history step so the paste can be undone and redone.
+  if (cmd) {
     cmd->set_selection_change(selection_before, selection_.capture());
     commit(std::move(cmd));
   } else {
@@ -417,7 +419,7 @@ void Document::delete_selection() {
       const Rect layer_bounds{0, 0, layer.width(), layer.height()};
       for (int y = 0; y < origin_canvas.h; ++y) {
         for (int x = 0; x < origin_canvas.w; ++x) {
-          if (!selection_.float_covers(x, y)) {
+          if (!selection_.origin_covers(x, y)) {
             continue;
           }
           const int lx = origin_canvas.x - ox + x;
@@ -476,7 +478,8 @@ void Document::duplicate_selection() {
   notify_changed();
 }
 
-void Document::paste_floating(int x, int y, int w, int h, std::vector<std::uint8_t> rgba) {
+void Document::paste_floating(int x, int y, int w, int h, std::vector<std::uint8_t> rgba,
+                              std::vector<std::uint8_t> coverage) {
   if (!allow_disrupt("paste")) {
     return;
   }
@@ -484,10 +487,116 @@ void Document::paste_floating(int x, int y, int w, int h, std::vector<std::uint8
     notify_blocked("Unlock the layer to place the selection");
     return;
   }
-  selection_.set_float_pixels(x, y, w, h, std::move(rgba));
+  selection_.set_float_pixels(x, y, w, h, std::move(rgba), std::move(coverage));
   selection_.set_source_layer(layers_.active_index());
   notify_invalidated(selection_.dirty_union());
   notify_changed();
+}
+
+bool Document::cancel_floating() {
+  if (!selection_.floating()) {
+    return false;
+  }
+  const Rect dirty = selection_.dirty_union();
+  if (selection_.copy_mode()) {
+    selection_.clear();
+  } else {
+    const SelectionState state = selection_.capture();
+    const Rect origin{state.origin_x, state.origin_y, state.origin_w, state.origin_h};
+    std::vector<std::uint8_t> coverage;
+    const std::size_t origin_n =
+        static_cast<std::size_t>(std::max(0, origin.w)) * static_cast<std::size_t>(std::max(0, origin.h));
+    if (state.float_w == origin.w && state.float_h == origin.h && !state.float_coverage.empty()) {
+      coverage = state.float_coverage;
+    } else if (!state.origin_coverage.empty() && state.origin_coverage.size() == origin_n) {
+      coverage = state.origin_coverage;
+    }
+    selection_.drop_float();
+    if (origin.empty()) {
+      selection_.clear();
+    } else if (!coverage.empty()) {
+      selection_.set_mask(origin, std::move(coverage));
+    } else {
+      selection_.set_rect(origin);
+    }
+  }
+  notify_invalidated(dirty);
+  notify_changed();
+  return true;
+}
+
+void Document::nudge_floating(int dx, int dy) {
+  if (!selection_.floating() || (dx == 0 && dy == 0)) {
+    return;
+  }
+  const Rect before = selection_.dirty_union();
+  selection_.move_float(selection_.float_x() + dx, selection_.float_y() + dy);
+  notify_invalidated(rect_union(before, selection_.dirty_union()));
+  notify_changed();
+}
+
+bool Document::crop_to_selection() {
+  if (selection_.floating() && !try_commit_floating("Crop")) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
+  }
+  if (selection_.empty() || selection_.inverted()) {
+    return false;
+  }
+  const Rect canvas{0, 0, width_, height_};
+  const Rect crop = rect_intersect(selection_.bounds(), canvas);
+  if (crop.empty()) {
+    return false;
+  }
+  StackXform xform;
+  xform.kind = StackXformKind::Crop;
+  xform.old_w = width_;
+  xform.old_h = height_;
+  xform.new_w = crop.w;
+  xform.new_h = crop.h;
+  xform.crop = crop;
+  if (selection_.has_mask()) {
+    xform.crop_mask.assign(static_cast<std::size_t>(crop.w) * static_cast<std::size_t>(crop.h), 0);
+    for (int y = 0; y < crop.h; ++y) {
+      for (int x = 0; x < crop.w; ++x) {
+        if (selection_.mask_at(crop.x + x, crop.y + y)) {
+          xform.crop_mask[static_cast<std::size_t>(y) * static_cast<std::size_t>(crop.w) +
+                          static_cast<std::size_t>(x)] = 1;
+        }
+      }
+    }
+  }
+  auto old_layers = snapshot_layers();
+  const int active = layers_.active_index();
+  commit(std::make_unique<AllLayersBufferCommand>("Crop", std::move(old_layers), active, xform));
+  return true;
+}
+
+std::unique_ptr<Document> Document::from_masked_paste(int width, int height, const std::uint8_t* rgba,
+                                                     const std::uint8_t* coverage) {
+  if (width < 1) {
+    width = 1;
+  }
+  if (height < 1) {
+    height = 1;
+  }
+  auto doc = create(width, height, Color::transparent(), "Pasted");
+  if (rgba == nullptr) {
+    return doc;
+  }
+  Layer& layer = doc->layers().active_layer();
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                static_cast<std::size_t>(x);
+      if (coverage != nullptr && coverage[index] == 0) {
+        continue;
+      }
+      const std::uint8_t* p = rgba + index * 4;
+      layer.set_pixel(x, y, Color{p[0], p[1], p[2], p[3]});
+    }
+  }
+  return doc;
 }
 
 void Document::replace_active_buffer(int width, int height, const std::uint8_t* rgba, int stride) {

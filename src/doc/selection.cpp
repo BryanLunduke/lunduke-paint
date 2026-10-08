@@ -5,6 +5,7 @@
 #include "doc/layer.hpp"
 #include "doc/layer_stack.hpp"
 #include "raster/blend.hpp"
+#include "raster/transform.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -165,6 +166,21 @@ bool Selection::float_covers(int local_x, int local_y) const {
                          static_cast<std::size_t>(local_x)] != 0;
 }
 
+bool Selection::origin_covers(int local_x, int local_y) const {
+  if (local_x < 0 || local_y < 0 || local_x >= origin_w_ || local_y >= origin_h_) {
+    return false;
+  }
+  if (origin_coverage_.empty()) {
+    return true;
+  }
+  const std::size_t index = static_cast<std::size_t>(local_y) * static_cast<std::size_t>(origin_w_) +
+                            static_cast<std::size_t>(local_x);
+  if (index >= origin_coverage_.size()) {
+    return false;
+  }
+  return origin_coverage_[index] != 0;
+}
+
 Color Selection::float_pixel(int x, int y) const {
   if (!floating_ || x < 0 || y < 0 || x >= float_w_ || y >= float_h_) {
     return Color::transparent();
@@ -219,10 +235,12 @@ bool Selection::lift(const Layer& layer, int source_index) {
   }
   if (!partial) {
     float_coverage_.clear();
+    origin_coverage_.clear();
     mask_.clear();
     mask_w_ = 0;
     mask_h_ = 0;
   } else {
+    origin_coverage_ = float_coverage_;
     mask_ = float_coverage_;
     mask_w_ = float_w_;
     mask_h_ = float_h_;
@@ -234,7 +252,41 @@ bool Selection::lift(const Layer& layer, int source_index) {
   return true;
 }
 
-void Selection::set_float_pixels(int x, int y, int w, int h, std::vector<std::uint8_t> rgba) {
+namespace {
+
+void install_coverage(std::vector<std::uint8_t>& coverage, std::vector<std::uint8_t>& mask, int& mask_w,
+                      int& mask_h, int w, int h, std::vector<std::uint8_t> incoming) {
+  const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+  bool partial = false;
+  if (incoming.size() >= n) {
+    incoming.resize(n);
+    for (std::uint8_t value : incoming) {
+      if (value == 0) {
+        partial = true;
+        break;
+      }
+    }
+  }
+  if (!partial) {
+    coverage.clear();
+    mask.clear();
+    mask_w = 0;
+    mask_h = 0;
+    return;
+  }
+  for (std::uint8_t& value : incoming) {
+    value = value == 0 ? 0 : 1;
+  }
+  coverage = std::move(incoming);
+  mask = coverage;
+  mask_w = w;
+  mask_h = h;
+}
+
+}  // namespace
+
+void Selection::set_float_pixels(int x, int y, int w, int h, std::vector<std::uint8_t> rgba,
+                                 std::vector<std::uint8_t> coverage) {
   if (w < 1 || h < 1 ||
       rgba.size() < static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4) {
     clear();
@@ -253,15 +305,14 @@ void Selection::set_float_pixels(int x, int y, int w, int h, std::vector<std::ui
   origin_w_ = w;
   origin_h_ = h;
   float_pixels_ = std::move(rgba);
-  float_coverage_.clear();
-  mask_.clear();
-  mask_w_ = 0;
-  mask_h_ = 0;
+  origin_coverage_.clear();
+  install_coverage(float_coverage_, mask_, mask_w_, mask_h_, w, h, std::move(coverage));
   rect_ = float_rect();
   bump();
 }
 
-void Selection::transform_float(int x, int y, int w, int h, std::vector<std::uint8_t> rgba) {
+void Selection::transform_float(int x, int y, int w, int h, std::vector<std::uint8_t> rgba,
+                                std::vector<std::uint8_t> coverage) {
   if (!floating_ || w < 1 || h < 1 ||
       rgba.size() < static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4) {
     return;
@@ -271,14 +322,116 @@ void Selection::transform_float(int x, int y, int w, int h, std::vector<std::uin
   float_w_ = w;
   float_h_ = h;
   float_pixels_ = std::move(rgba);
-  // The coverage was sampled on the old grid; a resampled float is rectangular.
-  if (w != mask_w_ || h != mask_h_) {
-    float_coverage_.clear();
-    mask_.clear();
-    mask_w_ = 0;
-    mask_h_ = 0;
-  }
+  install_coverage(float_coverage_, mask_, mask_w_, mask_h_, w, h, std::move(coverage));
   rect_ = float_rect();
+  bump();
+}
+
+void Selection::scale_float_nearest(int x, int y, int new_w, int new_h, const std::uint8_t* src,
+                                    int src_w, int src_h, const std::uint8_t* coverage) {
+  if (!floating_ || src == nullptr || src_w < 1 || src_h < 1 || new_w < 1 || new_h < 1) {
+    return;
+  }
+  std::vector<std::uint8_t> pixels(
+      static_cast<std::size_t>(new_w) * static_cast<std::size_t>(new_h) * 4, 0);
+  scale_nearest(src, src_w, src_h, src_w * 4, pixels.data(), new_w, new_h, new_w * 4);
+  std::vector<std::uint8_t> cov;
+  if (coverage != nullptr) {
+    cov.assign(static_cast<std::size_t>(new_w) * static_cast<std::size_t>(new_h), 0);
+    for (int yy = 0; yy < new_h; ++yy) {
+      const int sy = std::min(src_h - 1, yy * src_h / new_h);
+      for (int xx = 0; xx < new_w; ++xx) {
+        const int sx = std::min(src_w - 1, xx * src_w / new_w);
+        const std::uint8_t bit =
+            coverage[static_cast<std::size_t>(sy) * static_cast<std::size_t>(src_w) +
+                     static_cast<std::size_t>(sx)];
+        cov[static_cast<std::size_t>(yy) * static_cast<std::size_t>(new_w) +
+            static_cast<std::size_t>(xx)] = bit == 0 ? 0 : 1;
+      }
+    }
+  }
+  transform_float(x, y, new_w, new_h, std::move(pixels), std::move(cov));
+}
+
+void Selection::rotate_float_steps(int steps, int x, int y, const std::uint8_t* src, int src_w,
+                                   int src_h, const std::uint8_t* coverage) {
+  if (!floating_ || src == nullptr || src_w < 1 || src_h < 1) {
+    return;
+  }
+  steps %= 4;
+  if (steps < 0) {
+    steps += 4;
+  }
+  std::vector<std::uint8_t> cur(
+      src, src + static_cast<std::size_t>(src_w) * static_cast<std::size_t>(src_h) * 4);
+  std::vector<std::uint8_t> cov;
+  if (coverage != nullptr) {
+    cov.assign(coverage, coverage + static_cast<std::size_t>(src_w) * static_cast<std::size_t>(src_h));
+  }
+  int cw = src_w;
+  int ch = src_h;
+  for (int i = 0; i < steps; ++i) {
+    std::vector<std::uint8_t> next(static_cast<std::size_t>(ch) * static_cast<std::size_t>(cw) * 4, 0);
+    rotate_90_cw(cur.data(), cw, ch, cw * 4, next.data(), ch * 4);
+    std::vector<std::uint8_t> next_cov;
+    if (!cov.empty()) {
+      next_cov.assign(static_cast<std::size_t>(ch) * static_cast<std::size_t>(cw), 0);
+      for (int yy = 0; yy < cw; ++yy) {
+        for (int xx = 0; xx < ch; ++xx) {
+          next_cov[static_cast<std::size_t>(yy) * static_cast<std::size_t>(ch) +
+                   static_cast<std::size_t>(xx)] =
+              cov[static_cast<std::size_t>(ch - 1 - xx) * static_cast<std::size_t>(cw) +
+                  static_cast<std::size_t>(yy)];
+        }
+      }
+    }
+    cur.swap(next);
+    cov.swap(next_cov);
+    const int tmp = cw;
+    cw = ch;
+    ch = tmp;
+  }
+  transform_float(x, y, cw, ch, std::move(cur), std::move(cov));
+}
+
+void Selection::flip_horizontal() {
+  if (!floating_ || float_pixels_.empty() || float_w_ < 1 || float_h_ < 1) {
+    return;
+  }
+  flip_h(float_pixels_.data(), float_w_, float_h_, float_w_ * 4);
+  if (!float_coverage_.empty()) {
+    for (int y = 0; y < float_h_; ++y) {
+      std::uint8_t* row = float_coverage_.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(float_w_);
+      for (int x = 0; x < float_w_ / 2; ++x) {
+        std::swap(row[x], row[float_w_ - 1 - x]);
+      }
+    }
+    mask_ = float_coverage_;
+    mask_w_ = float_w_;
+    mask_h_ = float_h_;
+  }
+  bump();
+}
+
+void Selection::flip_vertical() {
+  if (!floating_ || float_pixels_.empty() || float_w_ < 1 || float_h_ < 1) {
+    return;
+  }
+  flip_v(float_pixels_.data(), float_w_, float_h_, float_w_ * 4);
+  if (!float_coverage_.empty()) {
+    for (int y = 0; y < float_h_ / 2; ++y) {
+      std::uint8_t* a =
+          float_coverage_.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(float_w_);
+      std::uint8_t* b = float_coverage_.data() +
+                        static_cast<std::size_t>(float_h_ - 1 - y) * static_cast<std::size_t>(float_w_);
+      for (int x = 0; x < float_w_; ++x) {
+        std::swap(a[x], b[x]);
+      }
+    }
+    mask_ = float_coverage_;
+    mask_w_ = float_w_;
+    mask_h_ = float_h_;
+  }
   bump();
 }
 
@@ -310,6 +463,7 @@ SelectionState Selection::capture() const {
   state.origin_h = origin_h_;
   state.float_pixels = float_pixels_;
   state.float_coverage = float_coverage_;
+  state.origin_coverage = origin_coverage_;
   state.mask = mask_;
   state.mask_w = mask_w_;
   state.mask_h = mask_h_;
@@ -334,6 +488,7 @@ void Selection::restore(const SelectionState& state) {
   origin_h_ = state.origin_h;
   float_pixels_ = state.float_pixels;
   float_coverage_ = state.float_coverage;
+  origin_coverage_ = state.origin_coverage;
   mask_ = state.mask;
   mask_w_ = state.mask_w;
   mask_h_ = state.mask_h;
@@ -389,6 +544,7 @@ void Selection::drop_float() {
   copy_mode_ = false;
   float_pixels_.clear();
   float_coverage_.clear();
+  origin_coverage_.clear();
   float_w_ = 0;
   float_h_ = 0;
   origin_w_ = 0;
@@ -549,15 +705,23 @@ void fill_selection(Layer& layer, const Selection& sel, Color color, Rect* dirty
 }
 
 void copy_selection_rgba(const Layer& layer, const Selection& sel, int canvas_w, int canvas_h,
-                         int& out_w, int& out_h, std::vector<std::uint8_t>& out) {
+                         int& out_w, int& out_h, std::vector<std::uint8_t>& out,
+                         std::vector<std::uint8_t>* coverage) {
   out_w = 0;
   out_h = 0;
   out.clear();
+  if (coverage != nullptr) {
+    coverage->clear();
+  }
   if (sel.floating() && sel.float_pixels() != nullptr) {
     out_w = sel.float_w();
     out_h = sel.float_h();
     out.assign(sel.float_pixels(),
                sel.float_pixels() + static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h) * 4);
+    if (coverage != nullptr && sel.has_float_coverage() && sel.float_coverage() != nullptr) {
+      const std::size_t n = static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h);
+      coverage->assign(sel.float_coverage(), sel.float_coverage() + n);
+    }
     return;
   }
   if (sel.empty()) {
@@ -595,6 +759,9 @@ void copy_selection_rgba(const Layer& layer, const Selection& sel, int canvas_w,
   out_h = r.h;
   out.assign(static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h) * 4, 0);
   layer.read_rect(r, out.data());
+  if (coverage != nullptr) {
+    coverage->assign(static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h), 1);
+  }
   if (sel.has_mask()) {
     for (int y = 0; y < out_h; ++y) {
       for (int x = 0; x < out_w; ++x) {
@@ -604,6 +771,10 @@ void copy_selection_rgba(const Layer& layer, const Selection& sel, int canvas_w,
                             static_cast<std::size_t>(x)) *
                                4;
           p[0] = p[1] = p[2] = p[3] = 0;
+          if (coverage != nullptr) {
+            (*coverage)[static_cast<std::size_t>(y) * static_cast<std::size_t>(out_w) +
+                        static_cast<std::size_t>(x)] = 0;
+          }
         }
       }
     }
@@ -666,7 +837,7 @@ bool composite_floating_into_buffer(const Selection& sel, std::uint8_t* pixels, 
     const Rect origin = sel.origin_rect();
     for (int y = 0; y < origin.h; ++y) {
       for (int x = 0; x < origin.w; ++x) {
-        if (!sel.float_covers(x, y)) {
+        if (!sel.origin_covers(x, y)) {
           continue;
         }
         write(origin.x - offset_x + x, origin.y - offset_y + y, Color::transparent());
@@ -691,6 +862,7 @@ bool composite_floating_into_buffer(const Selection& sel, std::uint8_t* pixels, 
 void paint_floating_selection(const LayerStack& layers, const Selection& sel, std::uint8_t* dest,
                               int dest_stride, Rect view, bool substitute_clear, Color hole_clear,
                               Color float_clear, const std::uint8_t* hole_rgba, int hole_stride) {
+  (void)float_clear;
   if (dest == nullptr || view.empty() || !sel.floating() || sel.float_pixels() == nullptr) {
     return;
   }
@@ -728,7 +900,7 @@ void paint_floating_selection(const LayerStack& layers, const Selection& sel, st
         for (int x = 0; x < hole.w; ++x) {
           const int canvas_x = hole.x + x;
           const int canvas_y = hole.y + y;
-          if (!sel.float_covers(canvas_x - origin.x, canvas_y - origin.y)) {
+          if (!sel.origin_covers(canvas_x - origin.x, canvas_y - origin.y)) {
             continue;
           }
           std::uint8_t* d = pixel_at(canvas_x, canvas_y);
@@ -769,12 +941,8 @@ void paint_floating_selection(const LayerStack& layers, const Selection& sel, st
       }
       const std::uint8_t* s = srow + static_cast<std::size_t>(x) * 4;
       if (s[3] == 0) {
-        if (!sel.transparent_move() && d[3] == 0 && substitute_clear) {
-          d[0] = float_clear.r;
-          d[1] = float_clear.g;
-          d[2] = float_clear.b;
-          d[3] = float_clear.a;
-        }
+        // A transparent float pixel leaves the hole (the layers under the
+        // source) visible. Uncovered lasso pixels never reach here.
         continue;
       }
       if (s[3] == 255) {
@@ -790,10 +958,14 @@ void paint_floating_selection(const LayerStack& layers, const Selection& sel, st
 }
 
 void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas_w, int canvas_h,
-                      int& out_w, int& out_h, std::vector<std::uint8_t>& out) {
+                      int& out_w, int& out_h, std::vector<std::uint8_t>& out,
+                      std::vector<std::uint8_t>* coverage) {
   out_w = 0;
   out_h = 0;
   out.clear();
+  if (coverage != nullptr) {
+    coverage->clear();
+  }
   if (canvas_w < 1 || canvas_h < 1) {
     return;
   }
@@ -854,14 +1026,14 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
   out_w = region.w;
   out_h = region.h;
   out.assign(static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h) * 4, 0);
+  if (coverage != nullptr) {
+    coverage->assign(static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h), 0);
+  }
   for (int y = 0; y < out_h; ++y) {
     for (int x = 0; x < out_w; ++x) {
       const int cx = region.x + x;
       const int cy = region.y + y;
-      if (sel.has_mask() && !sel.mask_at(cx, cy) && !sel.floating()) {
-        continue;
-      }
-      if (!sel.floating() && !sel.contains(cx, cy)) {
+      if (!sel.contains(cx, cy)) {
         continue;
       }
       const Color c = sample(cx, cy);
@@ -873,6 +1045,10 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
       p[1] = c.g;
       p[2] = c.b;
       p[3] = c.a;
+      if (coverage != nullptr) {
+        (*coverage)[static_cast<std::size_t>(y) * static_cast<std::size_t>(out_w) +
+                    static_cast<std::size_t>(x)] = 1;
+      }
     }
   }
 }

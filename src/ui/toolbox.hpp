@@ -9,6 +9,7 @@
 #include <gtkmm/cssprovider.h>
 #include <gtkmm/drawingarea.h>
 #include <gtkmm/grid.h>
+#include <gtkmm/scrolledwindow.h>
 #include <gtkmm/stack.h>
 #include <string>
 #include <vector>
@@ -67,6 +68,8 @@ private:
   int spray_radius_at_y(double y) const;
   void size_option_panels();
 
+  Gtk::ScrolledWindow scroll_;
+  Gtk::Box rail_{Gtk::ORIENTATION_VERTICAL, 2};
   Gtk::Grid grid_;
   Gtk::Stack options_stack_;
   Gtk::DrawingArea line_widths_;

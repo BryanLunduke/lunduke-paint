@@ -32,7 +32,10 @@
 #include <gtkmm/comboboxtext.h>
 #include <gtkmm/label.h>
 #include <gtkmm/main.h>
+#include <gtkmm/spinbutton.h>
 #include <gtkmm/window.h>
+
+#include "tools/tool.hpp"
 
 #include <cstdio>
 #include <vector>
@@ -57,6 +60,37 @@ void expect(bool cond, const char* msg) {
     ++errors;
   }
 }
+
+void expect_covers_request(Gtk::Widget& widget, const char* msg) {
+  int min_w = 0;
+  int nat_w = 0;
+  int min_h = 0;
+  int nat_h = 0;
+  widget.get_preferred_width(min_w, nat_w);
+  widget.get_preferred_height(min_h, nat_h);
+  const int aw = widget.get_allocated_width();
+  const int ah = widget.get_allocated_height();
+  if (aw < min_w || ah < min_h || aw < 1 || ah < 1) {
+    std::fprintf(stderr, "test_widgets: %s (allocated %dx%d, minimum %dx%d)\n", msg, aw, ah, min_w,
+                 min_h);
+    ++errors;
+  }
+}
+
+class IdTool : public lundukepaint::Tool {
+public:
+  explicit IdTool(const char* id) : id_(id) {}
+  const char* id() const override { return id_; }
+  const char* name() const override { return id_; }
+  char shortcut() const override { return 0; }
+  void on_press(lundukepaint::CanvasEvent) override {}
+  void on_motion(lundukepaint::CanvasEvent) override {}
+  void on_release(lundukepaint::CanvasEvent) override {}
+  void on_cancel() override {}
+
+private:
+  const char* id_;
+};
 
 void pump(int ms) {
   const gint64 end = g_get_monotonic_time() + static_cast<gint64>(ms) * 1000;
@@ -288,13 +322,22 @@ int main(int argc, char** argv) {
     configure_rail_combo(*font);
     auto* bold = Gtk::manage(new Gtk::CheckButton("Bold"));
     configure_rail_check(*bold);
+    auto* italic = Gtk::manage(new Gtk::CheckButton("Italic"));
+    configure_rail_check(*italic);
+    auto* size = Gtk::manage(new Gtk::SpinButton());
+    size->set_range(1, 256);
+    size->set_increments(1, 10);
+    size->set_value(16);
+    lundukepaint::configure_rail_spin(*size);
     auto* similar = Gtk::manage(new Gtk::Label("Similarity"));
     auto* move = Gtk::manage(new Gtk::CheckButton("Transparent move"));
     configure_rail_check(*move);
     auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
     configure_rail_check(*aa);
     options->pack_start(*font, Gtk::PACK_SHRINK);
+    options->pack_start(*size, Gtk::PACK_SHRINK);
     options->pack_start(*bold, Gtk::PACK_SHRINK);
+    options->pack_start(*italic, Gtk::PACK_SHRINK);
     options->pack_start(*similar, Gtk::PACK_SHRINK);
     options->pack_start(*move, Gtk::PACK_SHRINK);
     options->pack_start(*aa, Gtk::PACK_SHRINK);
@@ -307,6 +350,20 @@ int main(int argc, char** argv) {
     expect(bold->get_visible() && bold->get_mapped(), "text options are shown in the rail");
     expect(toolbox.width_tracks_tool_grid(), "options rail still fits the tool grid");
     expect(window.get_allocated_width() <= 1100 + 40, "default window does not grow for options");
+    expect(toolbox.get_allocated_width() >= 220, "rail stays at least 220px wide");
+    expect_covers_request(*font, "font combo at the default window");
+    expect_covers_request(*size, "size spin at the default window");
+    expect_covers_request(*bold, "Bold at the default window");
+    expect_covers_request(*italic, "Italic at the default window");
+    expect_covers_request(*move, "Transparent move at the default window");
+    window.resize(1100, 240);
+    pump(120);
+    expect(toolbox.get_allocated_width() >= 220, "rail keeps its width in a short window");
+    expect_covers_request(*font, "font combo in a short window");
+    expect_covers_request(*size, "size spin in a short window");
+    expect_covers_request(*bold, "Bold in a short window");
+    expect_covers_request(*italic, "Italic in a short window");
+    expect_covers_request(*move, "Transparent move in a short window");
     toolbox.set_active_tool("line");
     pump(40);
     expect(toolbox.width_tracks_tool_grid(), "line width plus antialias still fits");
@@ -315,6 +372,54 @@ int main(int argc, char** argv) {
     pump(40);
     expect(!bold->get_mapped(), "hand hides the options block");
     expect(toolbox.width_tracks_tool_grid(), "empty rail stays narrow");
+    window.hide();
+    pump(30);
+  }
+
+  // The canvas cursor follows the tool, and Space switches it to the hand.
+  {
+    Gtk::Window window;
+    window.set_default_size(640, 480);
+    CanvasView canvas;
+    window.add(canvas);
+    window.show_all();
+    pump(80);
+    expect(std::strcmp(canvas.canvas_cursor_name(), "default") == 0, "no tool keeps the default cursor");
+
+    IdTool pencil("pencil");
+    IdTool select("rect-select");
+    IdTool lasso("lasso");
+    IdTool text("text");
+    IdTool hand("hand");
+    canvas.set_tool(&pencil);
+    expect(std::strcmp(canvas.canvas_cursor_name(), "crosshair") == 0, "pencil uses the crosshair");
+    canvas.set_tool(&select);
+    expect(std::strcmp(canvas.canvas_cursor_name(), "crosshair") == 0, "rect select uses the crosshair");
+    canvas.set_tool(&lasso);
+    expect(std::strcmp(canvas.canvas_cursor_name(), "crosshair") == 0, "lasso uses the crosshair");
+    canvas.set_tool(&text);
+    expect(std::strcmp(canvas.canvas_cursor_name(), "text") == 0, "text uses the I-beam");
+    canvas.set_space_down(true);
+    expect(std::strcmp(canvas.canvas_cursor_name(), "hand") == 0, "Space switches the cursor to the hand");
+    canvas.set_space_down(false);
+    expect(std::strcmp(canvas.canvas_cursor_name(), "text") == 0, "releasing Space restores the tool cursor");
+    canvas.set_tool(&hand);
+    expect(std::strcmp(canvas.canvas_cursor_name(), "hand") == 0, "the hand tool uses the hand");
+
+    auto gdk_window = canvas.get_window();
+    expect(static_cast<bool>(gdk_window), "canvas has a window for the cursor");
+    if (gdk_window) {
+      auto cursor = gdk_window->get_cursor();
+      expect(static_cast<bool>(cursor) && cursor->get_cursor_type() == Gdk::HAND2,
+             "the hand cursor is installed on the canvas window");
+    }
+    canvas.set_tool(&text);
+    pump(20);
+    if (gdk_window) {
+      auto cursor = gdk_window->get_cursor();
+      expect(static_cast<bool>(cursor) && cursor->get_cursor_type() == Gdk::XTERM,
+             "the I-beam is installed on the canvas window");
+    }
     window.hide();
     pump(30);
   }

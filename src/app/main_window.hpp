@@ -183,6 +183,7 @@ private:
   void copy_selection_to_clipboard();
   void copy_merged_to_clipboard();
   bool paste_from_clipboard();
+  void action_paste_into_new();
   void remember_recent(const std::string& path);
   void rebuild_recent_menu();
   void offer_recovery();
@@ -251,6 +252,10 @@ private:
   Glib::RefPtr<Gio::SimpleAction> layer_merge_action_;
   Glib::RefPtr<Gio::SimpleAction> layer_flatten_action_;
   Gtk::MenuItem* recent_item_{nullptr};
+  int clip_w_ = 0;
+  int clip_h_ = 0;
+  std::vector<std::uint8_t> clip_rgba_;
+  std::vector<std::uint8_t> clip_coverage_;
   sigc::connection recovery_timer_;
 };
 

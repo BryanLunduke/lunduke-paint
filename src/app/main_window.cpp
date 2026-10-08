@@ -113,6 +113,7 @@ MainWindow::MainWindow() {
   copy_action_ = add_action(actions::kCopy, sigc::mem_fun(*this, &MainWindow::action_copy));
   copy_merged_action_ = add_action(actions::kCopyMerged, sigc::mem_fun(*this, &MainWindow::action_copy_merged));
   add_action(actions::kPaste, sigc::mem_fun(*this, &MainWindow::action_paste));
+  add_action(actions::kPasteIntoNew, sigc::mem_fun(*this, &MainWindow::action_paste_into_new));
   delete_action_ = add_action(actions::kDelete, sigc::mem_fun(*this, &MainWindow::action_delete));
   duplicate_action_ = add_action(actions::kDuplicate, sigc::mem_fun(*this, &MainWindow::action_duplicate));
   add_action(actions::kSelectAll, sigc::mem_fun(*this, &MainWindow::action_select_all));
@@ -871,12 +872,42 @@ bool MainWindow::on_key_press(GdkEventKey* event) {
     return false;
   }
   if (event->keyval == GDK_KEY_Escape) {
-    if (active_tool_ != nullptr && (active_tool_->is_stroking() || active_tool_->captures_keys())) {
-      active_tool_->on_cancel();
+    const bool busy =
+        active_tool_ != nullptr && (active_tool_->is_stroking() || active_tool_->captures_keys());
+    const bool floating = document_ptr() != nullptr && document().selection().floating();
+    switch (escape_target(busy, floating)) {
+      case EscapeTarget::ToolCancel:
+        active_tool_->on_cancel();
+        return true;
+      case EscapeTarget::FloatCancel:
+        document().cancel_floating();
+        return true;
+      case EscapeTarget::Deselect:
+        action_deselect();
+        return true;
+    }
+  }
+  if (document_ptr() != nullptr && document().selection().floating() &&
+      (event->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK)) == 0) {
+    int dx = 0;
+    int dy = 0;
+    if (event->keyval == GDK_KEY_Left) {
+      dx = -1;
+    } else if (event->keyval == GDK_KEY_Right) {
+      dx = 1;
+    } else if (event->keyval == GDK_KEY_Up) {
+      dy = -1;
+    } else if (event->keyval == GDK_KEY_Down) {
+      dy = 1;
+    }
+    if (dx != 0 || dy != 0) {
+      if ((event->state & GDK_SHIFT_MASK) != 0) {
+        dx *= 10;
+        dy *= 10;
+      }
+      document().nudge_floating(dx, dy);
       return true;
     }
-    action_deselect();
-    return true;
   }
   if (event->keyval == GDK_KEY_Return || event->keyval == GDK_KEY_KP_Enter) {
     if (active_tool_ != nullptr && active_tool_->on_commit()) {
@@ -1219,7 +1250,10 @@ bool MainWindow::confirm_lose_document(Document& document) {
   }
   const int idx = workspace_.index_of(&document);
   const bool is_active = idx >= 0 && idx == workspace_.active_index();
-  if (answer == CloseAnswer::Discard) {
+  const bool needs_chooser =
+      document.path().empty() || format_from_path(document.path()) == ImageFormat::Unknown;
+  const CloseSavePlan plan = plan_close_save(answer, needs_chooser, false);
+  if (plan.discard_edit) {
     if (is_active && active_tool_ != nullptr) {
       active_tool_->on_cancel();
     }
@@ -1227,14 +1261,17 @@ bool MainWindow::confirm_lose_document(Document& document) {
     crash_recovery::clear_after_discard(other_documents_dirty(&document));
     return true;
   }
+  if (!plan.commit_then_write && answer != CloseAnswer::Save) {
+    return false;
+  }
+  // A path is not known yet when Save As must run. Stamp only inside
+  // save_to_path, after the chooser has accepted a name.
   if (!is_active && idx >= 0) {
     if (!preserve_live_edits_for_tab_switch()) {
       return false;
     }
     workspace_.set_active(idx);
     attach_active_document();
-  } else if (edit == LiveEditAction::Stamp && !commit_live_edits()) {
-    return false;
   }
   action_save();
   return !document.dirty();
@@ -1271,6 +1308,67 @@ bool MainWindow::commit_live_edits() {
 }
 
 bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
+  // Reject and warn before any stamp. Cancelling a chooser never reaches
+  // here; cancelling one of these dialogs must leave the live edit up too.
+  if (format == ImageFormat::Gif) {
+    Gtk::MessageDialog err(*this, "GIF save is not supported.", false, Gtk::MESSAGE_ERROR,
+                           Gtk::BUTTONS_OK, true);
+    err.run();
+    return false;
+  }
+  if (format != ImageFormat::Ora) {
+    const bool multi = document().layers().count() > 1;
+    std::vector<std::uint8_t> preview;
+    composite_visible(preview);
+    bool transparent = false;
+    const int pixel_count = document().width() * document().height();
+    for (int i = 0; i < pixel_count; ++i) {
+      if (preview[static_cast<std::size_t>(i) * 4 + 3] != 255) {
+        transparent = true;
+        break;
+      }
+    }
+    if (!transparent && document().selection().floating() &&
+        document().selection().float_pixels() != nullptr) {
+      const int fw = document().selection().float_w();
+      const int fh = document().selection().float_h();
+      const std::uint8_t* pixels = document().selection().float_pixels();
+      const std::uint8_t* coverage = document().selection().float_coverage();
+      for (int i = 0; i < fw * fh; ++i) {
+        if (coverage != nullptr && coverage[i] == 0) {
+          continue;
+        }
+        if (pixels[static_cast<std::size_t>(i) * 4 + 3] != 255) {
+          transparent = true;
+          break;
+        }
+      }
+    }
+    if (multi && format == ImageFormat::Png) {
+      Gtk::MessageDialog warn(*this,
+                              "PNG will flatten visible layers (alpha is kept).",
+                              false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
+      if (warn.run() != Gtk::RESPONSE_OK) {
+        return false;
+      }
+    }
+    if (format == ImageFormat::Jpeg && (transparent || multi)) {
+      Gtk::MessageDialog warn(*this,
+                              "JPEG cannot store transparency or layers. The image will be flattened onto white.",
+                              false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
+      if (warn.run() != Gtk::RESPONSE_OK) {
+        return false;
+      }
+    }
+    if (format == ImageFormat::Bmp && (transparent || multi)) {
+      Gtk::MessageDialog warn(*this,
+                              "BMP cannot store transparency or layers. The image will be flattened onto white.",
+                              false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
+      if (warn.run() != Gtk::RESPONSE_OK) {
+        return false;
+      }
+    }
+  }
   if (!commit_live_edits()) {
     return false;
   }
@@ -1286,48 +1384,9 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
     return true;
   }
 
-  const bool multi = document().layers().count() > 1;
   std::vector<std::uint8_t> flat;
   composite_visible(flat);
-  bool transparent = false;
-  const int pixel_count = document().width() * document().height();
-  for (int i = 0; i < pixel_count; ++i) {
-    if (flat[static_cast<std::size_t>(i) * 4 + 3] != 255) {
-      transparent = true;
-      break;
-    }
-  }
-  if (multi && format == ImageFormat::Png) {
-    Gtk::MessageDialog warn(*this,
-                            "PNG will flatten visible layers (alpha is kept).",
-                            false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
-    if (warn.run() != Gtk::RESPONSE_OK) {
-      return false;
-    }
-  }
-  if (format == ImageFormat::Jpeg && (transparent || multi)) {
-    Gtk::MessageDialog warn(*this,
-                            "JPEG cannot store transparency or layers. The image will be flattened onto white.",
-                            false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
-    if (warn.run() != Gtk::RESPONSE_OK) {
-      return false;
-    }
-  }
-  if (format == ImageFormat::Bmp && (transparent || multi)) {
-    Gtk::MessageDialog warn(*this,
-                            "BMP cannot store transparency or layers. The image will be flattened onto white.",
-                            false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
-    if (warn.run() != Gtk::RESPONSE_OK) {
-      return false;
-    }
-  }
   std::string error;
-  if (format == ImageFormat::Gif) {
-    Gtk::MessageDialog err(*this, "GIF save is not supported.", false, Gtk::MESSAGE_ERROR,
-                           Gtk::BUTTONS_OK, true);
-    err.run();
-    return false;
-  }
   if (!save_flat_image(path, format, flat.data(), document().width(), document().height(),
                        document().width() * 4, jpeg_quality_, error)) {
     Gtk::MessageDialog err(*this, "Could not save image.", false, Gtk::MESSAGE_ERROR,
@@ -1567,6 +1626,42 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
 }
 
 
+namespace {
+
+bool pixbuf_to_tight_rgba(const Glib::RefPtr<Gdk::Pixbuf>& pixbuf, int& w, int& h,
+                          std::vector<std::uint8_t>& rgba) {
+  w = 0;
+  h = 0;
+  rgba.clear();
+  if (!pixbuf) {
+    return false;
+  }
+  w = pixbuf->get_width();
+  h = pixbuf->get_height();
+  if (w < 1 || h < 1) {
+    return false;
+  }
+  auto rgba_buf = pixbuf->add_alpha(false, 0, 0, 0);
+  rgba.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4, 0);
+  const int src_stride = rgba_buf->get_rowstride();
+  const std::uint8_t* src = rgba_buf->get_pixels();
+  const int nch = rgba_buf->get_n_channels();
+  for (int y = 0; y < h; ++y) {
+    const std::uint8_t* srow = src + static_cast<std::size_t>(y) * src_stride;
+    std::uint8_t* drow = rgba.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4;
+    for (int x = 0; x < w; ++x) {
+      const std::uint8_t* p = srow + static_cast<std::size_t>(x) * nch;
+      drow[x * 4 + 0] = p[0];
+      drow[x * 4 + 1] = p[1];
+      drow[x * 4 + 2] = p[2];
+      drow[x * 4 + 3] = nch >= 4 ? p[3] : 255;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 void MainWindow::copy_selection_to_clipboard() {
   if (document().selection().empty()) {
     return;
@@ -1574,11 +1669,16 @@ void MainWindow::copy_selection_to_clipboard() {
   int w = 0;
   int h = 0;
   std::vector<std::uint8_t> rgba;
+  std::vector<std::uint8_t> coverage;
   copy_selection_rgba(document().layers().active_layer(), document().selection(), document().width(),
-                      document().height(), w, h, rgba);
+                      document().height(), w, h, rgba, &coverage);
   if (w < 1 || h < 1 || rgba.empty()) {
     return;
   }
+  clip_w_ = w;
+  clip_h_ = h;
+  clip_rgba_ = rgba;
+  clip_coverage_ = std::move(coverage);
   auto pixbuf = Gdk::Pixbuf::create(Gdk::COLORSPACE_RGB, true, 8, w, h);
   const int dst_stride = pixbuf->get_rowstride();
   std::uint8_t* dst = pixbuf->get_pixels();
@@ -1595,11 +1695,16 @@ void MainWindow::copy_merged_to_clipboard() {
   int w = 0;
   int h = 0;
   std::vector<std::uint8_t> rgba;
+  std::vector<std::uint8_t> coverage;
   copy_merged_rgba(document().layers(), document().selection(), document().width(),
-                   document().height(), w, h, rgba);
+                   document().height(), w, h, rgba, &coverage);
   if (w < 1 || h < 1 || rgba.empty()) {
     return;
   }
+  clip_w_ = w;
+  clip_h_ = h;
+  clip_rgba_ = rgba;
+  clip_coverage_ = std::move(coverage);
   auto pixbuf = Gdk::Pixbuf::create(Gdk::COLORSPACE_RGB, true, 8, w, h);
   const int dst_stride = pixbuf->get_rowstride();
   std::uint8_t* dst = pixbuf->get_pixels();
@@ -1613,41 +1718,46 @@ void MainWindow::copy_merged_to_clipboard() {
 }
 
 bool MainWindow::paste_from_clipboard() {
-  auto pixbuf = Gtk::Clipboard::get()->wait_for_image();
-  if (!pixbuf) {
+  int w = 0;
+  int h = 0;
+  std::vector<std::uint8_t> rgba;
+  if (!pixbuf_to_tight_rgba(Gtk::Clipboard::get()->wait_for_image(), w, h, rgba)) {
     report_blocked("Clipboard has no image");
     return false;
-  }
-  const int w = pixbuf->get_width();
-  const int h = pixbuf->get_height();
-  if (w < 1 || h < 1) {
-    return false;
-  }
-  auto rgba_buf = pixbuf->add_alpha(false, 0, 0, 0);
-  std::vector<std::uint8_t> rgba(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4);
-  const int src_stride = rgba_buf->get_rowstride();
-  const std::uint8_t* src = rgba_buf->get_pixels();
-  const int nch = rgba_buf->get_n_channels();
-  for (int y = 0; y < h; ++y) {
-    const std::uint8_t* srow = src + static_cast<std::size_t>(y) * src_stride;
-    std::uint8_t* drow = rgba.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4;
-    for (int x = 0; x < w; ++x) {
-      const std::uint8_t* p = srow + static_cast<std::size_t>(x) * nch;
-      drow[x * 4 + 0] = p[0];
-      drow[x * 4 + 1] = p[1];
-      drow[x * 4 + 2] = p[2];
-      drow[x * 4 + 3] = nch >= 4 ? p[3] : 255;
-    }
   }
   int px = 0;
   int py = 0;
   if (!canvas_.last_pointer(px, py)) {
     canvas_.viewport_center_canvas(px, py);
   }
-  document().paste_floating(px, py, w, h, std::move(rgba));
+  std::vector<std::uint8_t> coverage;
+  if (w == clip_w_ && h == clip_h_ && clip_rgba_ == rgba && !clip_coverage_.empty()) {
+    coverage = clip_coverage_;
+  }
+  document().paste_floating(px, py, w, h, std::move(rgba), std::move(coverage));
   set_active_tool("rect-select");
   show_status("Pasted");
   return true;
+}
+
+void MainWindow::action_paste_into_new() {
+  int w = 0;
+  int h = 0;
+  std::vector<std::uint8_t> rgba;
+  if (!pixbuf_to_tight_rgba(Gtk::Clipboard::get()->wait_for_image(), w, h, rgba)) {
+    report_blocked("Clipboard has no image");
+    return;
+  }
+  const std::uint8_t* coverage = nullptr;
+  if (w == clip_w_ && h == clip_h_ && clip_rgba_ == rgba &&
+      clip_coverage_.size() == static_cast<std::size_t>(w) * static_cast<std::size_t>(h)) {
+    coverage = clip_coverage_.data();
+  }
+  auto pasted = Document::from_masked_paste(w, h, rgba.data(), coverage);
+  if (!adopt_document(std::move(pasted), false, LivePath::Paste)) {
+    return;
+  }
+  show_status("Pasted into new image");
 }
 
 void MainWindow::action_cut() {
@@ -1798,22 +1908,11 @@ void MainWindow::action_crop() {
   if (!commit_live_edits()) {
     return;
   }
-  const Selection& sel = document().selection();
-  if (sel.empty() || sel.inverted()) {
+  if (!document().crop_to_selection()) {
     return;
   }
-  Rect r = rect_intersect(sel.bounds(), Rect{0, 0, document().width(), document().height()});
-  if (r.empty()) {
-    return;
-  }
-  StackXform xform;
-  xform.kind = StackXformKind::Crop;
-  xform.old_w = document().width();
-  xform.old_h = document().height();
-  xform.new_w = r.w;
-  xform.new_h = r.h;
-  xform.crop = r;
-  commit_stack_transform("Crop", xform);
+  canvas_.refresh_size();
+  canvas_.invalidate_all();
 }
 
 void MainWindow::action_autocrop() {
@@ -1882,6 +1981,13 @@ void MainWindow::action_rotate_ccw() {
 }
 
 void MainWindow::action_flip_h() {
+  if (document_ptr() != nullptr && document().selection().floating()) {
+    document().selection().flip_horizontal();
+    document().notify_invalidated(document().selection().dirty_union());
+    document().notify_changed();
+    canvas_.invalidate_all();
+    return;
+  }
   if (!commit_live_edits()) {
     return;
   }
@@ -1895,6 +2001,13 @@ void MainWindow::action_flip_h() {
 }
 
 void MainWindow::action_flip_v() {
+  if (document_ptr() != nullptr && document().selection().floating()) {
+    document().selection().flip_vertical();
+    document().notify_invalidated(document().selection().dirty_union());
+    document().notify_changed();
+    canvas_.invalidate_all();
+    return;
+  }
   if (!commit_live_edits()) {
     return;
   }
@@ -2550,19 +2663,19 @@ void MainWindow::start_recovery_save() {
           item.revision += 1;
         }
       }
-      if (doc.selection().floating()) {
-        int float_index = doc.selection().source_layer();
-        if (float_index < 0 || float_index >= static_cast<int>(snapshot.layers.size())) {
-          float_index = doc.layers().active_index();
-        }
-        if (float_index >= 0 && float_index < static_cast<int>(snapshot.layers.size())) {
-          OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(float_index)];
-          const Layer& layer = doc.layers().at(float_index);
-          if (composite_floating_into_buffer(doc.selection(), item.pixels.data(), item.width,
-                                            item.height, item.stride, layer.offset_x(),
-                                            layer.offset_y())) {
-            item.revision += 1;
-          }
+    }
+    if (doc.selection().floating()) {
+      int float_index = doc.selection().source_layer();
+      if (float_index < 0 || float_index >= static_cast<int>(snapshot.layers.size())) {
+        float_index = doc.layers().active_index();
+      }
+      if (float_index >= 0 && float_index < static_cast<int>(snapshot.layers.size())) {
+        OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(float_index)];
+        const Layer& layer = doc.layers().at(float_index);
+        if (composite_floating_into_buffer(doc.selection(), item.pixels.data(), item.width,
+                                          item.height, item.stride, layer.offset_x(),
+                                          layer.offset_y())) {
+          item.revision += 1;
         }
       }
     }
