@@ -34,6 +34,9 @@ public:
   int spray_radius() const { return spray_radius_; }
   // Show the matching left-rail options panel for this tool id.
   void show_options_for_tool(const std::string& id);
+  // Parent the active tool's own controls under the width/brush/spray picker.
+  // Passing null hides that block. The toolbox does not own the widget.
+  void set_tool_options(Gtk::Widget* widget);
 
   const std::string& active_tool_id() const { return selection_.active_id(); }
   bool tool_button_selected(const std::string& id) const;
@@ -70,6 +73,8 @@ private:
   Gtk::DrawingArea brush_tips_;
   Gtk::DrawingArea spray_radii_;
   Gtk::Box empty_options_{Gtk::ORIENTATION_VERTICAL};
+  Gtk::Box tool_options_{Gtk::ORIENTATION_VERTICAL};
+  Gtk::Widget* hosted_options_{nullptr};
   std::vector<Gtk::Button*> buttons_;
   ToolSelection selection_;
   int next_col_ = 0;

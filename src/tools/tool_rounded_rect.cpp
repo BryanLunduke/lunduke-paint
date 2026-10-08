@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "tools/tool.hpp"
+#include "tools/rail_options.hpp"
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
@@ -49,7 +50,6 @@ private:
   int x1_ = 0;
   int y1_ = 0;
   unsigned button_ = 1;
-  int thickness_ = 1;
   int radius_ = 12;
   bool antialias_ = false;
   ShapeFillMode fill_mode_ = ShapeFillMode::Stroke;
@@ -57,52 +57,27 @@ private:
   const char* name_ = "Rounded rectangle";
   Rect dirty_{};
   std::unique_ptr<Gtk::Box> options_;
-  Gtk::ComboBoxText* mode_combo_{nullptr};
 };
 
 Gtk::Widget* RoundedRectTool::options_widget() {
   if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
-    auto* mlabel = Gtk::manage(new Gtk::Label("Mode"));
-    mode_combo_ = Gtk::manage(new Gtk::ComboBoxText());
-    mode_combo_->append("stroke", "Stroke");
-    mode_combo_->append("fill", "Fill");
-    mode_combo_->append("both", "Stroke and fill");
-    if (fill_mode_ == ShapeFillMode::Fill) mode_combo_->set_active_id("fill");
-    else if (fill_mode_ == ShapeFillMode::Both) mode_combo_->set_active_id("both");
-    else mode_combo_->set_active_id("stroke");
-    mode_combo_->signal_changed().connect([this]() {
-      const Glib::ustring id = mode_combo_->get_active_id();
-      if (id == "fill") {
-        fill_mode_ = ShapeFillMode::Fill;
-      } else if (id == "both") {
-        fill_mode_ = ShapeFillMode::Both;
-      } else {
-        fill_mode_ = ShapeFillMode::Stroke;
-      }
-    });
-    auto* tlabel = Gtk::manage(new Gtk::Label("Thickness"));
-    auto* tspin = Gtk::manage(new Gtk::SpinButton());
-    tspin->set_range(1, 64);
-    tspin->set_increments(1, 4);
-    tspin->set_digits(0);
-    tspin->set_value(thickness_);
-    tspin->signal_value_changed().connect([this, tspin]() { thickness_ = tspin->get_value_as_int(); });
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
+    prepare_rail_box(*options_);
     auto* rlabel = Gtk::manage(new Gtk::Label("Corner"));
+    rlabel->set_halign(Gtk::ALIGN_START);
     auto* rspin = Gtk::manage(new Gtk::SpinButton());
     rspin->set_range(0, 256);
     rspin->set_increments(1, 8);
     rspin->set_digits(0);
     rspin->set_value(radius_);
     rspin->set_tooltip_text("Corner radius in pixels");
+    configure_rail_spin(*rspin);
     rspin->signal_value_changed().connect([this, rspin]() { radius_ = rspin->get_value_as_int(); });
     auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
     aa->set_active(antialias_);
+    aa->set_tooltip_text("Smooth the rounded corners");
+    configure_rail_check(*aa);
     aa->signal_toggled().connect([this, aa]() { antialias_ = aa->get_active(); });
-    options_->pack_start(*mlabel, Gtk::PACK_SHRINK);
-    options_->pack_start(*mode_combo_, Gtk::PACK_SHRINK);
-    options_->pack_start(*tlabel, Gtk::PACK_SHRINK);
-    options_->pack_start(*tspin, Gtk::PACK_SHRINK);
     options_->pack_start(*rlabel, Gtk::PACK_SHRINK);
     options_->pack_start(*rspin, Gtk::PACK_SHRINK);
     options_->pack_start(*aa, Gtk::PACK_SHRINK);
@@ -118,7 +93,9 @@ void RoundedRectTool::on_press(CanvasEvent event) {
   if (!ensure_editable()) {
     return;
   }
-  host_->document().commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
   drawing_ = true;
   button_ = event.button;
   x0_ = static_cast<int>(std::floor(event.x));
@@ -148,7 +125,7 @@ void RoundedRectTool::preview(int x1, int y1, bool constrain) {
   const int ox = active.offset_x();
   const int oy = active.offset_y();
   draw_rounded_rect(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy,
-                    x1_ - ox, y1_ - oy, thickness_, radius_, stroke_color(button_), fill_mode_,
+                    x1_ - ox, y1_ - oy, stroke_px(), radius_, stroke_color(button_), fill_mode_,
                     antialias_, &dirty_);
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
   host_->invalidate_canvas(

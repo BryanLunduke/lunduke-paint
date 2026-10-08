@@ -41,29 +41,11 @@ private:
   int last_y_ = 0;
   unsigned button_ = 1;
   Rect dirty_{};
-  std::unique_ptr<Gtk::Box> options_;
-  Gtk::SpinButton* size_spin_{nullptr};
 };
 
 Gtk::Widget* PencilTool::options_widget() {
-  if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
-    auto* label = Gtk::manage(new Gtk::Label("Size"));
-    size_spin_ = Gtk::manage(new Gtk::SpinButton());
-    size_spin_->set_range(1, 64);
-    size_spin_->set_increments(1, 4);
-    size_spin_->set_digits(0);
-    size_spin_->set_value(host_ != nullptr ? host_->stroke_size() : 1);
-    size_spin_->signal_value_changed().connect([this]() {
-      if (host_ != nullptr) {
-        host_->set_stroke_size(size_spin_->get_value_as_int());
-      }
-    });
-    options_->pack_start(*label, Gtk::PACK_SHRINK);
-    options_->pack_start(*size_spin_, Gtk::PACK_SHRINK);
-    options_->show_all();
-  }
-  return options_.get();
+  // The left-rail width picker is the pencil size.
+  return nullptr;
 }
 
 void PencilTool::on_press(CanvasEvent event) {
@@ -106,7 +88,9 @@ void PencilTool::begin_stroke(CanvasEvent event) {
   if (!ensure_editable()) {
     return;
   }
-  host_->document().commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
   drawing_ = true;
   button_ = event.button;
   last_x_ = static_cast<int>(std::floor(event.x));

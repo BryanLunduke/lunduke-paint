@@ -6,6 +6,7 @@
 #include "raster/transform.hpp"
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <glib.h>
 #include <zlib.h>
 
 #include <algorithm>
@@ -116,6 +117,19 @@ void png_chunk(std::vector<std::uint8_t>& out, const char type[4], const std::ui
   append_be32(out, static_cast<std::uint32_t>(crc));
 }
 
+std::string with_errno(const char* prefix) {
+  const int err = errno;
+  std::string out = prefix != nullptr ? prefix : "Save failed";
+  if (err != 0) {
+    const char* text = g_strerror(err);
+    if (text != nullptr && text[0] != '\0') {
+      out += ": ";
+      out += text;
+    }
+  }
+  return out;
+}
+
 bool write_all_fd(int fd, const void* data, std::size_t size) {
   const char* bytes = static_cast<const char*>(data);
   std::size_t off = 0;
@@ -202,7 +216,7 @@ bool atomic_create(const std::string& path, AtomicFile& out, std::string& error)
   out.tmp_path = dir + "/." + base + ".tmp" + suffix;
   out.fd = ::open(out.tmp_path.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY | O_CLOEXEC, 0600);
   if (out.fd < 0) {
-    error = "Could not create a temporary file";
+    error = with_errno("Could not create a temporary file");
     out.tmp_path.clear();
     return false;
   }
@@ -215,13 +229,13 @@ bool atomic_commit(AtomicFile& file, std::string& error) {
     return false;
   }
   if (::fsync(file.fd) != 0) {
-    error = "Could not flush the temporary file";
+    error = with_errno("Could not flush the temporary file");
     atomic_abort(file);
     return false;
   }
   if (::close(file.fd) != 0) {
     file.fd = -1;
-    error = "Could not close the temporary file";
+    error = with_errno("Could not close the temporary file");
     if (!file.tmp_path.empty()) {
       ::unlink(file.tmp_path.c_str());
       file.tmp_path.clear();
@@ -230,7 +244,7 @@ bool atomic_commit(AtomicFile& file, std::string& error) {
   }
   file.fd = -1;
   if (::rename(file.tmp_path.c_str(), file.dest_path.c_str()) != 0) {
-    error = "Could not replace the destination file";
+    error = with_errno("Could not replace the destination file");
     ::unlink(file.tmp_path.c_str());
     file.tmp_path.clear();
     return false;
@@ -378,7 +392,7 @@ bool save_flat_image(const std::string& path, ImageFormat format, const std::uin
     return false;
   }
   if (!write_all_fd(file.fd, encoded.data(), encoded.size())) {
-    error = "Could not write the temporary file";
+    error = with_errno("Could not write the temporary file");
     atomic_abort(file);
     return false;
   }

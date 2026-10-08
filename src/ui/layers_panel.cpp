@@ -352,7 +352,7 @@ void LayersPanel::popup_row_menu(int stack_index, GdkEventButton* event) {
   add_item("_Duplicate", [this]() { document_->duplicate_layer(); });
   add_item("De_lete", [this]() { document_->delete_layer(); });
   add_item("_Raise", [this]() { document_->raise_layer(); });
-  add_item("_Lower", [this]() { document_->lower_layer(); });
+  add_item("Lo_wer", [this]() { document_->lower_layer(); });
   add_item("_Merge down", [this]() { document_->merge_down(); });
   add_item("_Flatten", [this]() { document_->flatten(); });
   menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));

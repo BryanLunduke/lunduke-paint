@@ -112,6 +112,21 @@ public:
   // current foreground (the text box) refresh here; the default is a no-op.
   virtual void on_document_changed() {}
   virtual bool is_stroking() const { return false; }
+  // Polygon, polyline, and curve keep a visible preview after the mouse
+  // button comes up. Save, quit, and tab switches must finish it.
+  virtual bool has_uncommitted_preview() const { return false; }
+  // Draw an open text box into a recovery snapshot of one layer. Default
+  // does nothing.
+  // Returns true when glyphs were composited into the snapshot.
+  virtual bool paint_recovery_overlay(int layer_index, std::uint8_t* pixels, int width, int height,
+                                     int stride) {
+    (void)layer_index;
+    (void)pixels;
+    (void)width;
+    (void)height;
+    (void)stride;
+    return false;
+  }
   // When is_stroking() is true, CanvasView may composite tool_layer in place of
   // the active layer. Selection tools set is_stroking for pointer capture only
   // and must return false here so an empty tool_layer does not flash the
@@ -128,6 +143,11 @@ protected:
 
   Color stroke_color(unsigned button) const;
   bool ensure_editable();
+  // Width from the left-rail picker. Tools that draw a stroke use this
+  // instead of a private thickness that the unparented spin used to own.
+  int stroke_px() const;
+  // Stamp a float, or stop the action when its layer is locked.
+  bool commit_float_or_stop();
 };
 
 }  // namespace lundukepaint

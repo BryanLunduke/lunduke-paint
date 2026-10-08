@@ -38,26 +38,12 @@ private:
   bool drawing_ = false;
   double last_x_ = 0;
   double last_y_ = 0;
-  int size_ = 8;
   Rect dirty_{};
-  std::unique_ptr<Gtk::Box> options_;
 };
 
 Gtk::Widget* EraserTool::options_widget() {
-  if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
-    auto* label = Gtk::manage(new Gtk::Label("Size"));
-    auto* spin = Gtk::manage(new Gtk::SpinButton());
-    spin->set_range(1, 64);
-    spin->set_increments(1, 4);
-    spin->set_digits(0);
-    spin->set_value(size_);
-    spin->signal_value_changed().connect([this, spin]() { size_ = spin->get_value_as_int(); });
-    options_->pack_start(*label, Gtk::PACK_SHRINK);
-    options_->pack_start(*spin, Gtk::PACK_SHRINK);
-    options_->show_all();
-  }
-  return options_.get();
+  // The left-rail width picker is the eraser size.
+  return nullptr;
 }
 
 Color EraserTool::erase_color() const {
@@ -106,7 +92,9 @@ void EraserTool::begin_stroke(CanvasEvent event) {
   if (!ensure_editable()) {
     return;
   }
-  host_->document().commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
   drawing_ = true;
   last_x_ = event.x;
   last_y_ = event.y;
@@ -121,7 +109,7 @@ void EraserTool::stamp_to(double x, double y) {
   }
   const Layer& active = host_->document().layers().active_layer();
   Layer& tool = host_->document().layers().tool_layer();
-  const int size = size_;
+  const int size = stroke_px();
   const double x0 = last_x_ - active.offset_x();
   const double y0 = last_y_ - active.offset_y();
   const double x1 = x - active.offset_x();

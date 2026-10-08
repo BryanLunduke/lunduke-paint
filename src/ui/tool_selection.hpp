@@ -52,6 +52,17 @@ inline const char* css() {
       "}"
       ".toolbox-caption {"
       "  font-size: 7.5pt; padding: 0;"
+      "}"
+      ".toolbox-options, .toolbox-options * {"
+      "  min-width: 0;"
+      "}"
+      ".toolbox-options spinbutton,"
+      ".toolbox-options entry,"
+      ".toolbox-options combobox,"
+      ".toolbox-options button {"
+      "  min-width: 0;"
+      "  padding-left: 1px;"
+      "  padding-right: 1px;"
       "}";
 }
 

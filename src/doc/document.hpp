@@ -8,6 +8,7 @@
 #include "io/ora.hpp"
 #include "raster/types.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -38,6 +39,10 @@ public:
   void set_unsaved_overlay(bool on);
   bool unsaved_overlay() const { return unsaved_overlay_; }
 
+  // Stable for this document in this session. Crash recovery writes
+  // recovery-<id>.ora so one tab cannot erase another's autosave.
+  std::uint64_t recovery_id() const { return recovery_id_; }
+
   // Nested OpenRaster stacks. Null when the file has no layer groups.
   // Cleared when layers are added, removed, or reordered.
   void set_ora_stack(OraNode node);
@@ -45,7 +50,8 @@ public:
   const OraNode* ora_stack() const;
 
   // Commits a floating selection onto its source layer, then switches.
-  void set_active_layer(int index);
+  // False when the float's layer is locked: the active layer is left alone.
+  bool set_active_layer(int index);
 
   Color foreground() const { return fg_; }
   Color background() const { return bg_; }
@@ -74,6 +80,9 @@ public:
   void deselect();
   void invert_selection();
   bool commit_floating(const char* name = "Move selection");
+  // True when there is no float, or the float was stamped. False when the
+  // source layer is locked; the float stays up and nothing else should proceed.
+  bool try_commit_floating(const char* name = "Move selection");
   void delete_selection();
   void duplicate_selection();
   void paste_floating(int x, int y, int w, int h, std::vector<std::uint8_t> rgba);
@@ -84,14 +93,14 @@ public:
   bool active_locked() const;
   std::vector<LayerSnapshot> snapshot_layers() const;
 
-  void add_layer();
-  void duplicate_layer();
+  bool add_layer();
+  bool duplicate_layer();
   bool delete_layer();
   bool raise_layer();
   bool lower_layer();
   bool move_layer(int from, int to);
   bool merge_down();
-  void flatten();
+  bool flatten();
   void set_layer_visible(int index, bool visible);
   void set_layer_locked(int index, bool locked);
   void set_layer_opacity(int index, float opacity);
@@ -101,13 +110,16 @@ public:
 
   using ChangedFn = std::function<void()>;
   using InvalidatedFn = std::function<void(Rect)>;
+  using BlockedFn = std::function<void(const char*)>;
 
   void set_on_changed(ChangedFn fn) { on_changed_ = std::move(fn); }
   void set_on_invalidated(InvalidatedFn fn) { on_invalidated_ = std::move(fn); }
   void set_on_selection(ChangedFn fn) { on_selection_ = std::move(fn); }
+  void set_on_blocked(BlockedFn fn) { on_blocked_ = std::move(fn); }
 
   void notify_invalidated(Rect rect);
   void notify_changed();
+  void notify_blocked(const char* message);
   // Selection geometry during a drag: status bar only, not the layer/history panels.
   void notify_selection();
 
@@ -122,6 +134,7 @@ private:
   double view_zoom_ = 1.0;
   bool dirty_ = false;
   bool unsaved_overlay_ = false;
+  std::uint64_t recovery_id_ = 0;
   bool has_ora_stack_ = false;
   OraNode ora_stack_{};
   Color fg_ = Color::black();
@@ -132,6 +145,7 @@ private:
   Selection selection_;
   ChangedFn on_changed_;
   ChangedFn on_selection_;
+  BlockedFn on_blocked_;
   InvalidatedFn on_invalidated_;
 };
 

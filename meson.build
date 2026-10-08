@@ -232,7 +232,7 @@ test('intro_howdy', test_intro_howdy)
 test_widgets = executable(
   'test_widgets',
   files('tests/test_widgets.cpp', 'src/ui/canvas_view.cpp', 'src/ui/toolbox.cpp',
-  'src/ui/pattern_strip.cpp',
+  'src/ui/status_bar.cpp', 'src/ui/pattern_strip.cpp',
         'src/ui/intro_howdy.cpp', 'src/tools/tool.cpp', 'src/tools/selection_xform.cpp'),
   lunduke_paint_resources,
   include_directories: lunduke_paint_inc,
@@ -269,6 +269,30 @@ test_shortcuts = executable(
   install: false,
 )
 test('shortcuts', test_shortcuts)
+
+# Round-3 review: stroke width, autocrop, live edits, per-tab recovery,
+# selection undo, locked floats, save policy, shortcuts, and save errors.
+# Widget hosting of the rail options is in test_widgets (skips without a display).
+test_review_r3 = executable(
+  'test_review_r3',
+  files(
+    'tests/test_review_r3.cpp',
+    'src/tools/tool.cpp',
+    'src/tools/tool_line.cpp',
+    'src/tools/tool_eraser.cpp',
+    'src/tools/tool_polygon.cpp',
+    'src/tools/tool_polyline.cpp',
+    'src/tools/tool_curve.cpp',
+    'src/tools/tool_text.cpp',
+    'src/tools/selection_xform.cpp',
+  ),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  cpp_args: ['-DREVIEW_R3_SOURCE="@0@"'.format(meson.project_source_root())],
+  install: false,
+)
+test('review_r3', test_review_r3)
 
 install_data(
   'data/org.lunduke.LundukePaint.desktop',

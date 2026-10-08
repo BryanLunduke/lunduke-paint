@@ -1,3 +1,20 @@
+lunduke-paint (0.9-4) unstable; urgency=medium
+
+  * Stroke width follows the left-rail picker for lines, shapes, and the
+    eraser. A solid canvas no longer autocrops to a single pixel.
+  * An open polygon, polyline, curve, or text box stays with its tab, shows
+    the dirty mark, and is stamped only when the user saves or switches away.
+    Quit Cancel leaves the edit in place.
+  * Each dirty tab keeps its own crash-recovery file, including committed
+    pixels and an open text box. Saving one tab no longer deletes the others.
+  * Undo of a selection move restores the selection. A locked layer blocks
+    the next action instead of dropping a floating selection.
+  * Tool options (font, similarity, transparent move, antialias, corner
+    radius) sit in the left rail. Status text is visible again, and save
+    errors include the operating-system reason. Shortcut help matches the keys.
+
+ -- Phil <phil@brushpad.local>  Thu, 08 Oct 2026 07:30:00 -0500
+
 lunduke-paint (0.9-3) unstable; urgency=medium
 
   * Undo trim no longer treats a dropped baseline as the saved file.

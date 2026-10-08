@@ -93,7 +93,7 @@
           <attribute name="action">win.select-all</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">_Deselect</attribute>
+          <attribute name="label" translatable="yes">Dese_lect</attribute>
           <attribute name="action">win.deselect</attribute>
         </item>
         <item>
@@ -103,7 +103,7 @@
       </section>
       <section>
         <item>
-          <attribute name="label" translatable="yes">_Preferences…</attribute>
+          <attribute name="label" translatable="yes">Pre_ferences…</attribute>
           <attribute name="action">win.preferences</attribute>
         </item>
       </section>
@@ -210,7 +210,7 @@
           <attribute name="action">win.layer-raise</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">_Lower Layer</attribute>
+          <attribute name="label" translatable="yes">Lo_wer Layer</attribute>
           <attribute name="action">win.layer-lower</attribute>
         </item>
         <item>

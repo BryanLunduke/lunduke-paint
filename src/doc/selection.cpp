@@ -292,6 +292,98 @@ void Selection::move_float(int x, int y) {
   bump();
 }
 
+SelectionState Selection::capture() const {
+  SelectionState state;
+  state.empty = empty_;
+  state.inverted = inverted_;
+  state.floating = floating_;
+  state.transparent_move = transparent_move_;
+  state.copy_mode = copy_mode_;
+  state.rect = rect_;
+  state.float_x = float_x_;
+  state.float_y = float_y_;
+  state.float_w = float_w_;
+  state.float_h = float_h_;
+  state.origin_x = origin_x_;
+  state.origin_y = origin_y_;
+  state.origin_w = origin_w_;
+  state.origin_h = origin_h_;
+  state.float_pixels = float_pixels_;
+  state.float_coverage = float_coverage_;
+  state.mask = mask_;
+  state.mask_w = mask_w_;
+  state.mask_h = mask_h_;
+  state.source_layer = source_layer_;
+  return state;
+}
+
+void Selection::restore(const SelectionState& state) {
+  empty_ = state.empty;
+  inverted_ = state.inverted;
+  floating_ = state.floating;
+  transparent_move_ = state.transparent_move;
+  copy_mode_ = state.copy_mode;
+  rect_ = state.rect;
+  float_x_ = state.float_x;
+  float_y_ = state.float_y;
+  float_w_ = state.float_w;
+  float_h_ = state.float_h;
+  origin_x_ = state.origin_x;
+  origin_y_ = state.origin_y;
+  origin_w_ = state.origin_w;
+  origin_h_ = state.origin_h;
+  float_pixels_ = state.float_pixels;
+  float_coverage_ = state.float_coverage;
+  mask_ = state.mask;
+  mask_w_ = state.mask_w;
+  mask_h_ = state.mask_h;
+  source_layer_ = state.source_layer;
+  bump();
+}
+
+void Selection::note_layer_inserted(int index) {
+  if (!floating_ || source_layer_ < 0 || index < 0) {
+    return;
+  }
+  if (source_layer_ >= index) {
+    ++source_layer_;
+  }
+}
+
+void Selection::note_layer_removed(int index) {
+  if (!floating_ || source_layer_ < 0 || index < 0) {
+    return;
+  }
+  if (source_layer_ == index) {
+    source_layer_ = -1;
+  } else if (source_layer_ > index) {
+    --source_layer_;
+  }
+}
+
+void Selection::note_layer_moved(int from, int to) {
+  if (!floating_ || source_layer_ < 0 || from == to) {
+    return;
+  }
+  if (source_layer_ == from) {
+    source_layer_ = to;
+    return;
+  }
+  if (from < to) {
+    if (source_layer_ > from && source_layer_ <= to) {
+      --source_layer_;
+    }
+  } else if (source_layer_ >= to && source_layer_ < from) {
+    ++source_layer_;
+  }
+}
+
+void Selection::note_stack_flattened() {
+  if (floating_) {
+    source_layer_ = 0;
+  }
+}
+
 void Selection::drop_float() {
   floating_ = false;
   copy_mode_ = false;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "tools/tool.hpp"
+#include "tools/rail_options.hpp"
 #include "tools/selection_xform.hpp"
 
 #include "doc/document.hpp"
@@ -53,9 +54,11 @@ private:
 
 Gtk::Widget* RectSelectTool::options_widget() {
   if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
+    prepare_rail_box(*options_);
     transparent_ = Gtk::manage(new Gtk::CheckButton("Transparent move"));
     transparent_->set_active(false);
+    configure_rail_check(*transparent_);
     transparent_->signal_toggled().connect([this]() { apply_transparent_option(); });
     options_->pack_start(*transparent_, Gtk::PACK_SHRINK);
     options_->show_all();
@@ -120,7 +123,9 @@ void RectSelectTool::on_press(CanvasEvent event) {
     return;
   }
 
-  doc.commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
   dragging_ = true;
   moving_ = false;
   start_x_ = clamp_x(x);

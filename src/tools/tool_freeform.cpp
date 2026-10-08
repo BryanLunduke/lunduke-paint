@@ -57,29 +57,8 @@ private:
 };
 
 Gtk::Widget* FreeformShapeTool::options_widget() {
-  if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
-    auto* label = Gtk::manage(new Gtk::Label("Mode"));
-    mode_combo_ = Gtk::manage(new Gtk::ComboBoxText());
-    mode_combo_->append("stroke", "Stroke");
-    mode_combo_->append("fill", "Fill");
-    mode_combo_->append("both", "Stroke and fill");
-    sync_mode_combo();
-    mode_combo_->signal_changed().connect([this]() {
-      const Glib::ustring id = mode_combo_->get_active_id();
-      if (id == "fill") {
-        fill_mode_ = ShapeFillMode::Fill;
-      } else if (id == "both") {
-        fill_mode_ = ShapeFillMode::Both;
-      } else {
-        fill_mode_ = ShapeFillMode::Stroke;
-      }
-    });
-    options_->pack_start(*label, Gtk::PACK_SHRINK);
-    options_->pack_start(*mode_combo_, Gtk::PACK_SHRINK);
-    options_->show_all();
-  }
-  return options_.get();
+  // Outline and filled are separate tools. Width comes from the left rail.
+  return nullptr;
 }
 
 void FreeformShapeTool::sync_mode_combo() {
@@ -102,7 +81,9 @@ void FreeformShapeTool::on_press(CanvasEvent event) {
   if (!ensure_editable()) {
     return;
   }
-  host_->document().commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
   drawing_ = true;
   button_ = event.button;
   xs_.clear();

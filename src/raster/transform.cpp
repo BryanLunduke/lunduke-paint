@@ -181,6 +181,21 @@ Rect autocrop_bounds(const std::uint8_t* rgba, int width, int height, int stride
   if (rgba == nullptr || width < 1 || height < 1) {
     return {};
   }
+  // A solid layer has no border to trim. Stopping the scan one row short of
+  // the edge used to report the last pixel as content and shrink the document.
+  const Color solid = get(rgba, stride, 0, 0);
+  bool uniform = true;
+  for (int y = 0; y < height && uniform; ++y) {
+    for (int x = 0; x < width; ++x) {
+      if (get(rgba, stride, x, y) != solid) {
+        uniform = false;
+        break;
+      }
+    }
+  }
+  if (uniform) {
+    return {};
+  }
   auto row_uniform = [&](int y, Color c) {
     for (int x = 0; x < width; ++x) {
       if (get(rgba, stride, x, y) != c) {

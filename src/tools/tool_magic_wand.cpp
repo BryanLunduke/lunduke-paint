@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "tools/tool.hpp"
+#include "tools/rail_options.hpp"
 #include "tools/selection_xform.hpp"
 
 #include "doc/document.hpp"
@@ -41,14 +42,17 @@ private:
 
 Gtk::Widget* MagicWandTool::options_widget() {
   if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
+    prepare_rail_box(*options_);
     auto* label = Gtk::manage(new Gtk::Label("Similarity"));
+    label->set_halign(Gtk::ALIGN_START);
     auto* spin = Gtk::manage(new Gtk::SpinButton());
     spin->set_range(0, 255);
     spin->set_increments(1, 16);
     spin->set_digits(0);
     spin->set_value(tolerance_);
     spin->set_tooltip_text("0 = exact color, 255 = select every connected pixel");
+    configure_rail_spin(*spin);
     spin->signal_value_changed().connect([this, spin]() {
       tolerance_ = spin->get_value_as_int();
       if (host_ != nullptr) {
@@ -70,7 +74,10 @@ void MagicWandTool::on_press(CanvasEvent event) {
     return;
   }
   Document& doc = host_->document();
-  doc.commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
+  tolerance_ = host_->fill_tolerance();
   const int x = static_cast<int>(std::floor(event.x));
   const int y = static_cast<int>(std::floor(event.y));
   if (x < 0 || y < 0 || x >= doc.width() || y >= doc.height()) {

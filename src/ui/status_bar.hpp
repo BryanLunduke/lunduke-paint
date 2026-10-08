@@ -6,6 +6,7 @@
 #include <gtkmm/box.h>
 #include <gtkmm/label.h>
 #include <gtkmm/separator.h>
+#include <sigc++/connection.h>
 
 namespace lundukepaint {
 
@@ -24,6 +25,9 @@ public:
 
 private:
   Gtk::Label hint_;
+  Glib::ustring hint_text_;
+  bool message_active_{false};
+  sigc::connection message_timer_;
   Gtk::Label coords_;
   Gtk::Label sel_;
   Gtk::Label size_;

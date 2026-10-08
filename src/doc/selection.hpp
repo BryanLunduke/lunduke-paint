@@ -12,6 +12,31 @@ namespace lundukepaint {
 class Layer;
 class LayerStack;
 
+// Full selection geometry, including a floating move. Stored on the move
+// command so undo and redo put the marching ants back with the pixels.
+struct SelectionState {
+  bool empty = true;
+  bool inverted = false;
+  bool floating = false;
+  bool transparent_move = false;
+  bool copy_mode = false;
+  Rect rect{};
+  int float_x = 0;
+  int float_y = 0;
+  int float_w = 0;
+  int float_h = 0;
+  int origin_x = 0;
+  int origin_y = 0;
+  int origin_w = 0;
+  int origin_h = 0;
+  std::vector<std::uint8_t> float_pixels;
+  std::vector<std::uint8_t> float_coverage;
+  std::vector<std::uint8_t> mask;
+  int mask_w = 0;
+  int mask_h = 0;
+  int source_layer = -1;
+};
+
 // One selection per document (not per layer). Rect, ellipse, or lasso
 // (optional 8-bit mask). Invert means "canvas minus the chosen region."
 class Selection {
@@ -73,6 +98,16 @@ public:
   // Layer the pixels were lifted from. -1 until lift / paste.
   int source_layer() const { return source_layer_; }
   void set_source_layer(int index) { source_layer_ = index; }
+
+  SelectionState capture() const;
+  void restore(const SelectionState& state);
+
+  // Keep source_layer_ pointing at the same layer when the stack shifts
+  // under a float that has not been stamped yet.
+  void note_layer_inserted(int index);
+  void note_layer_removed(int index);
+  void note_layer_moved(int from, int to);
+  void note_stack_flattened();
 
   // Copy the current rect from the layer into a floating buffer. Does not
   // modify the layer (the hole is previewed until commit). Origin stays in

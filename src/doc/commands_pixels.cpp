@@ -90,17 +90,44 @@ std::unique_ptr<PixelPatchCommand> PixelPatchCommand::from_layers(const Layer& b
   return cmd;
 }
 
+void PixelPatchCommand::set_selection_change(SelectionState before, SelectionState after) {
+  has_selection_ = true;
+  selection_before_ = std::move(before);
+  selection_after_ = std::move(after);
+  auto cover = [](const SelectionState& state) {
+    if (state.empty) {
+      return Rect{};
+    }
+    if (state.floating) {
+      return rect_union(Rect{state.origin_x, state.origin_y, state.origin_w, state.origin_h},
+                        Rect{state.float_x, state.float_y, state.float_w, state.float_h});
+    }
+    return state.rect;
+  };
+  bounds_ = rect_union(bounds_, rect_union(cover(selection_before_), cover(selection_after_)));
+}
+
 void PixelPatchCommand::apply(Document& document) {
-  Layer& layer = document.layers().at(layer_index_);
-  for (const Tile& tile : tiles_) {
-    write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.after.data());
+  if (layer_index_ >= 0 && layer_index_ < document.layers().count()) {
+    Layer& layer = document.layers().at(layer_index_);
+    for (const Tile& tile : tiles_) {
+      write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.after.data());
+    }
+  }
+  if (has_selection_) {
+    document.selection().restore(selection_after_);
   }
 }
 
 void PixelPatchCommand::undo(Document& document) {
-  Layer& layer = document.layers().at(layer_index_);
-  for (const Tile& tile : tiles_) {
-    write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.before.data());
+  if (layer_index_ >= 0 && layer_index_ < document.layers().count()) {
+    Layer& layer = document.layers().at(layer_index_);
+    for (const Tile& tile : tiles_) {
+      write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.before.data());
+    }
+  }
+  if (has_selection_) {
+    document.selection().restore(selection_before_);
   }
 }
 
