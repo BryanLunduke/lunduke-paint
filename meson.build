@@ -69,6 +69,7 @@ lunduke_paint_sources = files(
   'src/app/application.cpp',
   'src/app/live_edit.cpp',
   'src/app/main_window.cpp',
+  'src/app/save_dialog.cpp',
   'src/app/actions.cpp',
   'src/app/preferences.cpp',
   'src/ui/canvas_view.cpp',
@@ -271,6 +272,27 @@ test_shortcuts = executable(
   install: false,
 )
 test('shortcuts', test_shortcuts)
+
+test_save_target = executable(
+  'test_save_target',
+  files('tests/test_save_target.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, zlib_dep],
+  install: false,
+)
+test('save_target', test_save_target)
+
+# Real Save As chooser: OpenRaster filter + typed bft.png must write a PNG.
+test_save_as = executable(
+  'test_save_as',
+  files('tests/test_save_as.cpp', 'src/app/save_dialog.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, zlib_dep],
+  install: false,
+)
+test('save_as', test_save_as)
 
 # Round-3 review: stroke width, autocrop, live edits, per-tab recovery,
 # selection undo, locked floats, save policy, shortcuts, and save errors.

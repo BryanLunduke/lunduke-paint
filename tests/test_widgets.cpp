@@ -17,7 +17,9 @@
 #include "doc/layer.hpp"
 #include "doc/layer_stack.hpp"
 #include "tools/rail_options.hpp"
+#include "app/shortcut_dispatch.hpp"
 #include "ui/canvas_view.hpp"
+#include "ui/color_well.hpp"
 #include "ui/intro_howdy.hpp"
 #include "ui/layers_panel.hpp"
 #include "ui/status_bar.hpp"
@@ -29,6 +31,7 @@
 
 #include <glib.h>
 #include <gtk/gtk.h>
+#include <atkmm/object.h>
 #include <gtkmm/box.h>
 #include <gtkmm/checkbutton.h>
 #include <gtkmm/comboboxtext.h>
@@ -635,6 +638,105 @@ int main(int argc, char** argv) {
     expect(panel.opacity_percent() == 40, "panel shows the current layer opacity");
     window.hide();
     pump(20);
+  }
+
+  // Colour wells: tooltips and accessible names, no visible text labels,
+  // and the rail stays 82 px.
+  {
+    Gtk::Window window;
+    window.set_default_size(1100, 720);
+    Toolbox toolbox;
+    int count = 0;
+    const lundukepaint::ToolboxTool* tools = lundukepaint::toolbox_tools(count);
+    for (int i = 0; i < count; ++i) {
+      toolbox.add_tool_button(tools[i].id, tools[i].tooltip, tools[i].icon);
+    }
+    window.add(toolbox);
+    window.show_all();
+    pump(160);
+
+    const char* kTips[] = {
+        "Foreground color (click to change)",
+        "Background color (click to change)",
+        "Swap foreground and background colors (X)",
+        "Reset to black and white (D)",
+    };
+    expect(std::strcmp(lundukepaint::kForegroundWellTooltip, kTips[0]) == 0, "foreground tooltip constant");
+    expect(std::strcmp(lundukepaint::kBackgroundWellTooltip, kTips[1]) == 0, "background tooltip constant");
+    expect(std::strcmp(lundukepaint::kSwapColorsTooltip, kTips[2]) == 0, "swap tooltip constant");
+    expect(std::strcmp(lundukepaint::kResetColorsTooltip, kTips[3]) == 0, "reset tooltip constant");
+    expect(lundukepaint::resolve_canvas_key('X', nullptr, 0, nullptr).action ==
+               lundukepaint::CanvasKeyAction::SwapColors,
+           "X is the swap shortcut named in the tooltip");
+    expect(lundukepaint::resolve_canvas_key('D', nullptr, 0, nullptr).action ==
+               lundukepaint::CanvasKeyAction::ResetColors,
+           "D is the reset shortcut named in the tooltip");
+
+    std::vector<Gtk::Widget*> all;
+    std::vector<Gtk::Widget*> stack;
+    stack.push_back(&toolbox);
+    while (!stack.empty()) {
+      Gtk::Widget* widget = stack.back();
+      stack.pop_back();
+      if (widget == nullptr) {
+        continue;
+      }
+      all.push_back(widget);
+      auto* container = dynamic_cast<Gtk::Container*>(widget);
+      if (container == nullptr) {
+        continue;
+      }
+      for (Gtk::Widget* child : container->get_children()) {
+        stack.push_back(child);
+      }
+    }
+
+    for (const char* tip : kTips) {
+      int matches = 0;
+      for (Gtk::Widget* widget : all) {
+        if (widget->get_tooltip_text() != tip) {
+          continue;
+        }
+        ++matches;
+        expect(dynamic_cast<Gtk::Label*>(widget) == nullptr, "colour control is not a text label");
+        expect(!widget->get_tooltip_text().empty(), "colour control tooltip is non-empty");
+        auto accessible = widget->get_accessible();
+        expect(static_cast<bool>(accessible), "colour control has an accessible object");
+        if (accessible) {
+          const Glib::ustring name = accessible->get_name();
+          if (name != tip) {
+            std::fprintf(stderr, "test_widgets: accessible name '%s' for tooltip '%s'\n", name.c_str(), tip);
+            ++errors;
+          }
+        }
+      }
+      if (matches != 1) {
+        std::fprintf(stderr, "test_widgets: tooltip '%s' matched %d widgets\n", tip, matches);
+        ++errors;
+      }
+    }
+
+    for (Gtk::Widget* widget : all) {
+      auto* label = dynamic_cast<Gtk::Label*>(widget);
+      if (label == nullptr || !label->get_visible()) {
+        continue;
+      }
+      const Glib::ustring text = label->get_text();
+      const bool color_label = text.find("Foreground") != Glib::ustring::npos ||
+                               text.find("Background") != Glib::ustring::npos ||
+                               text.find("foreground") != Glib::ustring::npos ||
+                               text.find("background") != Glib::ustring::npos || text == "FG" || text == "BG" ||
+                               text.find("Swap") != Glib::ustring::npos || text.find("Reset") != Glib::ustring::npos;
+      if (color_label) {
+        std::fprintf(stderr, "test_widgets: visible colour label on the rail: '%s'\n", text.c_str());
+        ++errors;
+      }
+    }
+
+    expect(std::abs(toolbox.get_allocated_width() - kClassicRailWidth) <= 1,
+           "tooltips do not change the 82 px rail");
+    window.hide();
+    pump(30);
   }
 
   if (errors != 0) {

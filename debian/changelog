@@ -1,3 +1,14 @@
+lunduke-paint (0.9-9) unstable; urgency=medium
+
+  * Foreground and background wells, and the swap and reset controls, have
+    tooltips and accessible names. The tool rail stays 82 px and does not
+    grow text labels.
+  * A typed file extension wins over the Save As filter. The filter adds an
+    extension only when the name has none. An unknown extension asks before
+    anything is written. Save and Save As share that rule.
+
+ -- Phil <phil@brushpad.local>  Thu, 08 Oct 2026 21:45:00 -0500
+
 lunduke-paint (0.9-8) unstable; urgency=medium
 
   * The tool rail is back to the classic MacPaint width from 0.5-4 (82 px).

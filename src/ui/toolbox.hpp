@@ -8,6 +8,7 @@
 #include <gtkmm/button.h>
 #include <gtkmm/cssprovider.h>
 #include <gtkmm/drawingarea.h>
+#include <gtkmm/fixed.h>
 #include <gtkmm/grid.h>
 #include <gtkmm/scrolledwindow.h>
 #include <gtkmm/stack.h>
@@ -71,8 +72,10 @@ private:
   bool on_brush_tips_press(GdkEventButton* event);
   bool on_spray_draw(const Cairo::RefPtr<Cairo::Context>& cr);
   bool on_spray_press(GdkEventButton* event);
-  bool on_wells_draw(const Cairo::RefPtr<Cairo::Context>& cr);
-  bool on_wells_press(GdkEventButton* event);
+  bool on_fg_draw(const Cairo::RefPtr<Cairo::Context>& cr);
+  bool on_fg_press(GdkEventButton* event);
+  bool on_bg_draw(const Cairo::RefPtr<Cairo::Context>& cr);
+  bool on_bg_press(GdkEventButton* event);
   bool on_swap_draw(const Cairo::RefPtr<Cairo::Context>& cr);
   bool on_swap_press(GdkEventButton* event);
   bool on_reset_draw(const Cairo::RefPtr<Cairo::Context>& cr);
@@ -93,7 +96,9 @@ private:
   Gtk::Box empty_options_{Gtk::ORIENTATION_VERTICAL};
   Gtk::Box tool_options_{Gtk::ORIENTATION_VERTICAL};
   Gtk::Box color_row_{Gtk::ORIENTATION_HORIZONTAL, 4};
-  Gtk::DrawingArea wells_;
+  Gtk::Fixed wells_fixed_;
+  Gtk::DrawingArea fg_well_;
+  Gtk::DrawingArea bg_well_;
   Gtk::DrawingArea swap_colors_;
   Gtk::DrawingArea reset_colors_;
   Gtk::Widget* hosted_options_{nullptr};

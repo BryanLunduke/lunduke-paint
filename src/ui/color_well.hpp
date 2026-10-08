@@ -7,6 +7,15 @@ namespace lundukepaint {
 // Classic overlapping foreground / background wells. The foreground square
 // sits on top and wins the overlap; the background square peeks out at the
 // bottom-right.
+//
+// The four colour controls are tooltips and accessible names only — the rail
+// does not grow text labels. X and D are the canvas shortcuts in
+// shortcut_dispatch.hpp (swap and reset). Keep these strings in step with
+// those keys.
+inline constexpr const char* kForegroundWellTooltip = "Foreground color (click to change)";
+inline constexpr const char* kBackgroundWellTooltip = "Background color (click to change)";
+inline constexpr const char* kSwapColorsTooltip = "Swap foreground and background colors (X)";
+inline constexpr const char* kResetColorsTooltip = "Reset to black and white (D)";
 enum class WellHit { None, Foreground, Background };
 
 struct ColorWellGeom {

@@ -12,8 +12,10 @@
 #include "doc/commands_pixels.hpp"
 #include "doc/effect_preview.hpp"
 #include "doc/selection.hpp"
+#include "app/save_dialog.hpp"
 #include "io/image_io.hpp"
 #include "io/ora.hpp"
+#include "io/save_target.hpp"
 #include "io/crash_recovery.hpp"
 #include "raster/brush_tip.hpp"
 #include "raster/effects.hpp"
@@ -32,6 +34,7 @@
 #include <thread>
 
 #include <glibmm/error.h>
+#include <glibmm/fileutils.h>
 #include <giomm/menu.h>
 #include <gtkmm/builder.h>
 #include <glibmm/miscutils.h>
@@ -1104,11 +1107,17 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
   return true;
 }
 void MainWindow::action_save() {
-  if (document().path().empty() || format_from_path(document().path()) == ImageFormat::Unknown) {
+  // Same resolver as Save As. A known extension is written as itself. Anything
+  // else (no name, no extension, an unknown suffix) opens Save As.
+  const SaveTarget target = resolve_save_target(document().path(), ImageFormat::Unknown);
+  if (target.kind != SaveResolveKind::Ready) {
     action_save_as();
     return;
   }
-  if (save_to_path(document().path(), format_from_path(document().path()))) {
+  if (save_to_path(target.path, target.format)) {
+    if (target.path != document().path()) {
+      document().set_path(target.path);
+    }
     document().mark_clean();
     remember_recent(document().path());
     clear_document_recovery(document());
@@ -1499,65 +1508,30 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
   // Default GTK file chooser mirrors the parent size on many themes — pin it.
   dialog.set_default_size(620, 400);
   dialog.signal_map().connect([&dialog]() { dialog.resize(620, 400); });
-  auto ora = Gtk::FileFilter::create();
-  ora->set_name("OpenRaster project (*.ora)");
-  ora->add_pattern("*.ora");
-  dialog.add_filter(ora);
-  auto png = Gtk::FileFilter::create();
-  png->set_name("PNG image (*.png)");
-  png->add_pattern("*.png");
-  dialog.add_filter(png);
-  auto jpeg = Gtk::FileFilter::create();
-  jpeg->set_name("JPEG image (*.jpg)");
-  jpeg->add_pattern("*.jpg");
-  jpeg->add_pattern("*.jpeg");
-  dialog.add_filter(jpeg);
-  auto bmp = Gtk::FileFilter::create();
-  bmp->set_name("BMP image (*.bmp)");
-  bmp->add_pattern("*.bmp");
-  dialog.add_filter(bmp);
+  const SaveFilters filters = add_save_filters(dialog);
+  ImageFormat initial = ImageFormat::Ora;
   if (!document().path().empty()) {
     dialog.set_filename(document().path());
+    const ImageFormat existing = format_from_path(document().path());
+    if (existing == ImageFormat::Png) {
+      dialog.set_filter(filters.png);
+      initial = ImageFormat::Png;
+    } else if (existing == ImageFormat::Jpeg) {
+      dialog.set_filter(filters.jpeg);
+      initial = ImageFormat::Jpeg;
+    } else if (existing == ImageFormat::Bmp) {
+      dialog.set_filter(filters.bmp);
+      initial = ImageFormat::Bmp;
+    } else {
+      dialog.set_filter(filters.ora);
+      initial = ImageFormat::Ora;
+    }
   } else {
     dialog.set_current_name("untitled.ora");
+    dialog.set_filter(filters.ora);
+    initial = ImageFormat::Ora;
   }
-  auto sync_extension = [&dialog]() {
-    auto filter = dialog.get_filter();
-    if (!filter) {
-      return;
-    }
-    const Glib::ustring name = filter->get_name();
-    const char* ext = ".ora";
-    if (name.find("JPEG") != Glib::ustring::npos) {
-      ext = ".jpg";
-    } else if (name.find("BMP") != Glib::ustring::npos) {
-      ext = ".bmp";
-    } else if (name.find("PNG") != Glib::ustring::npos) {
-      ext = ".png";
-    } else if (name.find("OpenRaster") != Glib::ustring::npos) {
-      ext = ".ora";
-    } else {
-      return;
-    }
-    std::string cur = dialog.get_current_name();
-    if (cur.empty()) {
-      const std::string full = dialog.get_filename();
-      if (!full.empty()) {
-        const auto slash = full.find_last_of('/');
-        cur = slash == std::string::npos ? full : full.substr(slash + 1);
-      }
-    }
-    if (cur.empty()) {
-      cur = "untitled";
-    }
-    auto dot = cur.find_last_of('.');
-    if (dot != std::string::npos) {
-      cur = cur.substr(0, dot);
-    }
-    cur += ext;
-    dialog.set_current_name(cur);
-  };
-  dialog.property_filter().signal_changed().connect(sync_extension);
+  watch_save_filter(dialog, filters, initial);
   Gtk::Box extra(Gtk::ORIENTATION_HORIZONTAL, 8);
   extra.set_border_width(4);
   auto* qlabel = Gtk::manage(new Gtk::Label("JPEG quality"));
@@ -1574,45 +1548,52 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
     return false;
   }
   jpeg_quality_ = qspin->get_value_as_int();
-  path = dialog.get_filename();
-  format = format_from_path(path);
-  ImageFormat forced = ImageFormat::Unknown;
-  auto filter = dialog.get_filter();
-  if (filter) {
-    const Glib::ustring name = filter->get_name();
-    if (name.find("JPEG") != Glib::ustring::npos) {
-      forced = ImageFormat::Jpeg;
-    } else if (name.find("BMP") != Glib::ustring::npos) {
-      forced = ImageFormat::Bmp;
-    } else if (name.find("PNG") != Glib::ustring::npos) {
-      forced = ImageFormat::Png;
-    } else if (name.find("OpenRaster") != Glib::ustring::npos) {
-      forced = ImageFormat::Ora;
+  std::string chosen = dialog.get_filename();
+  if (chosen.empty()) {
+    const std::string folder = dialog.get_current_folder();
+    const std::string name = dialog.get_current_name();
+    if (!folder.empty() && !name.empty()) {
+      chosen = folder;
+      if (chosen.back() != '/') {
+        chosen.push_back('/');
+      }
+      chosen += name;
     }
   }
-  if (format == ImageFormat::Unknown) {
-    format = forced == ImageFormat::Unknown ? ImageFormat::Ora : forced;
-    path = replace_path_extension(path, format_extension(format));
-  } else if (forced != ImageFormat::Unknown && forced != format) {
-    format = forced;
-    path = replace_path_extension(path, format_extension(format));
+  const ImageFormat filter_format = format_of_save_filter(dialog.get_filter(), filters);
+  std::string error;
+  const bool accepted = complete_save_choice(
+      chosen, filter_format,
+      [this](const SaveTarget& target) {
+        Gtk::MessageDialog ask(*this, "Unknown file extension", false, Gtk::MESSAGE_QUESTION,
+                               Gtk::BUTTONS_NONE, true);
+        ask.set_secondary_text(target.message);
+        ask.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+        const std::string label =
+            std::string("_Save as ") + save_format_label(target.offered_format);
+        ask.add_button(label, Gtk::RESPONSE_ACCEPT);
+        return ask.run() == Gtk::RESPONSE_ACCEPT;
+      },
+      path, format, error);
+  if (!accepted && !error.empty()) {
+    Gtk::MessageDialog err(*this, "Can't save with that file name.", false, Gtk::MESSAGE_ERROR,
+                           Gtk::BUTTONS_OK, true);
+    err.set_secondary_text(error);
+    err.run();
   }
-  // Never write a flat image over an existing .ora path.
-  if (format != ImageFormat::Ora && format_from_path(path) == ImageFormat::Ora) {
-    path = replace_path_extension(path, format_extension(format));
-  }
-  if (format != ImageFormat::Ora && !document().path().empty() &&
-      format_from_path(document().path()) == ImageFormat::Ora && path == document().path()) {
-    path = replace_path_extension(path, format_extension(format));
-  }
-  if (format_from_path(path) == ImageFormat::Gif) {
-    if (forced == ImageFormat::Unknown) {
-      forced = ImageFormat::Png;
+  // The chooser confirmed the typed name. An appended extension is a different
+  // file, so confirm before replacing that one too.
+  if (accepted && path != chosen && Glib::file_test(path, Glib::FILE_TEST_EXISTS)) {
+    Gtk::MessageDialog overwrite(*this, "A file named \"" + Glib::path_get_basename(path) +
+                                             "\" already exists. Replace it?",
+                                 false, Gtk::MESSAGE_QUESTION, Gtk::BUTTONS_NONE, true);
+    overwrite.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+    overwrite.add_button("_Replace", Gtk::RESPONSE_ACCEPT);
+    if (overwrite.run() != Gtk::RESPONSE_ACCEPT) {
+      return false;
     }
-    format = forced;
-    path = replace_path_extension(path, format_extension(format));
   }
-  return true;
+  return accepted;
 }
 
 
