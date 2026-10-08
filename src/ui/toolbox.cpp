@@ -16,6 +16,8 @@
 #include <gtkmm/separator.h>
 #include <gtkmm/stylecontext.h>
 
+#include <string>
+
 #include <cmath>
 #include <cstring>
 
@@ -54,6 +56,22 @@ bool uses_line_width(const std::string& id) {
          id == "rectangle-fill" || id == "rounded-rect" || id == "rounded-rect-fill" ||
          id == "ellipse" || id == "ellipse-fill" || id == "freeform" || id == "freeform-fill" ||
          id == "polygon" || id == "polygon-fill" || id == "polyline" || id == "curve";
+}
+
+// Tooltip plus the matching accessible name. Realized again on map so a
+// theme that rebuilds the ATK object still exposes the name.
+void describe_control(Gtk::Widget& widget, const char* text) {
+  const std::string copy(text);
+  widget.set_tooltip_text(copy);
+  widget.set_has_tooltip(true);
+  auto apply = [&widget, copy]() {
+    auto accessible = widget.get_accessible();
+    if (accessible) {
+      accessible->set_name(copy);
+    }
+  };
+  apply();
+  widget.signal_map().connect(apply);
 }
 }  // namespace
 
@@ -176,19 +194,39 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   pack_start(scroll_, Gtk::PACK_EXPAND_WIDGET);
 
   // Wells stay outside the scrolled tool list so they remain visible.
-  wells_.set_size_request(ColorWellGeom::kWidth, ColorWellGeom::kHeight);
-  wells_.set_tooltip_text("Foreground (front) and background (back). Click a well to edit it.");
-  wells_.add_events(Gdk::BUTTON_PRESS_MASK);
-  wells_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_wells_draw));
-  wells_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_wells_press));
+  // Foreground and background are separate widgets so each has its own
+  // tooltip. They overlap the same way the single well used to: the front
+  // square is added last and wins the overlap.
+  wells_fixed_.set_size_request(ColorWellGeom::kWidth, ColorWellGeom::kHeight);
+  wells_fixed_.set_hexpand(false);
+  wells_fixed_.set_halign(Gtk::ALIGN_CENTER);
+  wells_fixed_.set_valign(Gtk::ALIGN_CENTER);
+  bg_well_.set_size_request(ColorWellGeom::kBg, ColorWellGeom::kBg);
+  bg_well_.set_hexpand(false);
+  bg_well_.set_can_focus(false);
+  describe_control(bg_well_, kBackgroundWellTooltip);
+  bg_well_.add_events(Gdk::BUTTON_PRESS_MASK | Gdk::ENTER_NOTIFY_MASK);
+  bg_well_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_bg_draw));
+  bg_well_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_bg_press));
+  fg_well_.set_size_request(ColorWellGeom::kFg, ColorWellGeom::kFg);
+  fg_well_.set_hexpand(false);
+  fg_well_.set_can_focus(false);
+  describe_control(fg_well_, kForegroundWellTooltip);
+  fg_well_.add_events(Gdk::BUTTON_PRESS_MASK | Gdk::ENTER_NOTIFY_MASK);
+  fg_well_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_fg_draw));
+  fg_well_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_fg_press));
+  wells_fixed_.put(bg_well_, ColorWellGeom::kBgX, ColorWellGeom::kBgY);
+  wells_fixed_.put(fg_well_, ColorWellGeom::kFgX, ColorWellGeom::kFgY);
   swap_colors_.set_size_request(22, 22);
-  swap_colors_.set_tooltip_text("Swap foreground and background (X)");
-  swap_colors_.add_events(Gdk::BUTTON_PRESS_MASK);
+  swap_colors_.set_can_focus(false);
+  describe_control(swap_colors_, kSwapColorsTooltip);
+  swap_colors_.add_events(Gdk::BUTTON_PRESS_MASK | Gdk::ENTER_NOTIFY_MASK);
   swap_colors_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_swap_draw));
   swap_colors_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_swap_press));
   reset_colors_.set_size_request(22, 22);
-  reset_colors_.set_tooltip_text("Reset to black and white (D)");
-  reset_colors_.add_events(Gdk::BUTTON_PRESS_MASK);
+  reset_colors_.set_can_focus(false);
+  describe_control(reset_colors_, kResetColorsTooltip);
+  reset_colors_.add_events(Gdk::BUTTON_PRESS_MASK | Gdk::ENTER_NOTIFY_MASK);
   reset_colors_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_reset_draw));
   reset_colors_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_reset_press));
   // Swap and reset stack beside the wells so the cluster fits the 82 px
@@ -202,7 +240,7 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   color_row_.set_margin_top(4);
   color_row_.set_halign(Gtk::ALIGN_CENTER);
   color_row_.set_hexpand(false);
-  color_row_.pack_start(wells_, Gtk::PACK_SHRINK);
+  color_row_.pack_start(wells_fixed_, Gtk::PACK_SHRINK);
   color_row_.pack_start(*well_actions, Gtk::PACK_SHRINK);
   pack_start(color_row_, Gtk::PACK_SHRINK);
   set_size_request(classic_outer_width(), -1);
@@ -406,7 +444,8 @@ int Toolbox::line_width_picker_width() const { return line_widths_.get_allocated
 void Toolbox::set_colors(Color fg, Color bg) {
   fg_ = fg;
   bg_ = bg;
-  wells_.queue_draw();
+  fg_well_.queue_draw();
+  bg_well_.queue_draw();
 }
 
 void Toolbox::size_option_panels() {
@@ -686,24 +725,37 @@ void paint_well(const Cairo::RefPtr<Cairo::Context>& cr, int x, int y, int size,
 
 }  // namespace
 
-bool Toolbox::on_wells_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
-  const int w = std::max(1, wells_.get_allocated_width());
-  const int h = std::max(1, wells_.get_allocated_height());
-  fill_picker_bg(*this, cr, w, h);
-  paint_well(cr, ColorWellGeom::kBgX, ColorWellGeom::kBgY, ColorWellGeom::kBg, bg_);
-  paint_well(cr, ColorWellGeom::kFgX, ColorWellGeom::kFgY, ColorWellGeom::kFg, fg_);
+bool Toolbox::on_fg_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
+  const int w = std::max(1, fg_well_.get_allocated_width());
+  const int h = std::max(1, fg_well_.get_allocated_height());
+  paint_well(cr, 0, 0, std::min(w, h), fg_);
   return true;
 }
 
-bool Toolbox::on_wells_press(GdkEventButton* event) {
+bool Toolbox::on_fg_press(GdkEventButton* event) {
   if (event == nullptr || (event->button != 1 && event->button != 3)) {
     return false;
   }
-  const WellHit hit = color_well_hit(event->x, event->y);
-  if (hit == WellHit::None || !on_edit_color) {
-    return hit != WellHit::None;
+  if (on_edit_color) {
+    on_edit_color(false);
   }
-  on_edit_color(hit == WellHit::Background);
+  return true;
+}
+
+bool Toolbox::on_bg_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
+  const int w = std::max(1, bg_well_.get_allocated_width());
+  const int h = std::max(1, bg_well_.get_allocated_height());
+  paint_well(cr, 0, 0, std::min(w, h), bg_);
+  return true;
+}
+
+bool Toolbox::on_bg_press(GdkEventButton* event) {
+  if (event == nullptr || (event->button != 1 && event->button != 3)) {
+    return false;
+  }
+  if (on_edit_color) {
+    on_edit_color(true);
+  }
   return true;
 }
 

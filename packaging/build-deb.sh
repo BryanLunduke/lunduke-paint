@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build lunduke-paint_0.9-8_amd64.deb into packaging/debs/ (repo-local).
+# Build lunduke-paint_0.9-9_amd64.deb into packaging/debs/ (repo-local).
 # Does NOT seed lcos-live-06 or lcos-live-07.
 #
 # Build-Depends for this script (it is not a dpkg-buildpackage source package):
@@ -20,8 +20,17 @@ if [ -z "${DISPLAY:-}" ]; then
 fi
 export LUNDUKEPAINT_REQUIRE_DISPLAY=1
 
+# Some images point c++ at clang. This package is built with g++.
+if [ -z "${CXX:-}" ]; then
+  if command -v c++ >/dev/null 2>&1 && c++ --version 2>&1 | head -n 1 | grep -qi clang; then
+    if command -v g++ >/dev/null 2>&1; then
+      export CXX=g++
+    fi
+  fi
+fi
+
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-VERSION="0.9-8"
+VERSION="0.9-9"
 PKGNAME="lunduke-paint_${VERSION}_amd64"
 BUILD="$ROOT/build"
 DEST="$ROOT/packaging/src/lunduke-paint"
