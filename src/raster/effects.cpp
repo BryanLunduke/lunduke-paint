@@ -183,7 +183,24 @@ void posterize_rgba(std::uint8_t* rgba, int width, int height, int stride, int l
 
 void box_blur_rgba(const std::uint8_t* src, int width, int height, int src_stride,
                    std::uint8_t* dest, int dest_stride, int radius) {
+  box_blur_rect(src, width, height, src_stride, dest, dest_stride, radius, Rect{0, 0, width, height},
+                nullptr);
+}
+
+void box_blur_rect(const std::uint8_t* src, int width, int height, int src_stride, std::uint8_t* dest,
+                   int dest_stride, int radius, Rect region, BlurWork* work) {
+  if (work != nullptr) {
+    work->scratch_bytes = 0;
+    work->pixels_written = 0;
+  }
   if (src == nullptr || dest == nullptr || width < 1 || height < 1) {
+    return;
+  }
+  if (region.w <= 0 || region.h <= 0) {
+    region = Rect{0, 0, width, height};
+  }
+  region = rect_intersect(region, Rect{0, 0, width, height});
+  if (region.empty()) {
     return;
   }
   if (radius < 1) {
@@ -193,11 +210,25 @@ void box_blur_rgba(const std::uint8_t* src, int width, int height, int src_strid
     radius = 16;
   }
   const int win = radius * 2 + 1;
-  const std::size_t n = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-  // Horizontal sums of premultiplied color and alpha. The vertical pass divides once.
-  std::vector<std::int64_t> hsum(n * 4, 0);
+  const int x0 = region.x;
+  const int x1 = region.x2();
+  const int y0 = region.y;
+  const int y1 = region.y2();
+  const int span = x1 - x0;
+  const std::size_t scratch = box_blur_scratch_bytes(span, radius);
+  std::vector<std::uint32_t> ring(scratch / sizeof(std::uint32_t), 0);
+  if (work != nullptr) {
+    work->scratch_bytes = scratch;
+    work->pixels_written = span * (y1 - y0);
+  }
 
-  auto sample = [&](int x, int y, std::int64_t& r, std::int64_t& g, std::int64_t& b, std::int64_t& a) {
+  auto sample = [&](int x, int y, std::uint32_t& r, std::uint32_t& g, std::uint32_t& b,
+                    std::uint32_t& a) {
+    if (y < 0) {
+      y = 0;
+    } else if (y >= height) {
+      y = height - 1;
+    }
     if (x < 0) {
       x = 0;
     } else if (x >= width) {
@@ -206,95 +237,103 @@ void box_blur_rgba(const std::uint8_t* src, int width, int height, int src_strid
     const std::uint8_t* p = src + static_cast<std::size_t>(y) * static_cast<std::size_t>(src_stride) +
                             static_cast<std::size_t>(x) * 4;
     a = p[3];
-    r = static_cast<std::int64_t>(p[0]) * a;
-    g = static_cast<std::int64_t>(p[1]) * a;
-    b = static_cast<std::int64_t>(p[2]) * a;
+    r = static_cast<std::uint32_t>(p[0]) * a;
+    g = static_cast<std::uint32_t>(p[1]) * a;
+    b = static_cast<std::uint32_t>(p[2]) * a;
   };
 
-  for (int y = 0; y < height; ++y) {
-    std::int64_t sr = 0;
-    std::int64_t sg = 0;
-    std::int64_t sb = 0;
-    std::int64_t sa = 0;
+  auto horiz_row = [&](int y, std::uint32_t* out) {
+    std::uint32_t sr = 0;
+    std::uint32_t sg = 0;
+    std::uint32_t sb = 0;
+    std::uint32_t sa = 0;
     for (int dx = -radius; dx <= radius; ++dx) {
-      std::int64_t r = 0;
-      std::int64_t g = 0;
-      std::int64_t b = 0;
-      std::int64_t a = 0;
-      sample(dx, y, r, g, b, a);
+      std::uint32_t r = 0;
+      std::uint32_t g = 0;
+      std::uint32_t b = 0;
+      std::uint32_t a = 0;
+      sample(x0 + dx, y, r, g, b, a);
       sr += r;
       sg += g;
       sb += b;
       sa += a;
     }
-    for (int x = 0; x < width; ++x) {
-      const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
-                             static_cast<std::size_t>(x)) *
-                            4;
-      hsum[i] = sr;
-      hsum[i + 1] = sg;
-      hsum[i + 2] = sb;
-      hsum[i + 3] = sa;
-      if (x + 1 >= width) {
+    for (int x = x0; x < x1; ++x) {
+      const std::size_t i = static_cast<std::size_t>(x - x0) * 4;
+      out[i] = sr;
+      out[i + 1] = sg;
+      out[i + 2] = sb;
+      out[i + 3] = sa;
+      if (x + 1 >= x1) {
         break;
       }
-      std::int64_t or_ = 0;
-      std::int64_t og = 0;
-      std::int64_t ob = 0;
-      std::int64_t oa = 0;
-      std::int64_t nr = 0;
-      std::int64_t ng = 0;
-      std::int64_t nb = 0;
-      std::int64_t na = 0;
+      std::uint32_t or_ = 0;
+      std::uint32_t og = 0;
+      std::uint32_t ob = 0;
+      std::uint32_t oa = 0;
+      std::uint32_t nr = 0;
+      std::uint32_t ng = 0;
+      std::uint32_t nb = 0;
+      std::uint32_t na = 0;
       sample(x - radius, y, or_, og, ob, oa);
       sample(x + 1 + radius, y, nr, ng, nb, na);
-      sr += nr - or_;
-      sg += ng - og;
-      sb += nb - ob;
-      sa += na - oa;
+      sr = sr + nr - or_;
+      sg = sg + ng - og;
+      sb = sb + nb - ob;
+      sa = sa + na - oa;
     }
+  };
+
+  const std::size_t row_floats = static_cast<std::size_t>(span) * 4;
+  for (int k = 0; k < win; ++k) {
+    int sy = y0 - radius + k;
+    if (sy < 0) {
+      sy = 0;
+    } else if (sy >= height) {
+      sy = height - 1;
+    }
+    horiz_row(sy, ring.data() + static_cast<std::size_t>(k) * row_floats);
   }
 
-  const std::int64_t area = static_cast<std::int64_t>(win) * static_cast<std::int64_t>(win);
-  for (int x = 0; x < width; ++x) {
-    std::int64_t sr = 0;
-    std::int64_t sg = 0;
-    std::int64_t sb = 0;
-    std::int64_t sa = 0;
-    auto add_row = [&](int y, int sign) {
-      if (y < 0) {
-        y = 0;
-      } else if (y >= height) {
-        y = height - 1;
+  const std::uint32_t area = static_cast<std::uint32_t>(win) * static_cast<std::uint32_t>(win);
+  int oldest = 0;
+  for (int y = y0; y < y1; ++y) {
+    std::uint8_t* drow =
+        dest + static_cast<std::size_t>(y) * static_cast<std::size_t>(dest_stride);
+    for (int x = 0; x < span; ++x) {
+      std::uint32_t sr = 0;
+      std::uint32_t sg = 0;
+      std::uint32_t sb = 0;
+      std::uint32_t sa = 0;
+      for (int k = 0; k < win; ++k) {
+        const std::uint32_t* cell =
+            ring.data() + static_cast<std::size_t>(k) * row_floats + static_cast<std::size_t>(x) * 4;
+        sr += cell[0];
+        sg += cell[1];
+        sb += cell[2];
+        sa += cell[3];
       }
-      const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
-                             static_cast<std::size_t>(x)) *
-                            4;
-      sr += sign * hsum[i];
-      sg += sign * hsum[i + 1];
-      sb += sign * hsum[i + 2];
-      sa += sign * hsum[i + 3];
-    };
-    for (int dy = -radius; dy <= radius; ++dy) {
-      add_row(dy, 1);
-    }
-    for (int y = 0; y < height; ++y) {
-      std::uint8_t* o = dest + static_cast<std::size_t>(y) * static_cast<std::size_t>(dest_stride) +
-                        static_cast<std::size_t>(x) * 4;
-      if (sa <= 0) {
+      std::uint8_t* o = drow + static_cast<std::size_t>(x0 + x) * 4;
+      if (sa == 0) {
         o[0] = o[1] = o[2] = o[3] = 0;
       } else {
-        o[0] = static_cast<std::uint8_t>(std::clamp(sr / sa, std::int64_t{0}, std::int64_t{255}));
-        o[1] = static_cast<std::uint8_t>(std::clamp(sg / sa, std::int64_t{0}, std::int64_t{255}));
-        o[2] = static_cast<std::uint8_t>(std::clamp(sb / sa, std::int64_t{0}, std::int64_t{255}));
-        o[3] = static_cast<std::uint8_t>(std::clamp(sa / area, std::int64_t{0}, std::int64_t{255}));
+        o[0] = static_cast<std::uint8_t>(std::min(sr / sa, 255u));
+        o[1] = static_cast<std::uint8_t>(std::min(sg / sa, 255u));
+        o[2] = static_cast<std::uint8_t>(std::min(sb / sa, 255u));
+        o[3] = static_cast<std::uint8_t>(std::min(sa / area, 255u));
       }
-      if (y + 1 >= height) {
-        break;
-      }
-      add_row(y - radius, -1);
-      add_row(y + 1 + radius, 1);
     }
+    if (y + 1 >= y1) {
+      break;
+    }
+    int ny = y + 1 + radius;
+    if (ny < 0) {
+      ny = 0;
+    } else if (ny >= height) {
+      ny = height - 1;
+    }
+    horiz_row(ny, ring.data() + static_cast<std::size_t>(oldest) * row_floats);
+    oldest = (oldest + 1) % win;
   }
 }
 

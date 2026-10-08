@@ -111,8 +111,8 @@ What works:
   Invert, Grayscale, Hue/Saturation, Posterize — each one undoable Command
 - Effects (active layer, clipped to selection): box blur, Sharpen, Emboss —
   each one undoable Command
-- Preferences: default new-document size, undo limit (default 50, cap 200),
-  checker colors, grid threshold (default 400%)
+- Preferences: default new-document size, undo step limit (default 50, cap 200)
+  plus a 256 MB undo-memory cap, checker colors, grid threshold (default 400%)
 - Help: Keyboard Shortcuts window; About (Lunduke Paint, GPL-3.0-or-later,
   app id `org.lunduke.LundukePaint`)
 - Print: Gtk::PrintOperation, fit-to-page, Ctrl+P
@@ -170,7 +170,7 @@ part of the development loop. Target runtime: Linux X11 / XLibre + XFCE.
 - JPEG and BMP flatten onto white (JPEG quality 90) and warn if the composite has transparency or more than one layer.
 - PNG export from a multi-layer document flattens visible layers and keeps alpha, after a warning.
 - Palette is an 8×6 Paint-like grid; the last swatch is transparent.
-- History stores 32×32 tiles that actually changed inside the stroke dirty rect, not the whole layer.
+- History stores 32×32 tiles that actually changed inside the stroke dirty rect, not the whole layer. A tile that is one solid color stores that color. Oldest steps are dropped when stored undo exceeds 256 MB, in addition to the step limit.
 - New canvas-resize pixels default to the current background color (Paint-like); the dialog also offers transparent.
 - Image → Clear fills the active layer with the current background color (Paint-like).
 - Delete/Backspace fills the selection with transparency, not the background.
@@ -185,7 +185,11 @@ part of the development loop. Target runtime: Linux X11 / XLibre + XFCE.
 - Blend onto a fully transparent destination uses the source color (Paint/Pinta-like; Multiply does not go black).
 - Flatten discards hidden layers and composites the visible ones into one Background layer.
 - Merge down blends the active layer onto the one below using the upper layer’s blend and opacity.
-- Layer opacity in the dock commits on Enter or focus-out so a spin does not flood undo.
+- Layer opacity and blend are on the layers panel. Opacity commits on Enter or focus-out so a spin does not flood undo. Dragging the spin previews without an undo step.
+- Patterns apply to the brush, the fill bucket, and the interiors of filled shapes. The pencil and shape outlines stay solid.
+- Zoom to Fit uses the largest ratio that fits the viewport. Zoom in, zoom out, and Ctrl+wheel stay on the power-of-two steps.
+- Overlapping foreground and background wells live on the left tool rail (swap is X, reset to black and white is D). Left-click a palette swatch sets the foreground. Right-click, middle-click, and Shift+left set the background and do not edit the swatch. Double-click edits a swatch.
+- The toolbox includes the picker, magic wand, ellipse select, curve, and polyline. The highlighted button follows the active tool.
 - Canvas size, scale, crop, rotate, and flip transform every user layer (KolourPaint/Pinta document ops).
 - New/Open add a tab unless the only document is an unused untitled placeholder, which is replaced.
 - Zoom is stored per document/tab.

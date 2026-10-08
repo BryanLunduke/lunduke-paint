@@ -20,6 +20,26 @@ Color Tool::stroke_color(unsigned button) const {
   return host_->document().foreground();
 }
 
+const Pattern* Tool::shape_pattern(ShapeFillMode mode) const {
+  if (host_ == nullptr) {
+    return nullptr;
+  }
+  if (mode != ShapeFillMode::Fill && mode != ShapeFillMode::Both) {
+    return nullptr;
+  }
+  return &host_->active_pattern();
+}
+
+Color Tool::pattern_back(unsigned button) const {
+  if (host_ == nullptr) {
+    return Color::white();
+  }
+  if (button == 3) {
+    return host_->document().foreground();
+  }
+  return host_->document().background();
+}
+
 void restore_shape_preview(Layer& tool, const Layer& active, Rect previous) {
   if (!previous.empty()) {
     tool.copy_rect_from(active, previous);

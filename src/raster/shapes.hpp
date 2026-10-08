@@ -2,6 +2,7 @@
 #ifndef LUNDUKEPAINT_RASTER_SHAPES_HPP
 #define LUNDUKEPAINT_RASTER_SHAPES_HPP
 
+#include "raster/pattern.hpp"
 #include "raster/types.hpp"
 
 #include <cstdint>
@@ -15,15 +16,18 @@ void draw_line(std::uint8_t* rgba, int width, int height, int stride, int x0, in
 
 void draw_rectangle(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0, int x1,
                     int y1, int thickness, Color color, ShapeFillMode mode, bool antialias,
-                    Rect* dirty);
+                    Rect* dirty, const Pattern* pattern = nullptr,
+                    Color pattern_bg = Color::white());
 
 void draw_ellipse(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0, int x1,
                   int y1, int thickness, Color color, ShapeFillMode mode, bool antialias,
-                  Rect* dirty);
+                  Rect* dirty, const Pattern* pattern = nullptr,
+                  Color pattern_bg = Color::white());
 
 void draw_rounded_rect(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0,
                        int x1, int y1, int thickness, int radius, Color color, ShapeFillMode mode,
-                       bool antialias, Rect* dirty);
+                       bool antialias, Rect* dirty, const Pattern* pattern = nullptr,
+                       Color pattern_bg = Color::white());
 
 void draw_polyline(std::uint8_t* rgba, int width, int height, int stride, const int* xs,
                    const int* ys, int count, int thickness, Color color, bool antialias,
@@ -31,7 +35,8 @@ void draw_polyline(std::uint8_t* rgba, int width, int height, int stride, const 
 
 void draw_polygon(std::uint8_t* rgba, int width, int height, int stride, const int* xs,
                   const int* ys, int count, int thickness, Color color, ShapeFillMode mode,
-                  bool antialias, Rect* dirty);
+                  bool antialias, Rect* dirty, const Pattern* pattern = nullptr,
+                  Color pattern_bg = Color::white());
 
 void draw_cubic_bezier(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0,
                        int x1, int y1, int x2, int y2, int x3, int y3, int thickness, Color color,

@@ -1,3 +1,22 @@
+lunduke-paint (0.9-7) unstable; urgency=medium
+
+  * Foreground and background wells sit on the tool rail, with swap and
+    reset. A palette swatch sets the foreground on left-click and the
+    background on right-click; editing a swatch is a double-click.
+  * Picker, magic wand, ellipse select, curve, and polyline have toolbox
+    buttons. The highlighted button follows the active tool.
+  * Patterns paint the brush, the fill bucket, and filled-shape interiors.
+    Pencil strokes and shape outlines stay solid. Zoom to Fit uses the
+    largest ratio that fits.
+  * Zoomed-out compositing samples the visible screen and caches it. Blur is
+    a separable box over the selection or the layer. Undo stores changed
+    patches and drops the oldest steps past 256 MB.
+  * The tool rail keeps square buttons and a full-width width picker. Menu
+    mnemonics and the shortcut list cover the keys the app uses. Layer
+    opacity and blend are on the layers panel.
+
+ -- Phil <phil@brushpad.local>  Thu, 08 Oct 2026 18:30:00 -0500
+
 lunduke-paint (0.9-6) unstable; urgency=medium
 
   * A floating selection from paste, move, drag-in, transform, nudge, or a

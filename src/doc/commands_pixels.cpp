@@ -34,11 +34,54 @@ std::vector<std::uint8_t> copy_tile(const std::uint8_t* src, int w, int h, int s
   return out;
 }
 
+bool tile_is_solid(const std::uint8_t* src, int w, int h, int stride, Color& color) {
+  if (src == nullptr || w < 1 || h < 1) {
+    return false;
+  }
+  color = Color{src[0], src[1], src[2], src[3]};
+  for (int y = 0; y < h; ++y) {
+    const std::uint8_t* row = src + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+    for (int x = 0; x < w; ++x) {
+      const std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
+      if (p[0] != color.r || p[1] != color.g || p[2] != color.b || p[3] != color.a) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 void write_tile(Layer& layer, int x, int y, int w, int h, const std::uint8_t* packed) {
   for (int row = 0; row < h; ++row) {
     const Rect line{x, y + row, w, 1};
     layer.write_rect(line, packed + static_cast<std::size_t>(row) * static_cast<std::size_t>(w) * 4);
   }
+}
+
+void write_solid(Layer& layer, int x, int y, int w, int h, Color color) {
+  std::vector<std::uint8_t> row(static_cast<std::size_t>(w) * 4);
+  for (int i = 0; i < w; ++i) {
+    row[static_cast<std::size_t>(i) * 4] = color.r;
+    row[static_cast<std::size_t>(i) * 4 + 1] = color.g;
+    row[static_cast<std::size_t>(i) * 4 + 2] = color.b;
+    row[static_cast<std::size_t>(i) * 4 + 3] = color.a;
+  }
+  for (int line = 0; line < h; ++line) {
+    layer.write_rect(Rect{x, y + line, w, 1}, row.data());
+  }
+}
+
+void store_side(bool& solid, Color& color, std::vector<std::uint8_t>& bytes, const std::uint8_t* src,
+                int w, int h, int stride) {
+  Color flat;
+  if (tile_is_solid(src, w, h, stride, flat)) {
+    solid = true;
+    color = flat;
+    bytes.clear();
+    return;
+  }
+  solid = false;
+  bytes = copy_tile(src, w, h, stride);
 }
 
 }  // namespace
@@ -75,8 +118,8 @@ std::unique_ptr<PixelPatchCommand> PixelPatchCommand::from_layers(const Layer& b
       tile.y = ty;
       tile.w = tw;
       tile.h = th;
-      tile.before = copy_tile(a, tw, th, before.stride());
-      tile.after = copy_tile(b, tw, th, after.stride());
+      store_side(tile.before_solid, tile.before_color, tile.before, a, tw, th, before.stride());
+      store_side(tile.after_solid, tile.after_color, tile.after, b, tw, th, after.stride());
       cmd->tiles_.push_back(std::move(tile));
     }
   }
@@ -107,11 +150,35 @@ void PixelPatchCommand::set_selection_change(SelectionState before, SelectionSta
   bounds_ = rect_union(bounds_, rect_union(cover(selection_before_), cover(selection_after_)));
 }
 
+std::size_t PixelPatchCommand::memory_bytes() const {
+  std::size_t bytes = 64;
+  for (const Tile& tile : tiles_) {
+    bytes += 48;
+    bytes += tile.before.size();
+    bytes += tile.after.size();
+  }
+  auto add_state = [&](const SelectionState& state) {
+    bytes += state.float_pixels.size();
+    bytes += state.float_coverage.size();
+    bytes += state.origin_coverage.size();
+    bytes += state.mask.size();
+  };
+  if (has_selection_) {
+    add_state(selection_before_);
+    add_state(selection_after_);
+  }
+  return bytes;
+}
+
 void PixelPatchCommand::apply(Document& document) {
   if (layer_index_ >= 0 && layer_index_ < document.layers().count()) {
     Layer& layer = document.layers().at(layer_index_);
     for (const Tile& tile : tiles_) {
-      write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.after.data());
+      if (tile.after_solid) {
+        write_solid(layer, tile.x, tile.y, tile.w, tile.h, tile.after_color);
+      } else {
+        write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.after.data());
+      }
     }
   }
   if (has_selection_) {
@@ -123,7 +190,11 @@ void PixelPatchCommand::undo(Document& document) {
   if (layer_index_ >= 0 && layer_index_ < document.layers().count()) {
     Layer& layer = document.layers().at(layer_index_);
     for (const Tile& tile : tiles_) {
-      write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.before.data());
+      if (tile.before_solid) {
+        write_solid(layer, tile.x, tile.y, tile.w, tile.h, tile.before_color);
+      } else {
+        write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.before.data());
+      }
     }
   }
   if (has_selection_) {

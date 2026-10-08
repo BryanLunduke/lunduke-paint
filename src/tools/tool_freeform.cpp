@@ -151,7 +151,8 @@ void FreeformShapeTool::preview() {
   dirty_ = {};
   draw_polygon(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
                static_cast<int>(xs.size()), (host_ != nullptr ? host_->stroke_size() : thickness_),
-               stroke_color(button_), fill_mode_, false, &dirty_);
+               stroke_color(button_), fill_mode_, false, &dirty_, shape_pattern(fill_mode_),
+               pattern_back(button_));
   host_->invalidate_canvas(
       layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
 }

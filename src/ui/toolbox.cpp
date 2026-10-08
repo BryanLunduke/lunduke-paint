@@ -3,6 +3,7 @@
 #include "ui/toolbox.hpp"
 
 #include "app/live_edit.hpp"
+#include "ui/color_well.hpp"
 #include "ui/symbolic_icon.hpp"
 
 #include "raster/brush_tip.hpp"
@@ -81,7 +82,8 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   grid_.set_column_spacing(2);
   grid_.set_column_homogeneous(true);
   grid_.set_hexpand(false);
-  grid_.set_halign(Gtk::ALIGN_START);
+  grid_.set_halign(Gtk::ALIGN_CENTER);
+  grid_.set_size_request(tool_grid_natural_width(), -1);
   grid_.set_margin_start(kSideAir);
   grid_.set_margin_end(kSideAir);
   rail_.pack_start(grid_, Gtk::PACK_SHRINK);
@@ -99,13 +101,15 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   options_stack_.set_margin_start(kSideAir);
   options_stack_.set_margin_end(kSideAir);
   options_stack_.set_margin_top(0);
-  options_stack_.set_hexpand(false);
-  options_stack_.set_halign(Gtk::ALIGN_START);
+  options_stack_.set_hexpand(true);
+  options_stack_.set_halign(Gtk::ALIGN_FILL);
 
-  const int grid_w = tool_grid_natural_width();
+  const int picker_w = picker_content_width();
 
-  // MacPaint-style line-width selector.
-  line_widths_.set_size_request(grid_w, 72);
+  // MacPaint-style line-width selector. It fills the rail; the tool buttons stay square.
+  line_widths_.set_hexpand(true);
+  line_widths_.set_halign(Gtk::ALIGN_FILL);
+  line_widths_.set_size_request(picker_w, 72);
   line_widths_.set_tooltip_text("Line width");
   line_widths_.add_events(Gdk::BUTTON_PRESS_MASK);
   line_widths_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_line_width_draw));
@@ -114,7 +118,9 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   options_stack_.add(line_widths_, "line", "Line width");
 
   // MacPaint-style brush tip grid (4×4).
-  brush_tips_.set_size_request(grid_w, grid_w);
+  brush_tips_.set_hexpand(true);
+  brush_tips_.set_halign(Gtk::ALIGN_FILL);
+  brush_tips_.set_size_request(picker_w, picker_w);
   brush_tips_.set_tooltip_text("Brush shape");
   brush_tips_.add_events(Gdk::BUTTON_PRESS_MASK);
   brush_tips_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_brush_tips_draw));
@@ -123,14 +129,16 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   options_stack_.add(brush_tips_, "brush", "Brush shape");
 
   // Compact spray radius rows (same visual language as line widths).
-  spray_radii_.set_size_request(grid_w, 72);
+  spray_radii_.set_hexpand(true);
+  spray_radii_.set_halign(Gtk::ALIGN_FILL);
+  spray_radii_.set_size_request(picker_w, 72);
   spray_radii_.set_tooltip_text("Spray radius");
   spray_radii_.add_events(Gdk::BUTTON_PRESS_MASK);
   spray_radii_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_spray_draw));
   spray_radii_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_spray_press));
   options_stack_.add(spray_radii_, "spray", "Spray radius");
 
-  empty_options_.set_size_request(grid_w, 8);
+  empty_options_.set_size_request(picker_w, 8);
   options_stack_.add(empty_options_, "none", "None");
 
   rail_.pack_start(options_stack_, Gtk::PACK_SHRINK);
@@ -156,6 +164,30 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   rail_.set_halign(Gtk::ALIGN_START);
   scroll_.add(rail_);
   pack_start(scroll_, Gtk::PACK_EXPAND_WIDGET);
+
+  // Wells stay outside the scrolled tool list so they remain visible.
+  wells_.set_size_request(ColorWellGeom::kWidth, ColorWellGeom::kHeight);
+  wells_.set_tooltip_text("Foreground (front) and background (back). Click a well to edit it.");
+  wells_.add_events(Gdk::BUTTON_PRESS_MASK);
+  wells_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_wells_draw));
+  wells_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_wells_press));
+  swap_colors_.set_size_request(22, 22);
+  swap_colors_.set_tooltip_text("Swap foreground and background (X)");
+  swap_colors_.add_events(Gdk::BUTTON_PRESS_MASK);
+  swap_colors_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_swap_draw));
+  swap_colors_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_swap_press));
+  reset_colors_.set_size_request(22, 22);
+  reset_colors_.set_tooltip_text("Reset to black and white (D)");
+  reset_colors_.add_events(Gdk::BUTTON_PRESS_MASK);
+  reset_colors_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_reset_draw));
+  reset_colors_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_reset_press));
+  color_row_.set_margin_start(kSideAir);
+  color_row_.set_margin_top(4);
+  color_row_.set_halign(Gtk::ALIGN_CENTER);
+  color_row_.pack_start(wells_, Gtk::PACK_SHRINK);
+  color_row_.pack_start(swap_colors_, Gtk::PACK_SHRINK);
+  color_row_.pack_start(reset_colors_, Gtk::PACK_SHRINK);
+  pack_start(color_row_, Gtk::PACK_SHRINK);
   set_vexpand(true);
 }
 
@@ -181,8 +213,8 @@ void Toolbox::add_tool_button(const std::string& id, const std::string& tooltip,
   button->set_relief(Gtk::RELIEF_NONE);
   button->set_can_focus(false);
   button->set_size_request(28, 28);
-  button->set_hexpand(true);
-  button->set_halign(Gtk::ALIGN_FILL);
+  button->set_hexpand(false);
+  button->set_halign(Gtk::ALIGN_CENTER);
   button->get_style_context()->add_class(toolbox_style::button_class());
   const std::string captured = id;
   button->signal_clicked().connect([this, captured]() {
@@ -317,12 +349,41 @@ void Toolbox::get_preferred_width_vfunc(int& minimum_width, int& natural_width) 
   natural_width = w;
 }
 
-void Toolbox::size_option_panels() {
+int Toolbox::picker_content_width() const {
+  const int border = static_cast<int>(get_border_width()) * 2;
+  int w = kRailMinWidth - border - kSideAir * 2;
+  const int alloc = rail_.get_allocated_width();
+  if (alloc > w + kSideAir * 2) {
+    w = alloc - kSideAir * 2;
+  }
   const int grid_w = tool_grid_natural_width();
-  line_widths_.set_size_request(grid_w, 72);
-  brush_tips_.set_size_request(grid_w, grid_w);
-  spray_radii_.set_size_request(grid_w, 72);
-  empty_options_.set_size_request(grid_w, 8);
+  if (w < grid_w) {
+    w = grid_w;
+  }
+  return w;
+}
+
+int Toolbox::tool_button_width() const {
+  if (buttons_.empty() || buttons_[0] == nullptr) {
+    return 0;
+  }
+  return buttons_[0]->get_allocated_width();
+}
+
+int Toolbox::line_width_picker_width() const { return line_widths_.get_allocated_width(); }
+
+void Toolbox::set_colors(Color fg, Color bg) {
+  fg_ = fg;
+  bg_ = bg;
+  wells_.queue_draw();
+}
+
+void Toolbox::size_option_panels() {
+  const int picker_w = picker_content_width();
+  line_widths_.set_size_request(picker_w, 72);
+  brush_tips_.set_size_request(picker_w, std::max(picker_w, tool_grid_natural_width()));
+  spray_radii_.set_size_request(picker_w, 72);
+  empty_options_.set_size_request(picker_w, 8);
 }
 
 void Toolbox::on_grid_size_allocate(Gtk::Allocation& allocation) {
@@ -559,6 +620,104 @@ bool Toolbox::on_spray_press(GdkEventButton* event) {
   set_spray_radius(r);
   if (on_spray_radius_chosen) {
     on_spray_radius_chosen(r);
+  }
+  return true;
+}
+
+namespace {
+
+void paint_well(const Cairo::RefPtr<Cairo::Context>& cr, int x, int y, int size, Color color) {
+  if (color.a == 0) {
+    const int cell = std::max(2, size / 4);
+    for (int py = 0; py < size; py += cell) {
+      for (int px = 0; px < size; px += cell) {
+        const bool dark = ((px / cell) + (py / cell)) % 2 == 0;
+        cr->set_source_rgb(dark ? 0.75 : 0.92, dark ? 0.75 : 0.92, dark ? 0.75 : 0.92);
+        cr->rectangle(x + px, y + py, std::min(cell, size - px), std::min(cell, size - py));
+        cr->fill();
+      }
+    }
+  } else {
+    cr->set_source_rgba(color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0);
+    cr->rectangle(x, y, size, size);
+    cr->fill();
+  }
+  cr->set_source_rgb(0.05, 0.05, 0.05);
+  cr->rectangle(x + 0.5, y + 0.5, size - 1.0, size - 1.0);
+  cr->set_line_width(1.0);
+  cr->stroke();
+}
+
+}  // namespace
+
+bool Toolbox::on_wells_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
+  const int w = std::max(1, wells_.get_allocated_width());
+  const int h = std::max(1, wells_.get_allocated_height());
+  fill_picker_bg(*this, cr, w, h);
+  paint_well(cr, ColorWellGeom::kBgX, ColorWellGeom::kBgY, ColorWellGeom::kBg, bg_);
+  paint_well(cr, ColorWellGeom::kFgX, ColorWellGeom::kFgY, ColorWellGeom::kFg, fg_);
+  return true;
+}
+
+bool Toolbox::on_wells_press(GdkEventButton* event) {
+  if (event == nullptr || (event->button != 1 && event->button != 3)) {
+    return false;
+  }
+  const WellHit hit = color_well_hit(event->x, event->y);
+  if (hit == WellHit::None || !on_edit_color) {
+    return hit != WellHit::None;
+  }
+  on_edit_color(hit == WellHit::Background);
+  return true;
+}
+
+bool Toolbox::on_swap_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
+  const int w = std::max(1, swap_colors_.get_allocated_width());
+  const int h = std::max(1, swap_colors_.get_allocated_height());
+  fill_picker_bg(*this, cr, w, h);
+  cr->set_source_rgb(0.1, 0.1, 0.1);
+  cr->set_line_width(1.4);
+  cr->move_to(4, h * 0.35);
+  cr->line_to(w - 6, h * 0.35);
+  cr->line_to(w - 9, h * 0.35 - 3);
+  cr->move_to(w - 6, h * 0.35);
+  cr->line_to(w - 9, h * 0.35 + 3);
+  cr->move_to(w - 4, h * 0.68);
+  cr->line_to(6, h * 0.68);
+  cr->line_to(9, h * 0.68 - 3);
+  cr->move_to(6, h * 0.68);
+  cr->line_to(9, h * 0.68 + 3);
+  cr->stroke();
+  return true;
+}
+
+bool Toolbox::on_swap_press(GdkEventButton* event) {
+  if (event == nullptr || event->button != 1) {
+    return false;
+  }
+  if (on_swap_colors) {
+    on_swap_colors();
+  }
+  return true;
+}
+
+bool Toolbox::on_reset_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
+  const int w = std::max(1, reset_colors_.get_allocated_width());
+  const int h = std::max(1, reset_colors_.get_allocated_height());
+  fill_picker_bg(*this, cr, w, h);
+  paint_well(cr, 6, 6, 10, Color::white());
+  paint_well(cr, 2, 2, 10, Color::black());
+  (void)w;
+  (void)h;
+  return true;
+}
+
+bool Toolbox::on_reset_press(GdkEventButton* event) {
+  if (event == nullptr || event->button != 1) {
+    return false;
+  }
+  if (on_reset_colors) {
+    on_reset_colors();
   }
   return true;
 }

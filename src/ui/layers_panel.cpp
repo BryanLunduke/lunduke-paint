@@ -21,6 +21,7 @@
 #include <gtkmm/togglebutton.h>
 #include <gtkmm/window.h>
 
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -122,7 +123,36 @@ LayersPanel::LayersPanel() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   del_.signal_clicked().connect(sigc::mem_fun(*this, &LayersPanel::delete_layer_clicked));
   rename_.signal_clicked().connect(sigc::mem_fun(*this, &LayersPanel::rename_clicked));
 
+  opacity_.set_range(0, 100);
+  opacity_.set_increments(1, 10);
+  opacity_.set_digits(0);
+  opacity_.set_value(100);
+  opacity_.set_width_chars(4);
+  opacity_.set_tooltip_text("Opacity of the current layer. Enter or leaving the field records one undo step.");
+  opacity_.signal_value_changed().connect(sigc::mem_fun(*this, &LayersPanel::preview_opacity));
+  opacity_.signal_activate().connect(sigc::mem_fun(*this, &LayersPanel::commit_opacity));
+  opacity_.signal_focus_out_event().connect([this](GdkEventFocus*) {
+    commit_opacity();
+    return false;
+  });
+  for (int i = 0; i < kBlendModeCount; ++i) {
+    blend_.append(blend_mode_label(blend_mode_from_index(i)));
+  }
+  blend_.set_active(0);
+  blend_.set_hexpand(true);
+  blend_.set_tooltip_text("Blend mode of the current layer");
+  blend_.signal_changed().connect(sigc::mem_fun(*this, &LayersPanel::on_blend_changed));
+
+  auto* opacity_row = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 4));
+  auto* opacity_label = Gtk::manage(new Gtk::Label("Opacity"));
+  opacity_label->set_halign(Gtk::ALIGN_START);
+  opacity_row->pack_start(*opacity_label, Gtk::PACK_SHRINK);
+  opacity_row->pack_start(opacity_, Gtk::PACK_SHRINK);
+  props_.pack_start(*opacity_row, Gtk::PACK_SHRINK);
+  props_.pack_start(blend_, Gtk::PACK_SHRINK);
+
   pack_start(scroll_, Gtk::PACK_EXPAND_WIDGET);
+  pack_start(props_, Gtk::PACK_SHRINK);
   pack_start(toolbar_, Gtk::PACK_SHRINK);
 }
 
@@ -275,6 +305,10 @@ void LayersPanel::add_row(int stack_index) {
   name->set_xalign(0.0f);
   name->set_ellipsize(Pango::ELLIPSIZE_END);
   name->set_max_width_chars(18);
+  const int pct = static_cast<int>(layer.opacity() * 100.0f + 0.5f);
+  auto* detail = Gtk::manage(new Gtk::Label(std::to_string(pct) + "% " + blend_mode_label(layer.blend())));
+  detail->set_xalign(0.0f);
+  detail->set_ellipsize(Pango::ELLIPSIZE_END);
 
   auto* eye = Gtk::manage(new Gtk::ToggleButton());
   eye->set_image_from_icon_name("view-reveal-symbolic", Gtk::ICON_SIZE_MENU);
@@ -308,12 +342,23 @@ void LayersPanel::add_row(int stack_index) {
   icons->pack_start(*lock, Gtk::PACK_SHRINK);
 
   box->pack_start(*name, Gtk::PACK_SHRINK);
+  box->pack_start(*detail, Gtk::PACK_SHRINK);
   box->pack_start(*icons, Gtk::PACK_SHRINK);
   row->add(*box);
   row->add_events(Gdk::BUTTON_PRESS_MASK);
   row->signal_button_press_event().connect(
       [this, stack_index](GdkEventButton* event) {
-        if (event != nullptr && event->button == 3) {
+        if (event == nullptr) {
+          return false;
+        }
+        if (event->type == GDK_2BUTTON_PRESS && event->button == 1) {
+          if (document_ != nullptr) {
+            document_->set_active_layer(stack_index);
+          }
+          show_properties();
+          return true;
+        }
+        if (event->button == 3) {
           popup_row_menu(stack_index, event);
           return true;
         }
@@ -451,6 +496,70 @@ void LayersPanel::show_properties() {
   document_->set_layer_offset(index, offx.get_value_as_int(), offy.get_value_as_int());
 }
 
+void LayersPanel::sync_layer_controls() {
+  syncing_props_ = true;
+  if (document_ == nullptr || document_->layers().count() < 1) {
+    opacity_.set_sensitive(false);
+    blend_.set_sensitive(false);
+    syncing_props_ = false;
+    return;
+  }
+  if (!opacity_editing_) {
+    const Layer& layer = document_->layers().active_layer();
+    opacity_.set_value(static_cast<int>(layer.opacity() * 100.0f + 0.5f));
+    blend_.set_active(static_cast<int>(layer.blend()));
+  }
+  opacity_.set_sensitive(true);
+  blend_.set_sensitive(true);
+  syncing_props_ = false;
+}
+
+void LayersPanel::preview_opacity() {
+  if (syncing_props_ || refreshing_ || document_ == nullptr || document_->layers().count() < 1) {
+    return;
+  }
+  const int index = document_->layers().active_index();
+  Layer& layer = document_->layers().at(index);
+  if (!opacity_editing_) {
+    opacity_before_ = layer.opacity();
+    opacity_layer_ = index;
+    opacity_editing_ = true;
+  }
+  const float next = static_cast<float>(opacity_.get_value_as_int()) / 100.0f;
+  layer.set_opacity(next);
+  document_->notify_invalidated(Rect{0, 0, document_->width(), document_->height()});
+}
+
+void LayersPanel::commit_opacity() {
+  if (!opacity_editing_ || document_ == nullptr) {
+    return;
+  }
+  const int index = opacity_layer_;
+  const float next = static_cast<float>(opacity_.get_value_as_int()) / 100.0f;
+  opacity_editing_ = false;
+  if (index < 0 || index >= document_->layers().count()) {
+    return;
+  }
+  Layer& layer = document_->layers().at(index);
+  if (std::abs(opacity_before_ - next) < 0.0001f) {
+    layer.set_opacity(opacity_before_);
+    return;
+  }
+  layer.set_opacity(opacity_before_);
+  document_->set_layer_opacity(index, next);
+}
+
+void LayersPanel::on_blend_changed() {
+  if (syncing_props_ || refreshing_ || document_ == nullptr || document_->layers().count() < 1) {
+    return;
+  }
+  const int active = blend_.get_active_row_number();
+  if (active < 0) {
+    return;
+  }
+  document_->set_layer_blend(document_->layers().active_index(), blend_mode_from_index(active));
+}
+
 void LayersPanel::update_buttons() {
   const bool have = document_ != nullptr && document_->layers().count() > 0;
   const int count = have ? document_->layers().count() : 0;
@@ -485,6 +594,7 @@ void LayersPanel::refresh() {
   list_.show_all();
   refreshing_ = false;
   update_buttons();
+  sync_layer_controls();
 }
 
 }  // namespace lundukepaint

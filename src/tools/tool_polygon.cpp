@@ -135,7 +135,7 @@ void PolygonTool::preview(bool closed) {
   if (closed && xs.size() >= 3) {
     draw_polygon(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
                  static_cast<int>(xs.size()), stroke_px(), stroke_color(button_), fill_mode_,
-                 antialias_, &dirty_);
+                 antialias_, &dirty_, shape_pattern(fill_mode_), pattern_back(button_));
   } else {
     draw_polyline(tool.pixels(), tool.width(), tool.height(), tool.stride(), xs.data(), ys.data(),
                   static_cast<int>(xs.size()), stroke_px(), stroke_color(button_), antialias_,

@@ -149,6 +149,9 @@ protected:
   ToolHost* host_ = nullptr;
 
   Color stroke_color(unsigned button) const;
+  // Filled interiors use the pattern strip. Outlines pass a null pattern.
+  const Pattern* shape_pattern(ShapeFillMode mode) const;
+  Color pattern_back(unsigned button) const;
   bool ensure_editable();
   // Width from the left-rail picker. Tools that draw a stroke use this
   // instead of a private thickness that the unparented spin used to own.

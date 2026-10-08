@@ -6,8 +6,10 @@
 
 #include <gtkmm/box.h>
 #include <gtkmm/button.h>
+#include <gtkmm/comboboxtext.h>
 #include <gtkmm/listbox.h>
 #include <gtkmm/scrolledwindow.h>
+#include <gtkmm/spinbutton.h>
 
 namespace lundukepaint {
 
@@ -20,6 +22,8 @@ public:
   void set_document(Document* document);
   void refresh();
   void show_properties();
+  int opacity_percent() const { return opacity_.get_value_as_int(); }
+  Glib::ustring blend_text() const { return blend_.get_active_text(); }
 
 private:
   void add_row(int stack_index);
@@ -31,6 +35,11 @@ private:
   void rename_clicked();
   int selected_stack_index() const;
   void update_buttons();
+  void sync_layer_controls();
+  void on_opacity_edited();
+  void preview_opacity();
+  void commit_opacity();
+  void on_blend_changed();
   void style_icon_button(Gtk::Button& button, const std::string& icon_name, const char* tip);
   bool on_list_drag_motion(const Glib::RefPtr<Gdk::DragContext>& context, int x, int y, guint time);
   void on_list_drag_leave(const Glib::RefPtr<Gdk::DragContext>& context, guint time);
@@ -44,10 +53,17 @@ private:
 
   Document* document_{nullptr};
   bool refreshing_{false};
+  bool syncing_props_{false};
+  bool opacity_editing_{false};
+  float opacity_before_{1.0f};
+  int opacity_layer_{-1};
   int drag_stack_from_{-1};
 
   Gtk::ScrolledWindow scroll_;
   Gtk::ListBox list_;
+  Gtk::Box props_{Gtk::ORIENTATION_VERTICAL, 2};
+  Gtk::SpinButton opacity_;
+  Gtk::ComboBoxText blend_;
   Gtk::Box toolbar_{Gtk::ORIENTATION_HORIZONTAL, 2};
   Gtk::Button del_;
   Gtk::Button rename_;

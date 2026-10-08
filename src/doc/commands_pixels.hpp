@@ -28,6 +28,7 @@ public:
   Rect dirty_rect() const override { return bounds_; }
 
   bool empty() const { return tiles_.empty(); }
+  std::size_t memory_bytes() const override;
 
   // Move selection: restore the ants (and the float, on undo) with the pixels.
   void set_selection_change(SelectionState before, SelectionState after);
@@ -38,6 +39,10 @@ private:
     int y = 0;
     int w = 0;
     int h = 0;
+    bool before_solid = false;
+    bool after_solid = false;
+    Color before_color{};
+    Color after_color{};
     std::vector<std::uint8_t> before;
     std::vector<std::uint8_t> after;
   };

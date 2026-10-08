@@ -2,6 +2,8 @@
 
 #include "ui/colors_panel.hpp"
 
+#include "ui/palette_click.hpp"
+
 #include <gtkmm/colorchooserdialog.h>
 #include <gtkmm/widget.h>
 #include <gtkmm/window.h>
@@ -105,7 +107,7 @@ ColorsPanel::ColorsPanel()
   custom_label_.set_xalign(0.0f);
   custom_label_.get_style_context()->add_class("dim-label");
 
-  hint_.set_text("L:FG  M:BG  R:store FG");
+  hint_.set_text("Left: foreground. Right, middle, or Shift+left: background. Double-click a swatch to edit it.");
   hint_.set_xalign(0.0f);
   hint_.set_line_wrap(true);
   hint_.set_max_width_chars(22);
@@ -259,6 +261,16 @@ bool ColorsPanel::on_swatch_draw(Gtk::DrawingArea* area, const Cairo::RefPtr<Cai
   cr->set_line_width(1.0);
   cr->stroke();
 
+  if (color == bg_) {
+    path_rounded_rect(cr, 2.5, 2.5, w - 5.0, h - 5.0, std::max(1.0, radius - 2.0));
+    if (luminance(color) < 0.55 || color.a < 128) {
+      cr->set_source_rgb(1.0, 1.0, 1.0);
+    } else {
+      cr->set_source_rgb(0.05, 0.05, 0.05);
+    }
+    cr->set_line_width(1.5);
+    cr->stroke();
+  }
   if (color_matches_fg(color)) {
     draw_checkmark(cr, w, h, luminance(color) < 0.55 || color.a < 128);
   }
@@ -289,29 +301,48 @@ bool ColorsPanel::on_swatch_press(GdkEventButton* event, SlotKind kind, int inde
     return false;
   }
 
-  if (event->button == 3) {
-    // Store current FG into this swatch (including overwriting transparent).
-    *slot = fg_;
-    if (area) {
-      area->queue_draw();
-    }
-    queue_all_draws();  // refresh checkmarks
+  const bool shift = (event->state & GDK_SHIFT_MASK) != 0;
+  const bool dbl = event->type == GDK_2BUTTON_PRESS;
+  const PaletteClick action = palette_click(event->button, shift, dbl);
+  if (action == PaletteClick::Edit) {
+    edit_slot(kind, index);
     return true;
   }
-  if (!on_swatch) {
+  if (action == PaletteClick::Ignore || !on_swatch) {
     return false;
   }
-  if (event->button == 1) {
-    on_swatch(*slot, (event->state & GDK_SHIFT_MASK) != 0);
-    queue_all_draws();
-    return true;
+  on_swatch(*slot, action == PaletteClick::Background);
+  queue_all_draws();
+  (void)area;
+  return true;
+}
+
+void ColorsPanel::edit_slot(SlotKind kind, int index) {
+  Color* slot = nullptr;
+  if (kind == SlotKind::Palette && index >= 0 && index < static_cast<int>(palette_.size())) {
+    slot = &palette_[static_cast<std::size_t>(index)];
+  } else if (kind == SlotKind::Custom && index >= 0 && index < static_cast<int>(custom_.size())) {
+    slot = &custom_[static_cast<std::size_t>(index)];
+  } else {
+    return;
   }
-  if (event->button == 2) {
-    on_swatch(*slot, true);
-    queue_all_draws();
-    return true;
+  Gtk::ColorChooserDialog dialog("Edit palette color");
+  if (auto* top = dynamic_cast<Gtk::Window*>(get_toplevel())) {
+    dialog.set_transient_for(*top);
   }
-  return false;
+  dialog.set_use_alpha(true);
+  Gdk::RGBA rgba;
+  rgba.set_rgba(slot->r / 255.0, slot->g / 255.0, slot->b / 255.0, slot->a / 255.0);
+  dialog.set_rgba(rgba);
+  if (dialog.run() != Gtk::RESPONSE_OK) {
+    return;
+  }
+  const Gdk::RGBA chosen = dialog.get_rgba();
+  slot->r = static_cast<std::uint8_t>(chosen.get_red() * 255.0 + 0.5);
+  slot->g = static_cast<std::uint8_t>(chosen.get_green() * 255.0 + 0.5);
+  slot->b = static_cast<std::uint8_t>(chosen.get_blue() * 255.0 + 0.5);
+  slot->a = static_cast<std::uint8_t>(chosen.get_alpha() * 255.0 + 0.5);
+  queue_all_draws();
 }
 
 void ColorsPanel::add_custom_color() {

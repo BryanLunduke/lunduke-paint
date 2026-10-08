@@ -22,7 +22,7 @@ inline const ShortcutHelpRow* shortcut_help_rows(int& count) {
       {"Deselect", "Ctrl+D"},
       {"Escape",
        "Cancels the text box, the in-progress shape, or a resting float; deselects only when nothing is in progress"},
-      {"Delete selection", "Delete"},
+      {"Delete selection", "Delete or BackSpace"},
       {"Duplicate selection", "Ctrl+J"},
       {"New layer", "Ctrl+Shift+N"},
       {"Merge down", "Ctrl+E"},
@@ -40,6 +40,13 @@ inline const ShortcutHelpRow* shortcut_help_rows(int& count) {
       {"Rounded rectangle outline, press U again for filled", "U"},
       {"Text / Curve", "T / V"},
       {"Spray / Polyline", "Y / N"},
+      {"Hand", "H"},
+      {"Copy merged", "Ctrl+Shift+C"},
+      {"Paste into New", "Edit menu"},
+      {"Revert", "Ctrl+R"},
+      {"Pan (hold)", "Space"},
+      {"Nudge a floating selection", "Arrow keys (Shift = 10 px)"},
+      {"Finish polygon, polyline, or curve", "Enter"},
   };
   count = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
   return kRows;

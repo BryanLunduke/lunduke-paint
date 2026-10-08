@@ -19,6 +19,24 @@ void History::set_depth(int depth) {
   trim();
 }
 
+void History::set_byte_cap(std::size_t bytes) {
+  if (bytes < 1) {
+    bytes = 1;
+  }
+  byte_cap_ = bytes;
+  trim();
+}
+
+std::size_t History::memory_bytes() const {
+  std::size_t total = 0;
+  for (const auto& command : commands_) {
+    if (command) {
+      total += command->memory_bytes();
+    }
+  }
+  return total;
+}
+
 void History::commit(Document& document, std::unique_ptr<Command> command) {
   if (!command) {
     return;
@@ -113,25 +131,37 @@ std::string History::name_at(int i) const {
   return commands_[static_cast<std::size_t>(i)]->name();
 }
 
+void History::drop_oldest() {
+  if (commands_.empty()) {
+    return;
+  }
+  commands_.erase(commands_.begin());
+  if (index_ >= 0) {
+    --index_;
+  }
+  if (!saved_valid_) {
+    return;
+  }
+  if (saved_index_ > 0) {
+    --saved_index_;
+  } else if (saved_index_ == 0) {
+    // The saved command itself fell off the front of the stack.
+    saved_valid_ = false;
+  } else {
+    // saved_index_ < 0: the base no longer matches the snapshot that was
+    // marked saved. Those strokes are now baked in and cannot be undone.
+    saved_valid_ = false;
+  }
+}
+
 void History::trim() {
-  while (static_cast<int>(commands_.size()) > depth_ && !commands_.empty()) {
-    commands_.erase(commands_.begin());
-    if (index_ >= 0) {
-      --index_;
+  while (!commands_.empty()) {
+    const bool over_depth = static_cast<int>(commands_.size()) > depth_;
+    const bool over_bytes = byte_cap_ > 0 && memory_bytes() > byte_cap_;
+    if (!over_depth && !over_bytes) {
+      break;
     }
-    if (!saved_valid_) {
-      continue;
-    }
-    if (saved_index_ > 0) {
-      --saved_index_;
-    } else if (saved_index_ == 0) {
-      // The saved command itself fell off the front of the stack.
-      saved_valid_ = false;
-    } else {
-      // saved_index_ < 0: the base no longer matches the snapshot that was
-      // marked saved. Those strokes are now baked in and cannot be undone.
-      saved_valid_ = false;
-    }
+    drop_oldest();
   }
 }
 

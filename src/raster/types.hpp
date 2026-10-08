@@ -3,6 +3,7 @@
 #define LUNDUKEPAINT_RASTER_TYPES_HPP
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 
 namespace lundukepaint {
@@ -91,6 +92,9 @@ constexpr int kDefaultWidth = 640;
 constexpr int kDefaultHeight = 480;
 constexpr int kDefaultUndoDepth = 50;
 constexpr int kMaxUndoDepth = 200;
+// Total bytes of stored undo patches. Oldest steps are dropped past this,
+// even when the step-count limit has not been reached. 256 MiB.
+constexpr std::size_t kDefaultUndoBytes = 256ull * 1024ull * 1024ull;
 constexpr int kPatchTile = 32;
 constexpr int kSoftMaxLayers = 64;
 // OpenRaster loads above this fail closed (no "continue anyway" dialog).

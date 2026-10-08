@@ -64,7 +64,7 @@ public:
   void zoom_out();
   void zoom_in_at(double widget_x, double widget_y);
   void zoom_out_at(double widget_x, double widget_y);
-  void zoom_to(double zoom, double widget_x, double widget_y);
+  void zoom_to(double zoom, double widget_x, double widget_y, bool snap = true);
   void zoom_fit();
 
   bool grid_visible() const { return grid_visible_; }
@@ -121,6 +121,13 @@ private:
   void draw_marching_ants(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy);
   void ensure_ants_timer();
   void invalidate_ants();
+  void note_composite_dirty(Rect rect);
+  void drop_composite_cache();
+  void queue_canvas_area(Rect rect);
+  Rect viewport_canvas_rect(int clip_x0, int clip_y0, int clip_x1, int clip_y1) const;
+  void ensure_composite(Rect view, int out_w, int out_h, bool downscale, const Layer* tool_override,
+                        int tool_index);
+  void paint_scaled_float(std::uint8_t* dest, int dest_stride, Rect view, int out_w, int out_h);
   void draw_intro(const Cairo::RefPtr<Cairo::Context>& cr);
   bool on_intro_tick();
 
@@ -151,6 +158,19 @@ private:
   int hole_cache_skip_{-2};
   std::uint64_t hole_cache_fp_{0};
   bool hole_cache_valid_{false};
+  // Straight RGBA of the visible canvas region. Zoomed-out views store one
+  // sample per screen pixel. Ant ticks do not dirty this cache.
+  std::vector<std::uint8_t> composite_cache_;
+  Rect composite_view_{};
+  int composite_out_w_{0};
+  int composite_out_h_{0};
+  double composite_zoom_{1.0};
+  bool composite_downscale_{false};
+  bool composite_tool_{false};
+  int composite_tool_index_{-2};
+  bool composite_valid_{false};
+  bool composite_dirty_all_{true};
+  Rect composite_dirty_{};
   Cairo::RefPtr<Cairo::SurfacePattern> checker_pattern_;
   bool space_down_{false};
   bool panning_{false};

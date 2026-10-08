@@ -18,6 +18,9 @@ public:
   explicit History(int depth = kDefaultUndoDepth);
 
   void set_depth(int depth);
+  void set_byte_cap(std::size_t bytes);
+  std::size_t byte_cap() const { return byte_cap_; }
+  std::size_t memory_bytes() const;
 
   // Applies the command, then records it. Drops redo branch.
   void commit(Document& document, std::unique_ptr<Command> command);
@@ -48,10 +51,12 @@ public:
 
 private:
   void trim();
+  void drop_oldest();
 
   std::vector<std::unique_ptr<Command>> commands_;
   int index_ = -1;
   int depth_ = kDefaultUndoDepth;
+  std::size_t byte_cap_ = kDefaultUndoBytes;
   bool saved_valid_ = true;
   int saved_index_ = -1;
 };
