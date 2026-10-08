@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "tools/tool.hpp"
+#include "tools/rail_options.hpp"
 
 #include "doc/document.hpp"
+#include "raster/text.hpp"
 #include "raster/text_box.hpp"
 
 #include <cairomm/context.h>
@@ -95,12 +97,15 @@ public:
   void on_release(CanvasEvent event) override;
   void on_cancel() override;
   bool on_commit() override;
+  bool paint_recovery_overlay(int layer_index, std::uint8_t* pixels, int width, int height,
+                             int stride) override;
 
 private:
   enum class Drag { None, Move, Resize };
 
   void begin_box(int x, int y, unsigned button);
   void close_box();
+  void sync_overlay();
   void apply_style();
   void rebuild_pixels();
   void relayout_caret();
@@ -132,8 +137,10 @@ private:
 
 Gtk::Widget* TextTool::options_widget() {
   if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
+    prepare_rail_box(*options_);
     auto* flabel = Gtk::manage(new Gtk::Label("Font"));
+    flabel->set_halign(Gtk::ALIGN_START);
     auto* font = Gtk::manage(new Gtk::ComboBoxText());
     PangoFontMap* map = pango_cairo_font_map_get_default();
     PangoFontFamily** families = nullptr;
@@ -162,28 +169,33 @@ Gtk::Widget* TextTool::options_widget() {
       font->set_active(0);
       family_ = font->get_active_text();
     }
+    configure_rail_combo(*font);
     font->signal_changed().connect([this, font]() {
       family_ = font->get_active_text();
       apply_style();
     });
     auto* slabel = Gtk::manage(new Gtk::Label("Size"));
+    slabel->set_halign(Gtk::ALIGN_START);
     auto* spin = Gtk::manage(new Gtk::SpinButton());
     spin->set_range(6, 128);
     spin->set_increments(1, 8);
     spin->set_digits(0);
     spin->set_value(size_pt_);
+    configure_rail_spin(*spin);
     spin->signal_value_changed().connect([this, spin]() {
       size_pt_ = spin->get_value_as_int();
       apply_style();
     });
     auto* bold = Gtk::manage(new Gtk::CheckButton("Bold"));
     bold->set_active(bold_);
+    configure_rail_check(*bold);
     bold->signal_toggled().connect([this, bold]() {
       bold_ = bold->get_active();
       apply_style();
     });
     auto* italic = Gtk::manage(new Gtk::CheckButton("Italic"));
     italic->set_active(italic_);
+    configure_rail_check(*italic);
     italic->signal_toggled().connect([this, italic]() {
       italic_ = italic->get_active();
       apply_style();
@@ -266,7 +278,9 @@ void TextTool::begin_box(int x, int y, unsigned button) {
   if (host_ == nullptr || !ensure_editable()) {
     return;
   }
-  host_->document().commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
   button_ = button;
   state_ = {};
   state_.family = family_;
@@ -282,12 +296,19 @@ void TextTool::begin_box(int x, int y, unsigned button) {
   const int width = std::max(160, state_.size_pt * 10);
   state_.box = Rect{x, y, width, height};
   editing_ = true;
-  host_->document().set_unsaved_overlay(true);
   drag_ = Drag::None;
   rebuild_pixels();
   start_blink();
+  sync_overlay();
   invalidate_box(state_.box);
   host_->show_status_hint("Text: type in the box; click away or Enter to stamp");
+}
+
+void TextTool::sync_overlay() {
+  if (host_ == nullptr) {
+    return;
+  }
+  host_->document().set_unsaved_overlay(editing_ && !state_.text.empty());
 }
 
 void TextTool::close_box() {
@@ -389,6 +410,7 @@ bool TextTool::on_key(unsigned keyval, unsigned modifiers, const std::string& te
   } else {
     relayout_caret();
   }
+  sync_overlay();
   invalidate_box(state_.box);
   return true;
 }
@@ -463,11 +485,41 @@ bool TextTool::on_commit() {
   if (!editing_ || host_ == nullptr) {
     return false;
   }
-  const TextBoxState state = state_;
-  close_box();
-  if (!state.text.empty() && ensure_editable()) {
-    commit_text_box(host_->document(), state);
+  if (state_.text.empty()) {
+    close_box();
+    return true;
   }
+  // Leave the box up when the layer is locked so Cancel on quit can keep it.
+  if (host_->document().active_locked()) {
+    return false;
+  }
+  if (!commit_text_box(host_->document(), state_)) {
+    return false;
+  }
+  close_box();
+  return true;
+}
+
+bool TextTool::paint_recovery_overlay(int layer_index, std::uint8_t* pixels, int width, int height,
+                                     int stride) {
+  if (!editing_ || state_.text.empty() || host_ == nullptr || pixels == nullptr || width < 1 ||
+      height < 1) {
+    return false;
+  }
+  Document& doc = host_->document();
+  if (layer_index != doc.layers().active_index()) {
+    return false;
+  }
+  if (pixels_.empty() || pix_w_ < 1 || pix_h_ < 1) {
+    rebuild_pixels();
+  }
+  if (pixels_.empty() || pix_w_ < 1 || pix_h_ < 1) {
+    return false;
+  }
+  const Layer& layer = doc.layers().active_layer();
+  blit_rgba_buffer(pixels, width, height, stride, state_.box.x + kTextBoxPad - layer.offset_x(),
+                   state_.box.y + kTextBoxPad - layer.offset_y(), pixels_.data(), pix_w_, pix_h_,
+                   pix_w_ * 4, true, nullptr);
   return true;
 }
 

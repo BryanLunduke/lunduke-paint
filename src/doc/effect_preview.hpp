@@ -37,6 +37,9 @@ public:
   bool valid() const { return snapshot_ != nullptr; }
   bool previewing() const { return previewing_; }
   int layer_index() const { return layer_index_; }
+  // Pixels from before preview() repainted the layer. Recovery writes these
+  // instead of the slider preview.
+  const Layer* pristine() const { return snapshot_.get(); }
 
   // Repaints the layer with the effect applied to the snapshot at full
   // resolution. No history. Returns the changed rectangle (clipped to the

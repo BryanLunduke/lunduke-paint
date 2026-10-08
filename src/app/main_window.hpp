@@ -144,6 +144,10 @@ private:
   void on_toggle_right_dock();
   void bind_document();
   void adopt_document(std::unique_ptr<Document> document, bool prefer_replace);
+  void preserve_live_edits_for_tab_switch();
+  void report_blocked(const char* message);
+  void clear_document_recovery(const Document& document);
+  bool other_documents_dirty(const Document* except) const;
   void attach_active_document();
   void detach_document();
   void rebuild_tabs();
@@ -158,8 +162,8 @@ private:
   void update_title();
   bool confirm_lose_changes();
   bool save_to_path(const std::string& path, ImageFormat format);
-  // Stamps an open text box, then a floating selection. False leaves both
-  // the dirty flag and any crash-recovery file alone.
+  // Stamps an open text box or polygon, then a floating selection. False
+  // leaves both the dirty flag and any crash-recovery file alone.
   bool commit_live_edits();
   std::string choose_open_path();
   bool choose_save_path(std::string& path, ImageFormat& format);
@@ -208,6 +212,7 @@ private:
   Workspace workspace_;
   Preferences prefs_;
   bool switching_tabs_{false};
+  bool blocked_dialog_{false};
   std::vector<std::unique_ptr<Tool>> tools_;
   Tool* active_tool_{nullptr};
   Tool* previous_tool_{nullptr};
@@ -224,6 +229,7 @@ private:
   std::shared_ptr<RecoverySlot> recovery_slot_;
   gint64 last_edit_us_{0};
   bool live_effect_preview_{false};
+  EffectPreview* effect_preview_{nullptr};
   Glib::RefPtr<Gio::SimpleAction> undo_action_;
   Glib::RefPtr<Gio::SimpleAction> redo_action_;
   Glib::RefPtr<Gio::SimpleAction> cut_action_;

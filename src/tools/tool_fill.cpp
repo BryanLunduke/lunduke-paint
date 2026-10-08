@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "tools/tool.hpp"
+#include "tools/rail_options.hpp"
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
@@ -38,14 +39,17 @@ private:
 
 Gtk::Widget* FillTool::options_widget() {
   if (!options_) {
-    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_HORIZONTAL, 8);
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
+    prepare_rail_box(*options_);
     auto* label = Gtk::manage(new Gtk::Label("Similarity"));
+    label->set_halign(Gtk::ALIGN_START);
     auto* spin = Gtk::manage(new Gtk::SpinButton());
     spin->set_range(0, 255);
     spin->set_increments(1, 16);
     spin->set_digits(0);
     spin->set_value(tolerance_);
     spin->set_tooltip_text("0 = exact color, 255 = fill every connected pixel");
+    configure_rail_spin(*spin);
     spin->signal_value_changed().connect([this, spin]() {
       tolerance_ = spin->get_value_as_int();
       if (host_ != nullptr) {
@@ -72,7 +76,10 @@ void FillTool::on_press(CanvasEvent event) {
       !host_->confirm_large_canvas(gate.width(), gate.height())) {
     return;
   }
-  doc.commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
+  tolerance_ = host_->fill_tolerance();
   doc.layers().copy_active_to_tool();
   const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();

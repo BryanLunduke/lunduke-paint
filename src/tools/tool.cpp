@@ -28,10 +28,29 @@ bool Tool::ensure_editable() {
     return false;
   }
   if (host_->document().layers().active_layer().locked()) {
-    host_->show_status_hint("Layer is locked");
+    host_->document().notify_blocked("Layer is locked");
     return false;
   }
   return true;
+}
+
+int Tool::stroke_px() const {
+  if (host_ == nullptr) {
+    return 1;
+  }
+  const int size = host_->stroke_size();
+  return size < 1 ? 1 : size;
+}
+
+bool Tool::commit_float_or_stop() {
+  if (host_ == nullptr) {
+    return false;
+  }
+  if (host_->document().try_commit_floating()) {
+    return true;
+  }
+  host_->document().notify_blocked("Unlock the layer to place the selection");
+  return false;
 }
 
 }  // namespace lundukepaint

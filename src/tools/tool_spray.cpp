@@ -78,7 +78,9 @@ void SprayTool::begin_stroke(CanvasEvent event) {
   if (host_ == nullptr || !ensure_editable()) {
     return;
   }
-  host_->document().commit_floating();
+  if (!commit_float_or_stop()) {
+    return;
+  }
   drawing_ = true;
   button_ = event.button;
   dirty_ = {};

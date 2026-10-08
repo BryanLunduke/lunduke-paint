@@ -6,13 +6,36 @@
 #include "doc/commands_pixels.hpp"
 #include "doc/layer.hpp"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <utility>
+
+namespace {
+
+std::uint64_t make_recovery_id() {
+  std::uint64_t id = 0;
+  const int fd = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  if (fd >= 0) {
+    if (::read(fd, &id, sizeof(id)) != static_cast<ssize_t>(sizeof(id))) {
+      id = 0;
+    }
+    ::close(fd);
+  }
+  if (id == 0) {
+    static std::uint64_t seq = 1;
+    id = seq++;
+  }
+  return id;
+}
+
+}  // namespace
 
 namespace lundukepaint {
 
 Document::Document(int width, int height, Color background, std::string layer_name)
-    : width_(width), height_(height), canvas_bg_(background) {
+    : width_(width), height_(height), recovery_id_(make_recovery_id()), canvas_bg_(background) {
   layers_.reset(width_, height_, background, std::move(layer_name));
 }
 
@@ -94,15 +117,20 @@ void Document::clear_ora_stack() {
   layers_.set_ora_stack(nullptr);
 }
 
-void Document::set_active_layer(int index) {
-  if (index < 0 || index >= layers_.count() || index == layers_.active_index()) {
-    return;
+bool Document::set_active_layer(int index) {
+  if (index < 0 || index >= layers_.count()) {
+    return false;
   }
-  if (selection_.floating()) {
-    commit_floating();
+  if (index == layers_.active_index()) {
+    return true;
+  }
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
   }
   layers_.set_active_index(index);
   notify_changed();
+  return true;
 }
 
 const OraNode* Document::ora_stack() const {
@@ -207,16 +235,28 @@ void Document::notify_selection() {
   }
 }
 
+void Document::notify_blocked(const char* message) {
+  if (on_blocked_ && message != nullptr && message[0] != '\0') {
+    on_blocked_(message);
+  }
+}
+
 
 void Document::select_all() {
-  commit_floating();
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return;
+  }
   selection_.select_all(width_, height_);
   notify_invalidated({0, 0, width_, height_});
   notify_changed();
 }
 
 void Document::deselect() {
-  commit_floating();
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return;
+  }
   if (selection_.empty()) {
     return;
   }
@@ -228,10 +268,20 @@ void Document::deselect() {
 }
 
 void Document::invert_selection() {
-  commit_floating();
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return;
+  }
   selection_.invert(width_, height_);
   notify_invalidated({0, 0, width_, height_});
   notify_changed();
+}
+
+bool Document::try_commit_floating(const char* name) {
+  if (!selection_.floating()) {
+    return true;
+  }
+  return commit_floating(name);
 }
 
 bool Document::commit_floating(const char* name) {
@@ -245,6 +295,7 @@ bool Document::commit_floating(const char* name) {
   if (index < 0 || index >= layers_.count() || layers_.at(index).locked()) {
     return false;
   }
+  const SelectionState selection_before = selection_.capture();
   Layer& layer = layers_.at(index);
   const int ox = layer.offset_x();
   const int oy = layer.offset_y();
@@ -308,6 +359,7 @@ bool Document::commit_floating(const char* name) {
   }
   auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, name ? name : "Move selection", index);
   if (cmd && !cmd->empty()) {
+    cmd->set_selection_change(selection_before, selection_.capture());
     commit(std::move(cmd));
   } else {
     if (!dirty.empty()) {
@@ -329,7 +381,7 @@ void Document::delete_selection() {
     index = layers_.active_index();
   }
   if (index < 0 || index >= layers_.count() || layers_.at(index).locked()) {
-    notify_changed();
+    notify_blocked("Layer is locked");
     return;
   }
   Layer& layer = layers_.at(index);
@@ -387,8 +439,9 @@ void Document::duplicate_selection() {
   if (selection_.empty()) {
     return;
   }
-  if (selection_.floating()) {
-    commit_floating("Duplicate");
+  if (selection_.floating() && !try_commit_floating("Duplicate")) {
+    notify_blocked("Unlock the layer to place the selection");
+    return;
   }
   if (selection_.empty() || selection_.inverted()) {
     return;
@@ -403,7 +456,10 @@ void Document::duplicate_selection() {
 }
 
 void Document::paste_floating(int x, int y, int w, int h, std::vector<std::uint8_t> rgba) {
-  commit_floating();
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return;
+  }
   selection_.set_float_pixels(x, y, w, h, std::move(rgba));
   selection_.set_source_layer(layers_.active_index());
   notify_invalidated(selection_.dirty_union());
@@ -451,9 +507,12 @@ std::vector<LayerSnapshot> Document::snapshot_layers() const {
   return out;
 }
 
-void Document::add_layer() {
+bool Document::add_layer() {
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
+  }
   clear_ora_stack();
-  commit_floating();
   LayerSnapshot snap;
   snap.name = layers_.next_layer_name();
   snap.visible = true;
@@ -464,31 +523,42 @@ void Document::add_layer() {
   snap.height = height_;
   snap.pixels.assign(static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_) * 4, 0);
   commit(std::make_unique<AddLayerCommand>(layers_.active_index() + 1, std::move(snap)));
+  return true;
 }
 
-void Document::duplicate_layer() {
+bool Document::duplicate_layer() {
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
+  }
   clear_ora_stack();
-  commit_floating();
   if (layers_.count() < 1) {
-    return;
+    return false;
   }
   commit(std::make_unique<DuplicateLayerCommand>(layers_.active_index()));
+  return true;
 }
 
 bool Document::delete_layer() {
-  clear_ora_stack();
-  commit_floating();
   if (layers_.count() <= 1) {
     return false;
   }
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
+  }
+  clear_ora_stack();
   const int idx = layers_.active_index();
   commit(std::make_unique<DeleteLayerCommand>(idx, snapshot_layer(layers_.at(idx))));
   return true;
 }
 
 bool Document::raise_layer() {
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
+  }
   clear_ora_stack();
-  commit_floating();
   const int idx = layers_.active_index();
   if (idx + 1 >= layers_.count()) {
     return false;
@@ -498,8 +568,11 @@ bool Document::raise_layer() {
 }
 
 bool Document::lower_layer() {
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
+  }
   clear_ora_stack();
-  commit_floating();
   const int idx = layers_.active_index();
   if (idx <= 0) {
     return false;
@@ -509,8 +582,11 @@ bool Document::lower_layer() {
 }
 
 bool Document::move_layer(int from, int to) {
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
+  }
   clear_ora_stack();
-  commit_floating();
   if (from < 0 || to < 0 || from >= layers_.count() || to >= layers_.count() || from == to) {
     return false;
   }
@@ -519,8 +595,11 @@ bool Document::move_layer(int from, int to) {
 }
 
 bool Document::merge_down() {
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
+  }
   clear_ora_stack();
-  commit_floating();
   const int idx = layers_.active_index();
   if (idx <= 0) {
     return false;
@@ -530,15 +609,17 @@ bool Document::merge_down() {
   return true;
 }
 
-void Document::flatten() {
-  if (selection_.floating() && !commit_floating()) {
-    return;
+bool Document::flatten() {
+  if (!try_commit_floating()) {
+    notify_blocked("Unlock the layer to place the selection");
+    return false;
   }
   clear_ora_stack();
   if (layers_.count() <= 1) {
-    return;
+    return false;
   }
   commit(std::make_unique<FlattenCommand>(snapshot_layers(), layers_.active_index()));
+  return true;
 }
 
 void Document::set_layer_visible(int index, bool visible) {

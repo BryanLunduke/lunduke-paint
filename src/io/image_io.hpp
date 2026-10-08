@@ -32,6 +32,25 @@ std::string format_extension(ImageFormat format);
 // "/home/me.backup/portrait" + ".png" -> "/home/me.backup/portrait.png".
 std::string replace_path_extension(const std::string& path, const std::string& extension);
 
+// After a flat file has been written, "Flatten and keep .ora" must not mark
+// the document clean when the layered copy failed.
+struct KeepOraDecision {
+  bool adopt_path = false;
+  bool mark_clean = false;
+  bool clear_recovery = false;
+};
+
+inline KeepOraDecision decide_keep_ora(bool flat_ok, bool ora_requested, bool ora_ok) {
+  KeepOraDecision decision;
+  if (!flat_ok || (ora_requested && !ora_ok)) {
+    return decision;
+  }
+  decision.adopt_path = true;
+  decision.mark_clean = true;
+  decision.clear_recovery = true;
+  return decision;
+}
+
 // True when the loader reports more than one frame (animated GIF).
 bool image_has_multiple_frames(const std::string& path);
 

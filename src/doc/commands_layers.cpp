@@ -40,6 +40,7 @@ AddLayerCommand::AddLayerCommand(int index, LayerSnapshot layer, std::string nam
 
 void AddLayerCommand::apply(Document& document) {
   dirty_ = canvas_rect(document);
+  document.selection().note_layer_inserted(index_);
   const int idx = document.layers().insert(index_, layer_from_snapshot(layer_));
   document.layers().set_active_index(idx);
 }
@@ -47,6 +48,7 @@ void AddLayerCommand::apply(Document& document) {
 void AddLayerCommand::undo(Document& document) {
   dirty_ = canvas_rect(document);
   document.layers().take(index_);
+  document.selection().note_layer_removed(index_);
 }
 
 DeleteLayerCommand::DeleteLayerCommand(int index, LayerSnapshot layer)
@@ -54,11 +56,13 @@ DeleteLayerCommand::DeleteLayerCommand(int index, LayerSnapshot layer)
 
 void DeleteLayerCommand::apply(Document& document) {
   dirty_ = canvas_rect(document);
+  document.selection().note_layer_removed(index_);
   document.layers().take(index_);
 }
 
 void DeleteLayerCommand::undo(Document& document) {
   dirty_ = canvas_rect(document);
+  document.selection().note_layer_inserted(index_);
   document.layers().insert(index_, layer_from_snapshot(layer_));
   document.layers().set_active_index(index_);
 }
@@ -71,6 +75,7 @@ void DuplicateLayerCommand::apply(Document& document) {
   dirty_ = canvas_rect(document);
   auto copy = document.layers().at(source_).clone();
   copy->set_name(document.layers().at(source_).name() + " copy");
+  document.selection().note_layer_inserted(source_ + 1);
   dest_ = document.layers().insert(source_ + 1, std::move(copy));
   document.layers().set_active_index(dest_);
 }
@@ -78,6 +83,7 @@ void DuplicateLayerCommand::apply(Document& document) {
 void DuplicateLayerCommand::undo(Document& document) {
   dirty_ = canvas_rect(document);
   document.layers().take(dest_);
+  document.selection().note_layer_removed(dest_);
   document.layers().set_active_index(source_);
 }
 
@@ -86,11 +92,13 @@ MoveLayerCommand::MoveLayerCommand(int from, int to, std::string name)
 
 void MoveLayerCommand::apply(Document& document) {
   dirty_ = canvas_rect(document);
+  document.selection().note_layer_moved(from_, to_);
   document.layers().move_layer(from_, to_);
 }
 
 void MoveLayerCommand::undo(Document& document) {
   dirty_ = canvas_rect(document);
+  document.selection().note_layer_moved(to_, from_);
   document.layers().move_layer(to_, from_);
 }
 
@@ -99,12 +107,14 @@ MergeDownCommand::MergeDownCommand(int upper_index, LayerSnapshot lower, LayerSn
 
 void MergeDownCommand::apply(Document& document) {
   dirty_ = canvas_rect(document);
+  document.selection().note_layer_removed(upper_);
   document.layers().merge_down(upper_);
 }
 
 void MergeDownCommand::undo(Document& document) {
   dirty_ = canvas_rect(document);
   document.layers().replace_at(upper_ - 1, layer_from_snapshot(lower_));
+  document.selection().note_layer_inserted(upper_);
   document.layers().insert(upper_, layer_from_snapshot(upper_layer_));
   document.layers().set_active_index(upper_);
 }
@@ -115,6 +125,7 @@ FlattenCommand::FlattenCommand(std::vector<LayerSnapshot> layers, int active)
 void FlattenCommand::apply(Document& document) {
   dirty_ = canvas_rect(document);
   document.layers().flatten_visible();
+  document.selection().note_stack_flattened();
 }
 
 void FlattenCommand::undo(Document& document) {

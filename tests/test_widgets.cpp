@@ -15,12 +15,18 @@
 #include "doc/document.hpp"
 #include "doc/layer.hpp"
 #include "doc/layer_stack.hpp"
+#include "tools/rail_options.hpp"
 #include "ui/canvas_view.hpp"
 #include "ui/intro_howdy.hpp"
+#include "ui/status_bar.hpp"
 #include "ui/toolbox.hpp"
 
 #include <glib.h>
 #include <gtk/gtk.h>
+#include <gtkmm/box.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/comboboxtext.h>
+#include <gtkmm/label.h>
 #include <gtkmm/main.h>
 #include <gtkmm/window.h>
 
@@ -33,7 +39,11 @@ using lundukepaint::CanvasView;
 using lundukepaint::Color;
 using lundukepaint::Document;
 using lundukepaint::Layer;
+using lundukepaint::StatusBar;
 using lundukepaint::Toolbox;
+using lundukepaint::configure_rail_check;
+using lundukepaint::configure_rail_combo;
+using lundukepaint::prepare_rail_box;
 
 int errors = 0;
 
@@ -226,6 +236,73 @@ int main(int argc, char** argv) {
     expect(!canvas.intro_visible(), "loading another document clears the overlay");
     window.hide();
     pump(50);
+  }
+
+  // Finding 8: a timed status message is visible and a new hint does not
+  // replace it until the timer ends.
+  {
+    Gtk::Window window;
+    StatusBar bar;
+    window.add(bar);
+    window.show_all();
+    pump(40);
+    bar.set_hint("Pencil");
+    bar.show_message("Grid on");
+    auto* hint = dynamic_cast<Gtk::Label*>(bar.get_children().front());
+    expect(hint != nullptr && hint->get_text() == "Grid on", "status message is on the bar");
+    bar.set_hint("Line");
+    expect(hint != nullptr && hint->get_text() == "Grid on", "hint waits while a message is showing");
+    window.hide();
+    pump(30);
+  }
+
+  // Finding 9: tool options replace the empty rail page and stay inside the
+  // toolbox width at the default window size.
+  {
+    Gtk::Window window;
+    window.set_default_size(1100, 720);
+    Toolbox toolbox;
+    toolbox.add_tool_button("pencil", "Pencil", "tool-pencil-symbolic");
+    toolbox.add_tool_button("line", "Line", "tool-line-symbolic");
+    toolbox.add_tool_button("text", "Text", "tool-text-symbolic");
+    toolbox.add_tool_button("fill", "Fill", "tool-fill-symbolic");
+    auto* options = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2));
+    prepare_rail_box(*options);
+    auto* font = Gtk::manage(new Gtk::ComboBoxText());
+    font->append("Liberation Sans");
+    font->set_active(0);
+    configure_rail_combo(*font);
+    auto* bold = Gtk::manage(new Gtk::CheckButton("Bold"));
+    configure_rail_check(*bold);
+    auto* similar = Gtk::manage(new Gtk::Label("Similarity"));
+    auto* move = Gtk::manage(new Gtk::CheckButton("Transparent move"));
+    configure_rail_check(*move);
+    auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
+    configure_rail_check(*aa);
+    options->pack_start(*font, Gtk::PACK_SHRINK);
+    options->pack_start(*bold, Gtk::PACK_SHRINK);
+    options->pack_start(*similar, Gtk::PACK_SHRINK);
+    options->pack_start(*move, Gtk::PACK_SHRINK);
+    options->pack_start(*aa, Gtk::PACK_SHRINK);
+    window.add(toolbox);
+    window.show_all();
+    pump(80);
+    toolbox.set_active_tool("text");
+    toolbox.set_tool_options(options);
+    pump(80);
+    expect(bold->get_visible() && bold->get_mapped(), "text options are shown in the rail");
+    expect(toolbox.width_tracks_tool_grid(), "options rail still fits the tool grid");
+    expect(window.get_allocated_width() <= 1100 + 40, "default window does not grow for options");
+    toolbox.set_active_tool("line");
+    pump(40);
+    expect(toolbox.width_tracks_tool_grid(), "line width plus antialias still fits");
+    toolbox.set_tool_options(nullptr);
+    toolbox.set_active_tool("hand");
+    pump(40);
+    expect(!bold->get_mapped(), "hand hides the options block");
+    expect(toolbox.width_tracks_tool_grid(), "empty rail stays narrow");
+    window.hide();
+    pump(30);
   }
 
   if (errors != 0) {

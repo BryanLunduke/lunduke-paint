@@ -3,6 +3,7 @@
 #define LUNDUKEPAINT_DOC_COMMANDS_PIXELS_HPP
 
 #include "doc/command.hpp"
+#include "doc/selection.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -28,6 +29,9 @@ public:
 
   bool empty() const { return tiles_.empty(); }
 
+  // Move selection: restore the ants (and the float, on undo) with the pixels.
+  void set_selection_change(SelectionState before, SelectionState after);
+
 private:
   struct Tile {
     int x = 0;
@@ -42,6 +46,9 @@ private:
   int layer_index_ = 0;
   Rect bounds_;
   std::vector<Tile> tiles_;
+  bool has_selection_ = false;
+  SelectionState selection_before_{};
+  SelectionState selection_after_{};
 };
 
 }  // namespace lundukepaint

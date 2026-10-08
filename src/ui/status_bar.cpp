@@ -2,6 +2,8 @@
 
 #include "ui/status_bar.hpp"
 
+#include <glibmm/main.h>
+
 #include <cstdio>
 
 namespace lundukepaint {
@@ -34,9 +36,11 @@ StatusBar::StatusBar() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 8) {
   clear_coordinates();
 }
 
-void StatusBar::set_hint(const Glib::ustring& /*hint*/) {
-  // Left status chatter removed in 0.5-9; keep an empty expanding spacer.
-  hint_.set_text("");
+void StatusBar::set_hint(const Glib::ustring& hint) {
+  hint_text_ = hint;
+  if (!message_active_) {
+    hint_.set_text(hint_text_);
+  }
 }
 
 void StatusBar::show_coordinates(double x, double y) {
@@ -75,9 +79,17 @@ void StatusBar::set_modified(bool modified) {
   modified_.set_text(modified ? "Modified" : "");
 }
 
-void StatusBar::show_message(const Glib::ustring& /*message*/) {
-  // Open/save and other left-rail status messages suppressed (0.5-9).
-  hint_.set_text("");
+void StatusBar::show_message(const Glib::ustring& message) {
+  message_active_ = true;
+  hint_.set_text(message);
+  message_timer_.disconnect();
+  message_timer_ = Glib::signal_timeout().connect(
+      [this]() {
+        message_active_ = false;
+        hint_.set_text(hint_text_);
+        return false;
+      },
+      4000);
 }
 
 }  // namespace lundukepaint

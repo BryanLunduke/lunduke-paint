@@ -137,6 +137,16 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
 
   pack_start(options_stack_, Gtk::PACK_SHRINK);
   options_stack_.set_visible_child("line");
+
+  tool_options_.set_margin_start(kSideAir);
+  tool_options_.set_margin_end(kSideAir);
+  tool_options_.set_hexpand(false);
+  tool_options_.set_halign(Gtk::ALIGN_FILL);
+  tool_options_.get_style_context()->add_class("toolbox-options");
+  tool_options_.set_size_request(grid_w, -1);
+  tool_options_.set_no_show_all(true);
+  tool_options_.hide();
+  pack_start(tool_options_, Gtk::PACK_SHRINK);
 }
 
 void Toolbox::add_tool_button(const std::string& id, const std::string& tooltip,
@@ -188,6 +198,7 @@ void Toolbox::set_active_tool(const std::string& id) {
 }
 
 void Toolbox::show_options_for_tool(const std::string& id) {
+  const bool picker = id == "brush" || id == "spray" || uses_line_width(id);
   if (id == "brush") {
     options_stack_.set_visible_child("brush");
   } else if (id == "spray") {
@@ -197,6 +208,33 @@ void Toolbox::show_options_for_tool(const std::string& id) {
   } else {
     options_stack_.set_visible_child("none");
   }
+  // Hand and picker have no picker. Their empty page stays hidden so the
+  // rail does not keep an 8px blank under the tool grid.
+  options_stack_.set_visible(picker);
+}
+
+void Toolbox::set_tool_options(Gtk::Widget* widget) {
+  if (hosted_options_ == widget) {
+    if (widget != nullptr) {
+      tool_options_.show();
+      widget->show_all();
+    }
+    return;
+  }
+  if (hosted_options_ != nullptr && hosted_options_->get_parent() == &tool_options_) {
+    tool_options_.remove(*hosted_options_);
+  }
+  hosted_options_ = widget;
+  if (widget == nullptr) {
+    tool_options_.hide();
+    return;
+  }
+  if (widget->get_parent() != nullptr && widget->get_parent() != &tool_options_) {
+    widget->get_parent()->remove(*widget);
+  }
+  tool_options_.pack_start(*widget, Gtk::PACK_SHRINK);
+  widget->show_all();
+  tool_options_.show();
 }
 
 void Toolbox::set_line_width(int width) {
