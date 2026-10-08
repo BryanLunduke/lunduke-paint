@@ -98,9 +98,12 @@ MainWindow::MainWindow() {
   prefs_.load();
   auto startup = Document::create(prefs_.default_width, prefs_.default_height, Color::white());
   startup->history().set_depth(prefs_.undo_limit);
+  startup->history().set_byte_cap(suggested_undo_bytes());
   workspace_.add(std::move(startup));
   set_title(Glib::ustring("Untitled — ") + actions::kProductName);
-  set_default_size(1100, 720);
+  // 640 fits a 1280×768 work area after a panel and a title bar. GTK grows
+  // this up to the requisition, so the requisition itself has to fit too.
+  set_default_size(1100, 640);
   // Reinforce default icon for WMs that ignore gtk_window_set_default_icon_name.
   set_icon_name(actions::kAppId);
   // Traditional WM decorations: do not call set_titlebar() / GtkHeaderBar.
@@ -325,16 +328,32 @@ void MainWindow::build_ui() {
 
   right_sidebar_.set_size_request(kRightDockWidth, -1);
   layers_frame_.set_size_request(kRightDockWidth, -1);
-  history_frame_.set_size_request(kRightDockWidth, 140);
+  history_frame_.set_size_request(kRightDockWidth, -1);
   colors_frame_.set_size_request(kRightDockWidth, -1);
 
   right_sidebar_.set_spacing(2);
   right_sidebar_.set_hexpand(false);
+  right_sidebar_.set_vexpand(true);
   right_sidebar_.set_halign(Gtk::ALIGN_FILL);
+  right_sidebar_.set_valign(Gtk::ALIGN_FILL);
   // Top Layers (grows) / middle History / bottom Colors (not a notebook).
   right_sidebar_.pack_start(layers_frame_, Gtk::PACK_EXPAND_WIDGET);
   right_sidebar_.pack_start(history_frame_, Gtk::PACK_SHRINK);
   right_sidebar_.pack_start(colors_frame_, Gtk::PACK_SHRINK);
+
+  // The dock's natural height (layers + history + the full palette) is taller
+  // than a 768 px screen. Scrolling keeps every row reachable and lets the
+  // window shrink. The minimum is the scrolled window's, not the child's.
+  right_scroll_.set_policy(Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
+  right_scroll_.set_propagate_natural_width(true);
+  right_scroll_.set_propagate_natural_height(false);
+  right_scroll_.set_min_content_width(kRightDockWidth);
+  right_scroll_.set_max_content_width(kRightDockWidth);
+  right_scroll_.set_min_content_height(120);
+  right_scroll_.set_shadow_type(Gtk::SHADOW_NONE);
+  right_scroll_.set_hexpand(false);
+  right_scroll_.set_vexpand(true);
+  right_scroll_.add(right_sidebar_);
 
   center_column_.set_spacing(0);
   center_column_.set_hexpand(true);
@@ -351,7 +370,7 @@ void MainWindow::build_ui() {
   work_area_.pack_start(toolbox_, Gtk::PACK_SHRINK);
   work_area_.pack_start(*left_sep, Gtk::PACK_SHRINK);
   work_area_.pack_start(center_column_, Gtk::PACK_EXPAND_WIDGET);
-  work_area_.pack_start(right_sidebar_, Gtk::PACK_SHRINK);
+  work_area_.pack_start(right_scroll_, Gtk::PACK_SHRINK);
   work_area_.set_hexpand(true);
   work_area_.set_vexpand(true);
 
@@ -485,6 +504,7 @@ bool MainWindow::adopt_document(std::unique_ptr<Document> document, bool prefer_
     return false;
   }
   document->history().set_depth(prefs_.undo_limit);
+  document->history().set_byte_cap(suggested_undo_bytes());
   if (document_ptr() != nullptr &&
       settle_tool_live(active_tool_, document_ptr(), path) == SettleResult::Blocked) {
     return false;
@@ -784,6 +804,9 @@ void MainWindow::update_chrome() {
   layer_merge_action_->set_enabled(active > 0);
   layer_flatten_action_->set_enabled(nlayers > 1);
   update_tab_labels();
+  if (document_ptr() != nullptr && document().history().consume_drop_notice()) {
+    show_status(kUndoDroppedNotice);
+  }
 }
 
 void MainWindow::update_title() {
@@ -1114,7 +1137,14 @@ void MainWindow::action_save() {
     action_save_as();
     return;
   }
+  if (target.format == ImageFormat::Ora) {
+    document().clear_companion_ora_path();
+  }
   if (save_to_path(target.path, target.format)) {
+    if (!save_companion_ora()) {
+      update_chrome();
+      return;
+    }
     if (target.path != document().path()) {
       document().set_path(target.path);
     }
@@ -1133,23 +1163,56 @@ void MainWindow::action_save_as() {
     return;
   }
   bool also_ora = false;
-  if (format != ImageFormat::Ora && document().layers().count() > 1) {
-    Gtk::MessageDialog warn(*this,
-                            "This document has multiple layers. Saving a flat file will flatten visible layers.",
-                            false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_NONE, true);
+  std::string ora_path;
+  const bool multi = document().layers().count() > 1;
+  const bool transparent = format != ImageFormat::Ora && flat_export_transparent();
+  if (flat_save_needs_warning(format, multi, transparent)) {
+    const std::string message = flat_save_message(format, multi, transparent);
+    Gtk::MessageDialog warn(*this, message, false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_NONE, true);
     warn.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
-    warn.add_button("Flatten only", Gtk::RESPONSE_NO);
-    warn.add_button("Flatten and keep .ora", Gtk::RESPONSE_YES);
+    if (multi) {
+      ora_path = companion_ora_path(path);
+      const std::string ora_name = Glib::path_get_basename(ora_path);
+      warn.set_secondary_text("Flatten and keep .ora also saves the layers as \"" + ora_name +
+                              "\" and updates that file each time you save.");
+      warn.add_button("Flatten only", Gtk::RESPONSE_NO);
+      warn.add_button("Flatten and keep .ora", Gtk::RESPONSE_YES);
+      warn.set_default_response(Gtk::RESPONSE_NO);
+    } else {
+      warn.add_button("_OK", Gtk::RESPONSE_OK);
+      warn.set_default_response(Gtk::RESPONSE_OK);
+    }
     const int response = warn.run();
-    if (response == Gtk::RESPONSE_CANCEL) {
+    if (response == Gtk::RESPONSE_CANCEL || response == Gtk::RESPONSE_DELETE_EVENT) {
       return;
     }
     also_ora = response == Gtk::RESPONSE_YES;
+    if (also_ora) {
+      const bool exists = Glib::file_test(ora_path, Glib::FILE_TEST_EXISTS);
+      const bool own =
+          ora_path == document().path() || ora_path == document().companion_ora_path();
+      if (ora_companion_needs_confirm(exists, own)) {
+        const std::string ora_name = Glib::path_get_basename(ora_path);
+        Gtk::MessageDialog overwrite(*this,
+                                     "A file named \"" + ora_name + "\" already exists. Replace it?",
+                                     false, Gtk::MESSAGE_QUESTION, Gtk::BUTTONS_NONE, true);
+        overwrite.set_secondary_text("Flatten and keep .ora would replace this file with the layers of the picture you are saving.");
+        overwrite.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+        overwrite.add_button("_Replace", Gtk::RESPONSE_ACCEPT);
+        overwrite.set_default_response(Gtk::RESPONSE_CANCEL);
+        if (overwrite.run() != Gtk::RESPONSE_ACCEPT) {
+          return;
+        }
+      }
+    }
   }
-  if (save_to_path(path, format)) {
+  if (format == ImageFormat::Ora || !also_ora) {
+    document().clear_companion_ora_path();
+  }
+  if (save_to_path(path, format, true)) {
     bool ora_ok = true;
     if (also_ora) {
-      const std::string ora_path = replace_path_extension(path, ".ora");
+      document().set_companion_ora_path(ora_path);
       std::string error;
       ora_ok = save_ora(ora_path, document(), error);
       if (!ora_ok) {
@@ -1277,6 +1340,10 @@ bool MainWindow::confirm_lose_document(Document& document) {
 }
 
 bool MainWindow::layer_has_transparency() const {
+  return flat_export_transparent();
+}
+
+bool MainWindow::flat_export_transparent() const {
   std::vector<std::uint8_t> flat;
   composite_visible(flat);
   const int n = document().width() * document().height();
@@ -1285,7 +1352,37 @@ bool MainWindow::layer_has_transparency() const {
       return true;
     }
   }
+  if (document().selection().floating() && document().selection().float_pixels() != nullptr) {
+    const int fw = document().selection().float_w();
+    const int fh = document().selection().float_h();
+    const std::uint8_t* pixels = document().selection().float_pixels();
+    const std::uint8_t* coverage = document().selection().float_coverage();
+    for (int i = 0; i < fw * fh; ++i) {
+      if (coverage != nullptr && coverage[i] == 0) {
+        continue;
+      }
+      if (pixels[static_cast<std::size_t>(i) * 4 + 3] != 255) {
+        return true;
+      }
+    }
+  }
   return false;
+}
+
+bool MainWindow::save_companion_ora() {
+  const std::string ora = document().companion_ora_path();
+  if (ora.empty() || ora == document().path()) {
+    return true;
+  }
+  std::string error;
+  if (!save_ora(ora, document(), error)) {
+    Gtk::MessageDialog err(*this, "Saved the flat file, but could not update the .ora copy.", false,
+                           Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
+    err.set_secondary_text(error.empty() ? ora : error);
+    err.run();
+    return false;
+  }
+  return true;
 }
 
 void MainWindow::composite_visible(std::vector<std::uint8_t>& dest) const {
@@ -1306,7 +1403,7 @@ bool MainWindow::commit_live_edits() {
   return settle_tool_live(active_tool_, document_ptr(), LivePath::Save) != SettleResult::Blocked;
 }
 
-bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
+bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool flatten_confirmed) {
   // Reject and warn before any stamp. Cancelling a chooser never reaches
   // here; cancelling one of these dialogs must leave the live edit up too.
   if (format == ImageFormat::Gif) {
@@ -1317,56 +1414,17 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
   }
   if (format != ImageFormat::Ora) {
     const bool multi = document().layers().count() > 1;
-    std::vector<std::uint8_t> preview;
-    composite_visible(preview);
-    bool transparent = false;
-    const int pixel_count = document().width() * document().height();
-    for (int i = 0; i < pixel_count; ++i) {
-      if (preview[static_cast<std::size_t>(i) * 4 + 3] != 255) {
-        transparent = true;
-        break;
-      }
-    }
-    if (!transparent && document().selection().floating() &&
-        document().selection().float_pixels() != nullptr) {
-      const int fw = document().selection().float_w();
-      const int fh = document().selection().float_h();
-      const std::uint8_t* pixels = document().selection().float_pixels();
-      const std::uint8_t* coverage = document().selection().float_coverage();
-      for (int i = 0; i < fw * fh; ++i) {
-        if (coverage != nullptr && coverage[i] == 0) {
-          continue;
-        }
-        if (pixels[static_cast<std::size_t>(i) * 4 + 3] != 255) {
-          transparent = true;
-          break;
-        }
-      }
-    }
-    if (multi && format == ImageFormat::Png) {
-      Gtk::MessageDialog warn(*this,
-                              "PNG will flatten visible layers (alpha is kept).",
-                              false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
+    const bool transparent = flat_export_transparent();
+    const std::string key = flat_save_ack_key(path, format, multi, transparent);
+    const bool acked = document().flat_save_acked(key);
+    if (should_warn_flat_save(format, multi, transparent, flatten_confirmed, acked)) {
+      Gtk::MessageDialog warn(*this, flat_save_message(format, multi, transparent), false,
+                              Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
       if (warn.run() != Gtk::RESPONSE_OK) {
         return false;
       }
     }
-    if (format == ImageFormat::Jpeg && (transparent || multi)) {
-      Gtk::MessageDialog warn(*this,
-                              "JPEG cannot store transparency or layers. The image will be flattened onto white.",
-                              false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
-      if (warn.run() != Gtk::RESPONSE_OK) {
-        return false;
-      }
-    }
-    if (format == ImageFormat::Bmp && (transparent || multi)) {
-      Gtk::MessageDialog warn(*this,
-                              "BMP cannot store transparency or layers. The image will be flattened onto white.",
-                              false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
-      if (warn.run() != Gtk::RESPONSE_OK) {
-        return false;
-      }
-    }
+    document().ack_flat_save(key);
   }
   if (!commit_live_edits()) {
     return false;
@@ -1534,16 +1592,19 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
   watch_save_filter(dialog, filters, initial);
   Gtk::Box extra(Gtk::ORIENTATION_HORIZONTAL, 8);
   extra.set_border_width(4);
+  extra.set_name("jpeg-quality-row");
   auto* qlabel = Gtk::manage(new Gtk::Label("JPEG quality"));
   auto* qspin = Gtk::manage(new Gtk::SpinButton());
   qspin->set_range(1, 100);
   qspin->set_increments(1, 10);
   qspin->set_digits(0);
   qspin->set_value(jpeg_quality_);
+  qspin->set_activates_default(true);
   extra.pack_start(*qlabel, Gtk::PACK_SHRINK);
   extra.pack_start(*qspin, Gtk::PACK_SHRINK);
   extra.show_all();
   dialog.set_extra_widget(extra);
+  watch_jpeg_quality(dialog, filters, extra);
   if (dialog.run() != Gtk::RESPONSE_ACCEPT) {
     return false;
   }
@@ -2364,6 +2425,7 @@ void MainWindow::apply_preferences() {
   canvas_.set_grid_threshold(prefs_.grid_threshold);
   for (int i = 0; i < workspace_.count(); ++i) {
     workspace_.at(i).history().set_depth(prefs_.undo_limit);
+    workspace_.at(i).history().set_byte_cap(suggested_undo_bytes());
   }
 }
 

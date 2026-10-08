@@ -23,10 +23,12 @@ NewImageDialog::NewImageDialog(Gtk::Window& parent, int width, int height)
   width_.set_increments(1, 50);
   width_.set_value(width);
   width_.set_digits(0);
+  width_.set_activates_default(true);
   height_.set_range(1, kHardMaxSide);
   height_.set_increments(1, 50);
   height_.set_value(height);
   height_.set_digits(0);
+  height_.set_activates_default(true);
 
   Gtk::RadioButton::Group group = white_.get_group();
   transparent_.set_group(group);

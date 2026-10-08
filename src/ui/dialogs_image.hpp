@@ -36,6 +36,7 @@ public:
   int image_height() const;
   bool nearest() const;
   bool oversized() const;
+  ~ScaleImageDialog() override;
 
 private:
   void on_width_changed();
@@ -44,6 +45,9 @@ private:
   int orig_w_ = 1;
   int orig_h_ = 1;
   bool updating_ = false;
+  // Set in the destructor before the spins are destroyed. A dying spin still
+  // emits value-changed, and the aspect check would then touch a dead widget.
+  bool closing_ = false;
   Gtk::SpinButton width_;
   Gtk::SpinButton height_;
   Gtk::CheckButton keep_aspect_;

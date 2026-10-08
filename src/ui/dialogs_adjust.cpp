@@ -144,6 +144,7 @@ PosterizeDialog::PosterizeDialog(Gtk::Window& parent) : LivePreviewDialog("Poste
   levels_.set_increments(1, 2);
   levels_.set_digits(0);
   levels_.set_value(4);
+  levels_.set_activates_default(true);
 
   auto* grid = Gtk::manage(new Gtk::Grid());
   grid->set_row_spacing(8);
@@ -171,6 +172,7 @@ BlurDialog::BlurDialog(Gtk::Window& parent) : LivePreviewDialog("Blur", parent) 
   radius_.set_increments(1, 2);
   radius_.set_digits(0);
   radius_.set_value(2);
+  radius_.set_activates_default(true);
 
   auto* grid = Gtk::manage(new Gtk::Grid());
   grid->set_row_spacing(8);

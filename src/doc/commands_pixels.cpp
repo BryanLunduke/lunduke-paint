@@ -5,6 +5,8 @@
 #include "doc/document.hpp"
 #include "doc/layer.hpp"
 
+#include <zlib.h>
+
 #include <algorithm>
 #include <cstring>
 #include <utility>
@@ -22,16 +24,6 @@ bool tiles_equal(const std::uint8_t* a, const std::uint8_t* b, int w, int h, int
     }
   }
   return true;
-}
-
-std::vector<std::uint8_t> copy_tile(const std::uint8_t* src, int w, int h, int stride) {
-  std::vector<std::uint8_t> out(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4);
-  for (int y = 0; y < h; ++y) {
-    std::memcpy(out.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4,
-                src + static_cast<std::size_t>(y) * stride,
-                static_cast<std::size_t>(w) * 4);
-  }
-  return out;
 }
 
 bool tile_is_solid(const std::uint8_t* src, int w, int h, int stride, Color& color) {
@@ -71,20 +63,71 @@ void write_solid(Layer& layer, int x, int y, int w, int h, Color color) {
   }
 }
 
-void store_side(bool& solid, Color& color, std::vector<std::uint8_t>& bytes, const std::uint8_t* src,
-                int w, int h, int stride) {
+void append_side(bool& solid, Color& color, std::uint32_t& off, std::uint32_t& len,
+                 std::vector<std::uint8_t>& raw, const std::uint8_t* src, int w, int h, int stride) {
   Color flat;
   if (tile_is_solid(src, w, h, stride, flat)) {
     solid = true;
     color = flat;
-    bytes.clear();
+    off = 0;
+    len = 0;
     return;
   }
   solid = false;
-  bytes = copy_tile(src, w, h, stride);
+  const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4;
+  off = static_cast<std::uint32_t>(raw.size());
+  len = static_cast<std::uint32_t>(n);
+  const std::size_t at = raw.size();
+  raw.resize(at + n);
+  for (int y = 0; y < h; ++y) {
+    std::memcpy(raw.data() + at + static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4,
+                src + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride),
+                static_cast<std::size_t>(w) * 4);
+  }
 }
 
 }  // namespace
+
+void PixelPatchCommand::pack_pixels(const std::vector<std::uint8_t>& raw, PackedPixels& out) {
+  out = {};
+  out.raw_size = static_cast<std::uint32_t>(raw.size());
+  if (raw.empty()) {
+    return;
+  }
+  if (raw.size() > 64) {
+    const uLongf bound = compressBound(static_cast<uLong>(raw.size()));
+    out.data.resize(bound);
+    uLongf dest = bound;
+    const int rc = compress2(out.data.data(), &dest, raw.data(), static_cast<uLong>(raw.size()), 1);
+    if (rc == Z_OK && static_cast<std::size_t>(dest) + 16 < raw.size()) {
+      out.data.resize(dest);
+      out.compressed = true;
+      return;
+    }
+  }
+  out.compressed = false;
+  out.data = raw;
+}
+
+bool PixelPatchCommand::unpack_pixels(const PackedPixels& in, std::vector<std::uint8_t>& raw) {
+  raw.clear();
+  if (in.raw_size == 0) {
+    return true;
+  }
+  raw.resize(in.raw_size);
+  if (!in.compressed) {
+    if (in.data.size() != in.raw_size) {
+      return false;
+    }
+    std::memcpy(raw.data(), in.data.data(), in.raw_size);
+    return true;
+  }
+  uLongf dest = in.raw_size;
+  if (uncompress(raw.data(), &dest, in.data.data(), static_cast<uLong>(in.data.size())) != Z_OK) {
+    return false;
+  }
+  return dest == in.raw_size;
+}
 
 std::unique_ptr<PixelPatchCommand> PixelPatchCommand::from_layers(const Layer& before,
                                                                   const Layer& after, Rect bounds,
@@ -102,6 +145,8 @@ std::unique_ptr<PixelPatchCommand> PixelPatchCommand::from_layers(const Layer& b
 
   const int x1 = bounds.x2();
   const int y1 = bounds.y2();
+  std::vector<std::uint8_t> before_raw;
+  std::vector<std::uint8_t> after_raw;
   for (int ty = bounds.y; ty < y1; ty += kPatchTile) {
     for (int tx = bounds.x; tx < x1; tx += kPatchTile) {
       const int tw = std::min(kPatchTile, x1 - tx);
@@ -118,11 +163,15 @@ std::unique_ptr<PixelPatchCommand> PixelPatchCommand::from_layers(const Layer& b
       tile.y = ty;
       tile.w = tw;
       tile.h = th;
-      store_side(tile.before_solid, tile.before_color, tile.before, a, tw, th, before.stride());
-      store_side(tile.after_solid, tile.after_color, tile.after, b, tw, th, after.stride());
+      append_side(tile.before_solid, tile.before_color, tile.before_off, tile.before_len, before_raw,
+                  a, tw, th, before.stride());
+      append_side(tile.after_solid, tile.after_color, tile.after_off, tile.after_len, after_raw, b,
+                  tw, th, after.stride());
       cmd->tiles_.push_back(std::move(tile));
     }
   }
+  pack_pixels(before_raw, cmd->before_packed_);
+  pack_pixels(after_raw, cmd->after_packed_);
 
   if (cmd->tiles_.empty()) {
     cmd->bounds_ = {};
@@ -152,11 +201,9 @@ void PixelPatchCommand::set_selection_change(SelectionState before, SelectionSta
 
 std::size_t PixelPatchCommand::memory_bytes() const {
   std::size_t bytes = 64;
-  for (const Tile& tile : tiles_) {
-    bytes += 48;
-    bytes += tile.before.size();
-    bytes += tile.after.size();
-  }
+  bytes += before_packed_.bytes();
+  bytes += after_packed_.bytes();
+  bytes += tiles_.size() * 48;
   auto add_state = [&](const SelectionState& state) {
     bytes += state.float_pixels.size();
     bytes += state.float_coverage.size();
@@ -173,11 +220,14 @@ std::size_t PixelPatchCommand::memory_bytes() const {
 void PixelPatchCommand::apply(Document& document) {
   if (layer_index_ >= 0 && layer_index_ < document.layers().count()) {
     Layer& layer = document.layers().at(layer_index_);
-    for (const Tile& tile : tiles_) {
-      if (tile.after_solid) {
-        write_solid(layer, tile.x, tile.y, tile.w, tile.h, tile.after_color);
-      } else {
-        write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.after.data());
+    std::vector<std::uint8_t> after;
+    if (unpack_pixels(after_packed_, after)) {
+      for (const Tile& tile : tiles_) {
+        if (tile.after_solid) {
+          write_solid(layer, tile.x, tile.y, tile.w, tile.h, tile.after_color);
+        } else if (static_cast<std::size_t>(tile.after_off) + tile.after_len <= after.size()) {
+          write_tile(layer, tile.x, tile.y, tile.w, tile.h, after.data() + tile.after_off);
+        }
       }
     }
   }
@@ -189,11 +239,14 @@ void PixelPatchCommand::apply(Document& document) {
 void PixelPatchCommand::undo(Document& document) {
   if (layer_index_ >= 0 && layer_index_ < document.layers().count()) {
     Layer& layer = document.layers().at(layer_index_);
-    for (const Tile& tile : tiles_) {
-      if (tile.before_solid) {
-        write_solid(layer, tile.x, tile.y, tile.w, tile.h, tile.before_color);
-      } else {
-        write_tile(layer, tile.x, tile.y, tile.w, tile.h, tile.before.data());
+    std::vector<std::uint8_t> before;
+    if (unpack_pixels(before_packed_, before)) {
+      for (const Tile& tile : tiles_) {
+        if (tile.before_solid) {
+          write_solid(layer, tile.x, tile.y, tile.w, tile.h, tile.before_color);
+        } else if (static_cast<std::size_t>(tile.before_off) + tile.before_len <= before.size()) {
+          write_tile(layer, tile.x, tile.y, tile.w, tile.h, before.data() + tile.before_off);
+        }
       }
     }
   }

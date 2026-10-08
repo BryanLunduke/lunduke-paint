@@ -93,7 +93,9 @@ constexpr int kDefaultHeight = 480;
 constexpr int kDefaultUndoDepth = 50;
 constexpr int kMaxUndoDepth = 200;
 // Total bytes of stored undo patches. Oldest steps are dropped past this,
-// even when the step-count limit has not been reached. 256 MiB.
+// even when the step-count limit has not been reached. The newest step is
+// kept even when it alone is larger. 256 MiB is the floor; the window may
+// raise it with suggested_undo_bytes().
 constexpr std::size_t kDefaultUndoBytes = 256ull * 1024ull * 1024ull;
 constexpr int kPatchTile = 32;
 constexpr int kSoftMaxLayers = 64;

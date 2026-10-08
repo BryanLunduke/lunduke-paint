@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build lunduke-paint_0.9-9_amd64.deb into packaging/debs/ (repo-local).
+# Build lunduke-paint_0.9-10_amd64.deb into packaging/debs/ (repo-local).
 # Does NOT seed lcos-live-06 or lcos-live-07.
 #
 # Build-Depends for this script (it is not a dpkg-buildpackage source package):
@@ -30,7 +30,7 @@ if [ -z "${CXX:-}" ]; then
 fi
 
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-VERSION="0.9-9"
+VERSION="0.9-10"
 PKGNAME="lunduke-paint_${VERSION}_amd64"
 BUILD="$ROOT/build"
 DEST="$ROOT/packaging/src/lunduke-paint"

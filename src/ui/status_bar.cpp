@@ -12,6 +12,7 @@ StatusBar::StatusBar() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 8) {
   set_border_width(3);
   hint_.set_xalign(0.0f);
   hint_.set_hexpand(true);
+  hint_.set_ellipsize(Pango::ELLIPSIZE_END);
   coords_.set_width_chars(14);
   sel_.set_width_chars(12);
   size_.set_width_chars(14);
