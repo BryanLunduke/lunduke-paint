@@ -10,7 +10,9 @@
 
 #include <gdkmm/pixbuf.h>
 #include <gdkmm/screen.h>
+#include <gtkmm/container.h>
 #include <gtkmm/image.h>
+#include <gtkmm/label.h>
 #include <gtkmm/separator.h>
 #include <gtkmm/stylecontext.h>
 
@@ -20,7 +22,11 @@
 namespace lundukepaint {
 
 namespace {
-constexpr int kRailMinWidth = 220;
+// Classic MacPaint rail, from acd6af9 ("MacPaint brush rail", 0.5-4) and
+// unchanged through tags v0.9-2 .. v0.9-5: two 28 px columns, the grid's
+// 2 px gap, a 4 px border on each side, and 8 px of air on each side.
+// 28 * 2 + 2 + 8 + 16 = 82. Commit 37b4520 (v0.9-6) replaced this with a
+// 220 px minimum; b8a8e37 (v0.9-7) then stretched the pickers to that width.
 constexpr int kGridWidthSlop = 36;
 constexpr int kSideAir = 8;
 constexpr int kLineChoices[5] = {1, 2, 3, 5, 8};
@@ -101,14 +107,15 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   options_stack_.set_margin_start(kSideAir);
   options_stack_.set_margin_end(kSideAir);
   options_stack_.set_margin_top(0);
-  options_stack_.set_hexpand(true);
-  options_stack_.set_halign(Gtk::ALIGN_FILL);
+  options_stack_.set_hexpand(false);
+  options_stack_.set_halign(Gtk::ALIGN_CENTER);
 
-  const int picker_w = picker_content_width();
+  const int picker_w = tool_grid_natural_width();
 
-  // MacPaint-style line-width selector. It fills the rail; the tool buttons stay square.
-  line_widths_.set_hexpand(true);
-  line_widths_.set_halign(Gtk::ALIGN_FILL);
+  // MacPaint-style line-width selector. Rows are as wide as the two tool
+  // columns, not the window.
+  line_widths_.set_hexpand(false);
+  line_widths_.set_halign(Gtk::ALIGN_CENTER);
   line_widths_.set_size_request(picker_w, 72);
   line_widths_.set_tooltip_text("Line width");
   line_widths_.add_events(Gdk::BUTTON_PRESS_MASK);
@@ -118,8 +125,8 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   options_stack_.add(line_widths_, "line", "Line width");
 
   // MacPaint-style brush tip grid (4×4).
-  brush_tips_.set_hexpand(true);
-  brush_tips_.set_halign(Gtk::ALIGN_FILL);
+  brush_tips_.set_hexpand(false);
+  brush_tips_.set_halign(Gtk::ALIGN_CENTER);
   brush_tips_.set_size_request(picker_w, picker_w);
   brush_tips_.set_tooltip_text("Brush shape");
   brush_tips_.add_events(Gdk::BUTTON_PRESS_MASK);
@@ -129,8 +136,8 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   options_stack_.add(brush_tips_, "brush", "Brush shape");
 
   // Compact spray radius rows (same visual language as line widths).
-  spray_radii_.set_hexpand(true);
-  spray_radii_.set_halign(Gtk::ALIGN_FILL);
+  spray_radii_.set_hexpand(false);
+  spray_radii_.set_halign(Gtk::ALIGN_CENTER);
   spray_radii_.set_size_request(picker_w, 72);
   spray_radii_.set_tooltip_text("Spray radius");
   spray_radii_.add_events(Gdk::BUTTON_PRESS_MASK);
@@ -146,8 +153,9 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
 
   tool_options_.set_margin_start(kSideAir);
   tool_options_.set_margin_end(kSideAir);
-  tool_options_.set_hexpand(true);
-  tool_options_.set_halign(Gtk::ALIGN_FILL);
+  tool_options_.set_hexpand(false);
+  tool_options_.set_halign(Gtk::ALIGN_CENTER);
+  tool_options_.set_size_request(picker_w, -1);
   tool_options_.get_style_context()->add_class("toolbox-options");
   tool_options_.set_no_show_all(true);
   tool_options_.hide();
@@ -156,6 +164,8 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   scroll_.set_policy(Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
   scroll_.set_propagate_natural_width(true);
   scroll_.set_propagate_natural_height(false);
+  scroll_.set_min_content_width(picker_w + kSideAir * 2);
+  scroll_.set_max_content_width(picker_w + kSideAir * 2);
   scroll_.set_min_content_height(72);
   scroll_.set_shadow_type(Gtk::SHADOW_NONE);
   scroll_.set_hexpand(false);
@@ -181,13 +191,21 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   reset_colors_.add_events(Gdk::BUTTON_PRESS_MASK);
   reset_colors_.signal_draw().connect(sigc::mem_fun(*this, &Toolbox::on_reset_draw));
   reset_colors_.signal_button_press_event().connect(sigc::mem_fun(*this, &Toolbox::on_reset_press));
-  color_row_.set_margin_start(kSideAir);
+  // Swap and reset stack beside the wells so the cluster fits the 82 px
+  // rail. A single row of 48 + 22 + 22 does not.
+  auto* well_actions = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2));
+  well_actions->set_halign(Gtk::ALIGN_CENTER);
+  well_actions->set_valign(Gtk::ALIGN_CENTER);
+  well_actions->pack_start(swap_colors_, Gtk::PACK_SHRINK);
+  well_actions->pack_start(reset_colors_, Gtk::PACK_SHRINK);
+  color_row_.set_spacing(2);
   color_row_.set_margin_top(4);
   color_row_.set_halign(Gtk::ALIGN_CENTER);
+  color_row_.set_hexpand(false);
   color_row_.pack_start(wells_, Gtk::PACK_SHRINK);
-  color_row_.pack_start(swap_colors_, Gtk::PACK_SHRINK);
-  color_row_.pack_start(reset_colors_, Gtk::PACK_SHRINK);
+  color_row_.pack_start(*well_actions, Gtk::PACK_SHRINK);
   pack_start(color_row_, Gtk::PACK_SHRINK);
+  set_size_request(classic_outer_width(), -1);
   set_vexpand(true);
 }
 
@@ -255,6 +273,29 @@ void Toolbox::show_options_for_tool(const std::string& id) {
   options_stack_.set_visible(picker);
 }
 
+namespace {
+
+void fit_option_labels(Gtk::Widget& widget) {
+  if (auto* label = dynamic_cast<Gtk::Label*>(&widget)) {
+    if (!label->get_line_wrap() && label->get_ellipsize() == Pango::ELLIPSIZE_NONE) {
+      label->set_ellipsize(Pango::ELLIPSIZE_END);
+      label->set_max_width_chars(8);
+      label->set_xalign(0.0f);
+    }
+  }
+  auto* container = dynamic_cast<Gtk::Container*>(&widget);
+  if (container == nullptr) {
+    return;
+  }
+  for (Gtk::Widget* child : container->get_children()) {
+    if (child != nullptr) {
+      fit_option_labels(*child);
+    }
+  }
+}
+
+}  // namespace
+
 void Toolbox::set_tool_options(Gtk::Widget* widget) {
   if (hosted_options_ == widget) {
     if (widget != nullptr) {
@@ -274,6 +315,9 @@ void Toolbox::set_tool_options(Gtk::Widget* widget) {
   if (widget->get_parent() != nullptr && widget->get_parent() != &tool_options_) {
     widget->get_parent()->remove(*widget);
   }
+  widget->set_hexpand(false);
+  widget->set_halign(Gtk::ALIGN_FILL);
+  fit_option_labels(*widget);
   tool_options_.pack_start(*widget, Gtk::PACK_SHRINK);
   widget->show_all();
   tool_options_.show();
@@ -339,28 +383,15 @@ int Toolbox::tool_grid_natural_width() const {
   return kBtn * 2 + grid_.get_column_spacing();
 }
 
-void Toolbox::get_preferred_width_vfunc(int& minimum_width, int& natural_width) const {
+int Toolbox::classic_outer_width() const {
   const int border = static_cast<int>(get_border_width()) * 2;
-  const int grid = tool_grid_natural_width() + border + kSideAir * 2;
-  // The rail is at least wide enough for the font, size, and check labels.
-  // Their own minimums are what the widgets test compares against allocation.
-  const int w = std::max(kRailMinWidth, grid);
-  minimum_width = w;
-  natural_width = w;
+  return tool_grid_natural_width() + border + kSideAir * 2;
 }
 
-int Toolbox::picker_content_width() const {
-  const int border = static_cast<int>(get_border_width()) * 2;
-  int w = kRailMinWidth - border - kSideAir * 2;
-  const int alloc = rail_.get_allocated_width();
-  if (alloc > w + kSideAir * 2) {
-    w = alloc - kSideAir * 2;
-  }
-  const int grid_w = tool_grid_natural_width();
-  if (w < grid_w) {
-    w = grid_w;
-  }
-  return w;
+void Toolbox::get_preferred_width_vfunc(int& minimum_width, int& natural_width) const {
+  const int w = classic_outer_width();
+  minimum_width = w;
+  natural_width = w;
 }
 
 int Toolbox::tool_button_width() const {
@@ -379,18 +410,23 @@ void Toolbox::set_colors(Color fg, Color bg) {
 }
 
 void Toolbox::size_option_panels() {
-  const int picker_w = picker_content_width();
+  const int picker_w = tool_grid_natural_width();
   line_widths_.set_size_request(picker_w, 72);
-  brush_tips_.set_size_request(picker_w, std::max(picker_w, tool_grid_natural_width()));
+  brush_tips_.set_size_request(picker_w, picker_w);
   spray_radii_.set_size_request(picker_w, 72);
   empty_options_.set_size_request(picker_w, 8);
+  tool_options_.set_size_request(picker_w, -1);
 }
 
 void Toolbox::on_grid_size_allocate(Gtk::Allocation& allocation) {
   (void)allocation;
-  // Do not pin the rail back to the tool-grid width. That request was what
-  // clipped the font, size, and check labels. The preferred width is the
-  // wider rail, and a size request here would override it.
+  const int want = classic_outer_width();
+  int req_w = 0;
+  int req_h = 0;
+  get_size_request(req_w, req_h);
+  if (req_w != want) {
+    set_size_request(want, -1);
+  }
   size_option_panels();
 }
 

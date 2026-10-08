@@ -1,3 +1,12 @@
+lunduke-paint (0.9-8) unstable; urgency=medium
+
+  * The tool rail is back to the classic MacPaint width from 0.5-4 (82 px).
+    Foreground and background wells, swap and reset, the extra tool
+    buttons, and the line, brush, and spray pickers sit in that column.
+    The pattern strip, colours dock, and F12 are unchanged.
+
+ -- Phil <phil@brushpad.local>  Thu, 08 Oct 2026 20:15:00 -0500
+
 lunduke-paint (0.9-7) unstable; urgency=medium
 
   * Foreground and background wells sit on the tool rail, with swap and
