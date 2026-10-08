@@ -96,6 +96,76 @@ private:
   const char* id_;
 };
 
+// Classic outer width from acd6af9, still the rail in tags v0.9-2 through v0.9-5.
+constexpr int kClassicRailWidth = 82;
+
+bool widget_past_rail(Gtk::Widget& rail, Gtk::Widget& child, int& x, int& y) {
+  x = 0;
+  y = 0;
+  if (!child.get_mapped() || !child.get_visible()) {
+    return false;
+  }
+  if (!child.translate_coordinates(rail, 0, 0, x, y)) {
+    return false;
+  }
+  const int cw = child.get_allocated_width();
+  const int ch = child.get_allocated_height();
+  if (cw < 1 || ch < 1) {
+    return false;
+  }
+  const int rw = rail.get_allocated_width();
+  const int rh = rail.get_allocated_height();
+  return x < -1 || y < -1 || x + cw > rw + 1 || y + ch > rh + 1;
+}
+
+void expect_rail_contains(Gtk::Widget& rail, Gtk::Widget& child) {
+  int x = 0;
+  int y = 0;
+  if (!widget_past_rail(rail, child, x, y)) {
+    auto* container = dynamic_cast<Gtk::Container*>(&child);
+    if (container == nullptr) {
+      return;
+    }
+    for (Gtk::Widget* next : container->get_children()) {
+      if (next != nullptr) {
+        expect_rail_contains(rail, *next);
+      }
+    }
+    return;
+  }
+  const char* type = G_OBJECT_TYPE_NAME(child.gobj());
+  const Glib::ustring tip = child.get_tooltip_text();
+  std::fprintf(stderr,
+               "test_widgets: %s \"%s\" extends past the rail at %d,%d size %dx%d (rail %dx%d)\n",
+               type, tip.c_str(), x, y, child.get_allocated_width(), child.get_allocated_height(),
+               rail.get_allocated_width(), rail.get_allocated_height());
+  ++errors;
+}
+
+void expect_picker_naturals(Gtk::Widget& rail, Gtk::Widget& widget) {
+  const Glib::ustring tip = widget.get_tooltip_text();
+  if (tip == "Line width" || tip == "Brush shape" || tip == "Spray radius") {
+    int min_w = 0;
+    int nat_w = 0;
+    widget.get_preferred_width(min_w, nat_w);
+    const int rail_w = rail.get_allocated_width();
+    if (nat_w < 1 || nat_w > rail_w) {
+      std::fprintf(stderr, "test_widgets: picker \"%s\" natural width %d, rail %d\n", tip.c_str(),
+                   nat_w, rail_w);
+      ++errors;
+    }
+  }
+  auto* container = dynamic_cast<Gtk::Container*>(&widget);
+  if (container == nullptr) {
+    return;
+  }
+  for (Gtk::Widget* child : container->get_children()) {
+    if (child != nullptr) {
+      expect_picker_naturals(rail, *child);
+    }
+  }
+}
+
 void pump(int ms) {
   const gint64 end = g_get_monotonic_time() + static_cast<gint64>(ms) * 1000;
   do {
@@ -353,7 +423,8 @@ int main(int argc, char** argv) {
     expect(bold->get_visible() && bold->get_mapped(), "text options are shown in the rail");
     expect(toolbox.width_tracks_tool_grid(), "options rail still fits the tool grid");
     expect(window.get_allocated_width() <= 1100 + 40, "default window does not grow for options");
-    expect(toolbox.get_allocated_width() >= 220, "rail stays at least 220px wide");
+    expect(std::abs(toolbox.get_allocated_width() - 82) <= 1,
+           "rail stays at the classic 82px width");
     expect_covers_request(*font, "font combo at the default window");
     expect_covers_request(*size, "size spin at the default window");
     expect_covers_request(*bold, "Bold at the default window");
@@ -361,7 +432,8 @@ int main(int argc, char** argv) {
     expect_covers_request(*move, "Transparent move at the default window");
     window.resize(1100, 240);
     pump(120);
-    expect(toolbox.get_allocated_width() >= 220, "rail keeps its width in a short window");
+    expect(std::abs(toolbox.get_allocated_width() - 82) <= 1,
+           "rail keeps the classic width in a short window");
     expect_covers_request(*font, "font combo in a short window");
     expect_covers_request(*size, "size spin in a short window");
     expect_covers_request(*bold, "Bold in a short window");
@@ -427,7 +499,7 @@ int main(int argc, char** argv) {
     pump(30);
   }
 
-  // Round 6: catalog tools highlight, square buttons, full-width width picker.
+  // Round 6: catalog tools highlight, square buttons, rail-sized width picker.
   {
     Gtk::Window window;
     window.set_default_size(280, 640);
@@ -451,10 +523,67 @@ int main(int argc, char** argv) {
     const int button_w = toolbox.tool_button_width();
     expect(button_w > 8 && button_w <= 36, "tool buttons stay square");
     expect(toolbox.width_tracks_tool_grid(), "tool grid does not stretch across the rail");
-    expect(toolbox.get_allocated_width() >= 220, "rail stays at least 220px");
+    expect(std::abs(toolbox.get_allocated_width() - 82) <= 1, "rail stays at the classic 82px");
     toolbox.set_active_tool("line");
     pump(40);
-    expect(toolbox.line_width_picker_width() >= 160, "line-width picker uses the rail width");
+    const int picker_w = toolbox.line_width_picker_width();
+    const int rail_w = toolbox.get_allocated_width();
+    // Compact row from acd6af9: the picker matches the two tool columns (58 px),
+    // inside the 82 px rail, rather than stretching to 160 px or more.
+    expect(picker_w > 0 && picker_w <= rail_w, "line-width picker fits in the rail");
+    expect(std::abs(picker_w - 58) <= 2, "line-width picker is the compact rail row");
+    window.hide();
+    pump(30);
+  }
+
+  // The rail stays at the pre-round-5 width at the default window size and
+  // when the window is large, and nothing in it hangs out past that column.
+  {
+    Gtk::Window window;
+    window.set_default_size(1100, 720);
+    Gtk::Box row(Gtk::ORIENTATION_HORIZONTAL, 0);
+    Toolbox toolbox;
+    int count = 0;
+    const lundukepaint::ToolboxTool* tools = lundukepaint::toolbox_tools(count);
+    for (int i = 0; i < count; ++i) {
+      toolbox.add_tool_button(tools[i].id, tools[i].tooltip, tools[i].icon);
+    }
+    Gtk::Box canvas_stand_in(Gtk::ORIENTATION_VERTICAL, 0);
+    canvas_stand_in.set_hexpand(true);
+    row.pack_start(toolbox, Gtk::PACK_SHRINK);
+    row.pack_start(canvas_stand_in, Gtk::PACK_EXPAND_WIDGET);
+    window.add(row);
+    window.show_all();
+    pump(160);
+
+    const auto check_width = [](Toolbox& box, const char* when) {
+      const int w = box.get_allocated_width();
+      if (std::abs(w - kClassicRailWidth) > 1) {
+        std::fprintf(stderr, "test_widgets: rail width %d %s, expected %d\n", w, when,
+                     kClassicRailWidth);
+        ++errors;
+      }
+    };
+    expect(!toolbox.get_hexpand(), "the rail does not request extra horizontal space");
+    check_width(toolbox, "at the default 1100x720 window");
+    expect_rail_contains(toolbox, toolbox);
+    expect_picker_naturals(toolbox, toolbox);
+
+    toolbox.set_active_tool("line");
+    pump(40);
+    toolbox.set_active_tool("brush");
+    pump(40);
+    toolbox.set_active_tool("spray");
+    pump(40);
+    expect_rail_contains(toolbox, toolbox);
+    expect_picker_naturals(toolbox, toolbox);
+
+    const int before = toolbox.get_allocated_width();
+    window.resize(1800, 1100);
+    pump(160);
+    check_width(toolbox, "at a large 1800x1100 window");
+    expect(toolbox.get_allocated_width() == before, "the rail does not stretch when the window grows");
+    expect_rail_contains(toolbox, toolbox);
     window.hide();
     pump(30);
   }

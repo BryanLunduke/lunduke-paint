@@ -77,7 +77,7 @@ private:
   bool on_swap_press(GdkEventButton* event);
   bool on_reset_draw(const Cairo::RefPtr<Cairo::Context>& cr);
   bool on_reset_press(GdkEventButton* event);
-  int picker_content_width() const;
+  int classic_outer_width() const;
   int width_at_y(double y) const;
   int brush_tip_at(double x, double y) const;
   int spray_radius_at_y(double y) const;
