@@ -1,10 +1,27 @@
 #!/bin/sh
-# Build lunduke-paint_0.9-4_amd64.deb into packaging/debs/ (repo-local).
+# Build lunduke-paint_0.9-5_amd64.deb into packaging/debs/ (repo-local).
 # Does NOT seed lcos-live-06 or lcos-live-07.
+#
+# Build-Depends for this script (it is not a dpkg-buildpackage source package):
+# meson, ninja-build, g++, pkg-config, libgtkmm-3.0-dev and the other libraries
+# meson.build already requires, plus xvfb and xauth so the widgets GUI test
+# can run with no DISPLAY and no window manager.
 set -eu
 
+# A package build must not skip the GUI test. Start Xvfb when the caller did
+# not provide a display. If DISPLAY is already set (including `xvfb-run -a
+# packaging/build-deb.sh`), do not nest another server.
+if [ -z "${DISPLAY:-}" ]; then
+  if ! command -v xvfb-run >/dev/null 2>&1; then
+    echo "packaging/build-deb.sh: DISPLAY is unset and xvfb-run is not installed (need xvfb and xauth)" >&2
+    exit 1
+  fi
+  exec xvfb-run -a "$0" "$@"
+fi
+export LUNDUKEPAINT_REQUIRE_DISPLAY=1
+
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-VERSION="0.9-4"
+VERSION="0.9-5"
 PKGNAME="lunduke-paint_${VERSION}_amd64"
 BUILD="$ROOT/build"
 DEST="$ROOT/packaging/src/lunduke-paint"

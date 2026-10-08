@@ -67,6 +67,7 @@ lunduke_paint_core = static_library(
 lunduke_paint_sources = files(
   'src/main.cpp',
   'src/app/application.cpp',
+  'src/app/live_edit.cpp',
   'src/app/main_window.cpp',
   'src/app/actions.cpp',
   'src/app/preferences.cpp',
@@ -227,8 +228,9 @@ test_intro_howdy = executable(
 )
 test('intro_howdy', test_intro_howdy)
 
-# Widget-level checks that need an X display: skipped (exit 77) when there is
-# none, so `meson test` stays clean headless and can be re-run under xvfb-run.
+# Widget-level checks that need an X display. Exit 77 when there is none,
+# unless LUNDUKEPAINT_REQUIRE_DISPLAY is set (packaging/build-deb.sh), in which
+# case a missing display fails the test. The package script starts Xvfb itself.
 test_widgets = executable(
   'test_widgets',
   files('tests/test_widgets.cpp', 'src/ui/canvas_view.cpp', 'src/ui/toolbox.cpp',
@@ -293,6 +295,35 @@ test_review_r3 = executable(
   install: false,
 )
 test('review_r3', test_review_r3)
+
+# Round-4 review: every live-edit path against every kind of live state, plus
+# the options that must follow one shared value.
+test_review_r4 = executable(
+  'test_review_r4',
+  files(
+    'tests/test_review_r4.cpp',
+    'src/app/live_edit.cpp',
+    'src/tools/tool.cpp',
+    'src/tools/tool_pencil.cpp',
+    'src/tools/tool_line.cpp',
+    'src/tools/tool_rectangle.cpp',
+    'src/tools/tool_ellipse.cpp',
+    'src/tools/tool_rounded_rect.cpp',
+    'src/tools/tool_polygon.cpp',
+    'src/tools/tool_text.cpp',
+    'src/tools/tool_fill.cpp',
+    'src/tools/tool_magic_wand.cpp',
+    'src/tools/tool_rect_select.cpp',
+    'src/tools/tool_lasso.cpp',
+    'src/tools/tool_ellipse_select.cpp',
+    'src/tools/selection_xform.cpp',
+  ),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
+test('review_r4', test_review_r4)
 
 install_data(
   'data/org.lunduke.LundukePaint.desktop',

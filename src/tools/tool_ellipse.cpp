@@ -2,6 +2,7 @@
 
 #include "tools/tool.hpp"
 #include "tools/rail_options.hpp"
+#include "tools/shape_options.hpp"
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
@@ -43,10 +44,11 @@ public:
   void on_motion(CanvasEvent event) override;
   void on_release(CanvasEvent event) override;
   void on_cancel() override;
+  bool on_commit() override;
 
 private:
   void preview(int x1, int y1, bool constrain);
-  void finish();
+  bool finish();
   ShapeFillMode mode() const;
 
   bool drawing_ = false;
@@ -56,6 +58,8 @@ private:
   int y1_ = 0;
   unsigned button_ = 1;
   bool antialias_ = false;
+  const char* family_ = "ellipse";
+  Gtk::CheckButton* aa_button_ = nullptr;
   ShapeFillMode fill_mode_ = ShapeFillMode::Stroke;
   Rect dirty_{};
   const char* id_ = "ellipse";
@@ -69,12 +73,19 @@ Gtk::Widget* EllipseTool::options_widget() {
     options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
     prepare_rail_box(*options_);
     auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
-    aa->set_active(antialias_);
+    aa_button_ = aa;
     aa->set_tooltip_text("Smooth the shape edges");
     configure_rail_check(*aa);
-    aa->signal_toggled().connect([this, aa]() { antialias_ = aa->get_active(); });
+    aa->signal_toggled().connect([this, aa]() {
+      antialias_ = aa->get_active();
+      shape_family_options(family_).antialias = antialias_;
+    });
     options_->pack_start(*aa, Gtk::PACK_SHRINK);
     options_->show_all();
+  }
+  antialias_ = shape_family_options(family_).antialias;
+  if (aa_button_ != nullptr && aa_button_->get_active() != antialias_) {
+    aa_button_->set_active(antialias_);
   }
   return options_.get();
 }
@@ -100,7 +111,7 @@ void EllipseTool::on_press(CanvasEvent event) {
   x1_ = x0_;
   y1_ = y0_;
   dirty_ = {};
-  host_->document().layers().copy_active_to_tool();
+  arm_preview_layer();
   preview(x1_, y1_, false);
 }
 
@@ -109,7 +120,8 @@ void EllipseTool::preview(int x1, int y1, bool constrain) {
     return;
   }
   Document& doc = host_->document();
-  const Layer& active = doc.layers().active_layer();
+  antialias_ = shape_family_options(family_).antialias;
+  const Layer& active = preview_layer_ref();
   Layer& tool = doc.layers().tool_layer();
   const Rect previous = dirty_;
   restore_shape_preview(tool, active, previous);
@@ -124,8 +136,7 @@ void EllipseTool::preview(int x1, int y1, bool constrain) {
   draw_ellipse(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy, x1_ - ox,
                y1_ - oy, stroke_px(), stroke_color(button_), mode(), antialias_, &dirty_);
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
-  host_->invalidate_canvas(
-      layer_dirty_to_canvas(host_->document().layers().active_layer(), rect_union(previous, dirty_)));
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
 }
 
 void EllipseTool::on_motion(CanvasEvent event) {
@@ -147,30 +158,34 @@ void EllipseTool::on_release(CanvasEvent event) {
 void EllipseTool::on_cancel() {
   if (!drawing_ || host_ == nullptr) {
     drawing_ = false;
+    clear_preview_overlay();
     return;
   }
   drawing_ = false;
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(layer_dirty_to_canvas(preview_layer_ref(), dirty_));
   dirty_ = {};
+  clear_preview_overlay();
 }
 
-void EllipseTool::finish() {
+bool EllipseTool::on_commit() {
+  if (!drawing_) {
+    return false;
+  }
+  return finish();
+}
+
+bool EllipseTool::finish() {
   if (host_ == nullptr) {
     drawing_ = false;
-    return;
+    return false;
+  }
+  if (!commit_preview("Ellipse", dirty_)) {
+    return false;
   }
   drawing_ = false;
-  Document& doc = host_->document();
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), doc.layers().tool_layer(),
-                                            dirty_, "Ellipse", doc.layers().active_index());
-  doc.layers().clear_tool_layer();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
-  } else {
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
-  }
   dirty_ = {};
+  return true;
 }
 
 Tool* create_ellipse_tool() {

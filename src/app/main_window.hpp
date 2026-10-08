@@ -2,6 +2,7 @@
 #ifndef LUNDUKEPAINT_APP_MAIN_WINDOW_HPP
 #define LUNDUKEPAINT_APP_MAIN_WINDOW_HPP
 
+#include "app/live_edit.hpp"
 #include "app/preferences.hpp"
 #include "doc/commands_layers.hpp"
 #include "doc/document.hpp"
@@ -143,8 +144,10 @@ private:
   Glib::RefPtr<Gio::MenuModel> load_menubar_model();
   void on_toggle_right_dock();
   void bind_document();
-  void adopt_document(std::unique_ptr<Document> document, bool prefer_replace);
-  void preserve_live_edits_for_tab_switch();
+  bool adopt_document(std::unique_ptr<Document> document, bool prefer_replace,
+                      LivePath path = LivePath::NewDocument);
+  bool preserve_live_edits_for_tab_switch();
+  bool disrupt_allowed(const char* action);
   void report_blocked(const char* message);
   void clear_document_recovery(const Document& document);
   bool other_documents_dirty(const Document* except) const;
@@ -152,6 +155,7 @@ private:
   void detach_document();
   void rebuild_tabs();
   void update_tab_labels();
+  bool active_document_holds_live_work(const Document* document);
   bool confirm_lose_document(Document& document);
   bool close_document_at(int index);
   std::string tab_title(const Document& document) const;

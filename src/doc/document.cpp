@@ -117,12 +117,22 @@ void Document::clear_ora_stack() {
   layers_.set_ora_stack(nullptr);
 }
 
+bool Document::allow_disrupt(const char* action) {
+  if (!on_disrupt_) {
+    return true;
+  }
+  return on_disrupt_(action);
+}
+
 bool Document::set_active_layer(int index) {
   if (index < 0 || index >= layers_.count()) {
     return false;
   }
   if (index == layers_.active_index()) {
     return true;
+  }
+  if (!allow_disrupt("layer-change")) {
+    return false;
   }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
@@ -185,6 +195,9 @@ void Document::commit(std::unique_ptr<Command> command) {
 }
 
 Rect Document::undo() {
+  if (!allow_disrupt("undo")) {
+    return {};
+  }
   if (!history_.can_undo()) {
     return {};
   }
@@ -196,6 +209,9 @@ Rect Document::undo() {
 }
 
 Rect Document::redo() {
+  if (!allow_disrupt("redo")) {
+    return {};
+  }
   if (!history_.can_redo()) {
     return {};
   }
@@ -208,6 +224,9 @@ Rect Document::redo() {
 
 Rect Document::jump_history(int target) {
   if (target == history_.index()) {
+    return {};
+  }
+  if (!allow_disrupt("history-jump")) {
     return {};
   }
   const Rect dirty = history_.jump_to(*this, target);
@@ -384,6 +403,7 @@ void Document::delete_selection() {
     notify_blocked("Layer is locked");
     return;
   }
+  const SelectionState selection_before = selection_.capture();
   Layer& layer = layers_.at(index);
   const int ox = layer.offset_x();
   const int oy = layer.offset_y();
@@ -424,6 +444,7 @@ void Document::delete_selection() {
   }
   auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, "Delete", index);
   if (cmd && !cmd->empty()) {
+    cmd->set_selection_change(selection_before, selection_.capture());
     commit(std::move(cmd));
   } else {
     if (!dirty.empty()) {
@@ -456,6 +477,9 @@ void Document::duplicate_selection() {
 }
 
 void Document::paste_floating(int x, int y, int w, int h, std::vector<std::uint8_t> rgba) {
+  if (!allow_disrupt("paste")) {
+    return;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return;
@@ -508,6 +532,9 @@ std::vector<LayerSnapshot> Document::snapshot_layers() const {
 }
 
 bool Document::add_layer() {
+  if (!allow_disrupt("layer-add")) {
+    return false;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return false;
@@ -527,6 +554,9 @@ bool Document::add_layer() {
 }
 
 bool Document::duplicate_layer() {
+  if (!allow_disrupt("layer-add")) {
+    return false;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return false;
@@ -543,6 +573,9 @@ bool Document::delete_layer() {
   if (layers_.count() <= 1) {
     return false;
   }
+  if (!allow_disrupt("layer-delete")) {
+    return false;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return false;
@@ -554,6 +587,9 @@ bool Document::delete_layer() {
 }
 
 bool Document::raise_layer() {
+  if (!allow_disrupt("layer-move")) {
+    return false;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return false;
@@ -568,6 +604,9 @@ bool Document::raise_layer() {
 }
 
 bool Document::lower_layer() {
+  if (!allow_disrupt("layer-move")) {
+    return false;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return false;
@@ -582,6 +621,9 @@ bool Document::lower_layer() {
 }
 
 bool Document::move_layer(int from, int to) {
+  if (!allow_disrupt("layer-move")) {
+    return false;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return false;
@@ -595,6 +637,9 @@ bool Document::move_layer(int from, int to) {
 }
 
 bool Document::merge_down() {
+  if (!allow_disrupt("layer-delete")) {
+    return false;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return false;
@@ -610,6 +655,9 @@ bool Document::merge_down() {
 }
 
 bool Document::flatten() {
+  if (!allow_disrupt("layer-delete")) {
+    return false;
+  }
   if (!try_commit_floating()) {
     notify_blocked("Unlock the layer to place the selection");
     return false;
@@ -630,6 +678,9 @@ void Document::set_layer_visible(int index, bool visible) {
   if (layer.visible() == visible) {
     return;
   }
+  if (!allow_disrupt("layer-change")) {
+    return;
+  }
   LayerSnapshot before = snapshot_layer_props(layer);
   LayerSnapshot after = before;
   after.visible = visible;
@@ -639,6 +690,9 @@ void Document::set_layer_visible(int index, bool visible) {
 
 void Document::set_layer_locked(int index, bool locked) {
   if (index < 0 || index >= layers_.count()) {
+    return;
+  }
+  if (!allow_disrupt("layer-lock")) {
     return;
   }
   Layer& layer = layers_.at(index);
@@ -666,6 +720,9 @@ void Document::set_layer_opacity(int index, float opacity) {
   if (layer.opacity() == opacity) {
     return;
   }
+  if (!allow_disrupt("layer-change")) {
+    return;
+  }
   LayerSnapshot before = snapshot_layer_props(layer);
   LayerSnapshot after = before;
   after.opacity = opacity;
@@ -681,6 +738,9 @@ void Document::set_layer_blend(int index, BlendMode blend) {
   if (layer.blend() == blend) {
     return;
   }
+  if (!allow_disrupt("layer-change")) {
+    return;
+  }
   LayerSnapshot before = snapshot_layer_props(layer);
   LayerSnapshot after = before;
   after.blend = blend;
@@ -694,6 +754,9 @@ void Document::set_layer_offset(int index, int x, int y) {
   }
   Layer& layer = layers_.at(index);
   if (layer.offset_x() == x && layer.offset_y() == y) {
+    return;
+  }
+  if (!allow_disrupt("layer-change")) {
     return;
   }
   LayerSnapshot before = snapshot_layer_props(layer);

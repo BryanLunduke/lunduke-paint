@@ -641,6 +641,53 @@ void blit_rgba(Layer& dest, int dx, int dy, const std::uint8_t* src, int sw, int
   }
 }
 
+bool composite_floating_into_buffer(const Selection& sel, std::uint8_t* pixels, int width, int height,
+                                   int stride, int offset_x, int offset_y) {
+  if (pixels == nullptr || width < 1 || height < 1 || stride < width * 4 || !sel.floating() ||
+      sel.float_pixels() == nullptr) {
+    return false;
+  }
+  bool any = false;
+  auto write = [&](int lx, int ly, Color color) {
+    if (lx < 0 || ly < 0 || lx >= width || ly >= height) {
+      return;
+    }
+    std::uint8_t* dest =
+        pixels + static_cast<std::size_t>(ly) * static_cast<std::size_t>(stride) +
+        static_cast<std::size_t>(lx) * 4;
+    const std::uint8_t next[4] = {color.r, color.g, color.b, color.a};
+    if (std::memcmp(dest, next, 4) == 0) {
+      return;
+    }
+    std::memcpy(dest, next, 4);
+    any = true;
+  };
+  if (!sel.copy_mode()) {
+    const Rect origin = sel.origin_rect();
+    for (int y = 0; y < origin.h; ++y) {
+      for (int x = 0; x < origin.w; ++x) {
+        if (!sel.float_covers(x, y)) {
+          continue;
+        }
+        write(origin.x - offset_x + x, origin.y - offset_y + y, Color::transparent());
+      }
+    }
+  }
+  for (int y = 0; y < sel.float_h(); ++y) {
+    for (int x = 0; x < sel.float_w(); ++x) {
+      if (!sel.float_covers(x, y)) {
+        continue;
+      }
+      const Color color = sel.float_pixel(x, y);
+      if (sel.transparent_move() && color.a == 0) {
+        continue;
+      }
+      write(sel.float_x() - offset_x + x, sel.float_y() - offset_y + y, color);
+    }
+  }
+  return any;
+}
+
 void paint_floating_selection(const LayerStack& layers, const Selection& sel, std::uint8_t* dest,
                               int dest_stride, Rect view, bool substitute_clear, Color hole_clear,
                               Color float_clear, const std::uint8_t* hole_rgba, int hole_stride) {

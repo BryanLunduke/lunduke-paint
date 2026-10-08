@@ -111,11 +111,14 @@ public:
   using ChangedFn = std::function<void()>;
   using InvalidatedFn = std::function<void(Rect)>;
   using BlockedFn = std::function<void(const char*)>;
+  // False aborts a history or layer change that would drop live edits.
+  using DisruptFn = std::function<bool(const char* action)>;
 
   void set_on_changed(ChangedFn fn) { on_changed_ = std::move(fn); }
   void set_on_invalidated(InvalidatedFn fn) { on_invalidated_ = std::move(fn); }
   void set_on_selection(ChangedFn fn) { on_selection_ = std::move(fn); }
   void set_on_blocked(BlockedFn fn) { on_blocked_ = std::move(fn); }
+  void set_on_disrupt(DisruptFn fn) { on_disrupt_ = std::move(fn); }
 
   void notify_invalidated(Rect rect);
   void notify_changed();
@@ -126,6 +129,7 @@ public:
 private:
   Document(int width, int height, Color background, std::string layer_name);
   void note_history_dirty();
+  bool allow_disrupt(const char* action);
 
   int width_ = kDefaultWidth;
   int height_ = kDefaultHeight;
@@ -146,6 +150,7 @@ private:
   ChangedFn on_changed_;
   ChangedFn on_selection_;
   BlockedFn on_blocked_;
+  DisruptFn on_disrupt_;
   InvalidatedFn on_invalidated_;
 };
 

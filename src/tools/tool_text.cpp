@@ -86,6 +86,8 @@ public:
   bool is_stroking() const override { return editing_; }
   bool uses_tool_layer() const override { return false; }
   bool captures_keys() const override { return editing_; }
+  bool has_uncommitted_preview() const override { return editing_ && !state_.text.empty(); }
+  bool paste_text(const std::string& utf8) override;
   Gtk::Widget* options_widget() override;
   void draw_overlay(const Cairo::RefPtr<Cairo::Context>& cr, int origin_x, int origin_y,
                     double zoom) override;
@@ -333,14 +335,19 @@ void TextTool::paste_clipboard() {
   if (!clipboard) {
     return;
   }
-  const Glib::ustring text = clipboard->wait_for_text();
-  if (text.empty()) {
-    return;
+  paste_text(clipboard->wait_for_text());
+}
+
+bool TextTool::paste_text(const std::string& utf8) {
+  if (!editing_ || utf8.empty()) {
+    return false;
   }
-  text_box_insert(state_, text);
+  text_box_insert(state_, utf8);
   cursor_on_ = true;
   rebuild_pixels();
   invalidate_box(state_.box);
+  sync_overlay();
+  return true;
 }
 
 bool TextTool::on_key(unsigned keyval, unsigned modifiers, const std::string& text) {
@@ -491,6 +498,7 @@ bool TextTool::on_commit() {
   }
   // Leave the box up when the layer is locked so Cancel on quit can keep it.
   if (host_->document().active_locked()) {
+    host_->document().notify_blocked("Unlock the layer to place the text");
     return false;
   }
   if (!commit_text_box(host_->document(), state_)) {

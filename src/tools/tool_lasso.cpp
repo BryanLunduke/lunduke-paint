@@ -28,11 +28,13 @@ public:
   bool is_stroking() const override { return dragging_ || moving_ || xform_.active(); }
   bool uses_tool_layer() const override { return false; }
   Gtk::Widget* options_widget() override;
+  void sync_options_from_document() override;
 
   void on_press(CanvasEvent event) override;
   void on_motion(CanvasEvent event) override;
   void on_release(CanvasEvent event) override;
   void on_cancel() override;
+  void release_pointer() override;
 
 private:
   int clamp_x(int x) const;
@@ -65,7 +67,18 @@ Gtk::Widget* LassoTool::options_widget() {
     options_->pack_start(*transparent_, Gtk::PACK_SHRINK);
     options_->show_all();
   }
+  sync_options_from_document();
   return options_.get();
+}
+
+void LassoTool::sync_options_from_document() {
+  if (transparent_ == nullptr || host_ == nullptr) {
+    return;
+  }
+  const bool on = host_->document().selection().transparent_move();
+  if (transparent_->get_active() != on) {
+    transparent_->set_active(on);
+  }
 }
 
 void LassoTool::apply_transparent_option() {
@@ -206,8 +219,6 @@ void LassoTool::on_press(CanvasEvent event) {
   const int x = static_cast<int>(std::floor(event.x));
   const int y = static_cast<int>(std::floor(event.y));
   Selection& sel = doc.selection();
-  apply_transparent_option();
-
   const bool ctrl = (event.modifiers & Modifier::Ctrl) != 0;
   const bool can_move = !sel.empty() && !sel.inverted() &&
                         (sel.floating() ? sel.float_rect().contains(x, y) : sel.contains(x, y));
@@ -289,6 +300,14 @@ void LassoTool::on_release(CanvasEvent event) {
   if (dragging_) {
     add_point(static_cast<int>(std::floor(event.x)), static_cast<int>(std::floor(event.y)));
     finish_path();
+  }
+}
+
+void LassoTool::release_pointer() {
+  moving_ = false;
+  dragging_ = false;
+  if (xform_.active()) {
+    xform_.on_release(host_);
   }
 }
 

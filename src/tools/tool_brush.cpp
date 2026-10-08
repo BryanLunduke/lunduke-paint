@@ -26,11 +26,12 @@ public:
   void on_motion(CanvasEvent event) override;
   void on_release(CanvasEvent event) override;
   void on_cancel() override;
+  bool on_commit() override;
 
 private:
   void begin_stroke(CanvasEvent event);
   void stamp_to(double x, double y);
-  void finish_stroke();
+  bool finish_stroke();
 
   bool drawing_ = false;
   double last_x_ = 0;
@@ -63,12 +64,21 @@ void BrushTool::on_release(CanvasEvent event) {
 void BrushTool::on_cancel() {
   if (!drawing_ || host_ == nullptr) {
     drawing_ = false;
+    clear_preview_overlay();
     return;
   }
   drawing_ = false;
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(layer_dirty_to_canvas(preview_layer_ref(), dirty_));
   dirty_ = {};
+  clear_preview_overlay();
+}
+
+bool BrushTool::on_commit() {
+  if (!drawing_) {
+    return false;
+  }
+  return finish_stroke();
 }
 
 void BrushTool::begin_stroke(CanvasEvent event) {
@@ -86,7 +96,7 @@ void BrushTool::begin_stroke(CanvasEvent event) {
   last_x_ = event.x;
   last_y_ = event.y;
   dirty_ = {};
-  host_->document().layers().copy_active_to_tool();
+  arm_preview_layer();
   stamp_to(last_x_, last_y_);
 }
 
@@ -94,7 +104,7 @@ void BrushTool::stamp_to(double x, double y) {
   if (host_ == nullptr || !drawing_) {
     return;
   }
-  const Layer& active = host_->document().layers().active_layer();
+  const Layer& active = preview_layer_ref();
   Layer& tool = host_->document().layers().tool_layer();
   const BrushTip tip = brush_tip_at(host_->brush_tip());
   const double x0 = last_x_ - active.offset_x();
@@ -119,22 +129,17 @@ void BrushTool::stamp_to(double x, double y) {
   host_->invalidate_canvas(layer_dirty_to_canvas(active, halo));
 }
 
-void BrushTool::finish_stroke() {
+bool BrushTool::finish_stroke() {
   if (host_ == nullptr) {
     drawing_ = false;
-    return;
+    return false;
+  }
+  if (!commit_preview("Brush stroke", dirty_)) {
+    return false;
   }
   drawing_ = false;
-  Document& doc = host_->document();
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), doc.layers().tool_layer(),
-                                            dirty_, "Brush stroke", doc.layers().active_index());
-  doc.layers().clear_tool_layer();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
-  } else {
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
-  }
   dirty_ = {};
+  return true;
 }
 
 Tool* create_brush_tool() {

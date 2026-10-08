@@ -1,3 +1,5 @@
+# packaging/build-deb.sh Build-Depends (this file is the binary control template):
+# xvfb, xauth, plus the compilers and libraries meson.setup already needs.
 Source: lunduke-paint
 Section: graphics
 Priority: optional

@@ -30,11 +30,12 @@ public:
   void on_motion(CanvasEvent event) override;
   void on_release(CanvasEvent event) override;
   void on_cancel() override;
+  bool on_commit() override;
 
 private:
   void begin_stroke(CanvasEvent event);
   void stamp_to(int x, int y);
-  void finish_stroke();
+  bool finish_stroke();
 
   bool drawing_ = false;
   int last_x_ = 0;
@@ -73,12 +74,21 @@ void PencilTool::on_release(CanvasEvent event) {
 void PencilTool::on_cancel() {
   if (!drawing_ || host_ == nullptr) {
     drawing_ = false;
+    clear_preview_overlay();
     return;
   }
   drawing_ = false;
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(layer_dirty_to_canvas(preview_layer_ref(), dirty_));
   dirty_ = {};
+  clear_preview_overlay();
+}
+
+bool PencilTool::on_commit() {
+  if (!drawing_) {
+    return false;
+  }
+  return finish_stroke();
 }
 
 void PencilTool::begin_stroke(CanvasEvent event) {
@@ -96,7 +106,7 @@ void PencilTool::begin_stroke(CanvasEvent event) {
   last_x_ = static_cast<int>(std::floor(event.x));
   last_y_ = static_cast<int>(std::floor(event.y));
   dirty_ = {};
-  host_->document().layers().copy_active_to_tool();
+  arm_preview_layer();
   stamp_to(last_x_, last_y_);
 }
 
@@ -104,7 +114,7 @@ void PencilTool::stamp_to(int x, int y) {
   if (host_ == nullptr || !drawing_) {
     return;
   }
-  const Layer& active = host_->document().layers().active_layer();
+  const Layer& active = preview_layer_ref();
   Layer& tool = host_->document().layers().tool_layer();
   const Color color = stroke_color(button_);
   const int size = host_->stroke_size();
@@ -120,22 +130,17 @@ void PencilTool::stamp_to(int x, int y) {
   host_->invalidate_canvas(layer_dirty_to_canvas(active, dirty_));
 }
 
-void PencilTool::finish_stroke() {
+bool PencilTool::finish_stroke() {
   if (host_ == nullptr) {
     drawing_ = false;
-    return;
+    return false;
+  }
+  if (!commit_preview("Pencil stroke", dirty_)) {
+    return false;
   }
   drawing_ = false;
-  Document& doc = host_->document();
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), doc.layers().tool_layer(),
-                                            dirty_, "Pencil stroke", doc.layers().active_index());
-  doc.layers().clear_tool_layer();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
-  } else {
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
-  }
   dirty_ = {};
+  return true;
 }
 
 Tool* create_pencil_tool() {

@@ -25,11 +25,12 @@ public:
   void on_motion(CanvasEvent event) override;
   void on_release(CanvasEvent event) override;
   void on_cancel() override;
+  bool on_commit() override;
 
 private:
   void begin_stroke(CanvasEvent event);
   void stamp_to(double x, double y);
-  void finish_stroke();
+  bool finish_stroke();
 
   bool drawing_ = false;
   unsigned button_ = 1;
@@ -66,12 +67,21 @@ void SprayTool::on_release(CanvasEvent event) {
 void SprayTool::on_cancel() {
   if (!drawing_ || host_ == nullptr) {
     drawing_ = false;
+    clear_preview_overlay();
     return;
   }
   drawing_ = false;
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(layer_dirty_to_canvas(preview_layer_ref(), dirty_));
   dirty_ = {};
+  clear_preview_overlay();
+}
+
+bool SprayTool::on_commit() {
+  if (!drawing_) {
+    return false;
+  }
+  return finish_stroke();
 }
 
 void SprayTool::begin_stroke(CanvasEvent event) {
@@ -86,7 +96,7 @@ void SprayTool::begin_stroke(CanvasEvent event) {
   dirty_ = {};
   last_x_ = event.x;
   last_y_ = event.y;
-  host_->document().layers().copy_active_to_tool();
+  arm_preview_layer();
   stamp_to(event.x, event.y);
 }
 
@@ -95,7 +105,7 @@ void SprayTool::stamp_to(double x, double y) {
     return;
   }
   Document& doc = host_->document();
-  const Layer& active = doc.layers().active_layer();
+  const Layer& active = preview_layer_ref();
   Layer& tool = doc.layers().tool_layer();
   const int radius = host_ != nullptr ? host_->spray_radius() : radius_;
   Rect stamp{};
@@ -117,22 +127,17 @@ void SprayTool::stamp_to(double x, double y) {
   host_->invalidate_canvas(layer_dirty_to_canvas(active, halo));
 }
 
-void SprayTool::finish_stroke() {
+bool SprayTool::finish_stroke() {
   if (host_ == nullptr) {
     drawing_ = false;
-    return;
+    return false;
+  }
+  if (!commit_preview("Spray", dirty_)) {
+    return false;
   }
   drawing_ = false;
-  Document& doc = host_->document();
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), doc.layers().tool_layer(),
-                                            dirty_, "Spray", doc.layers().active_index());
-  doc.layers().clear_tool_layer();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
-  } else {
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
-  }
   dirty_ = {};
+  return true;
 }
 
 Tool* create_spray_tool() {
