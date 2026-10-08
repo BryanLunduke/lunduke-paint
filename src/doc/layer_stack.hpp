@@ -56,6 +56,17 @@ public:
   void composite_rect(std::uint8_t* dest, int dest_stride, Rect view,
                       const Layer* tool_override = nullptr, int tool_index = -1,
                       int skip_index = -1) const;
+
+  // Nearest-neighbor composite of `view` into an `out_w`×`out_h` buffer.
+  // When the output is smaller than the view, only output pixels are sampled.
+  // `out_rect` limits which output pixels are written (empty = the whole buffer).
+  struct CompositeWork {
+    int samples = 0;
+  };
+  void composite_scaled(std::uint8_t* dest, int dest_stride, Rect view, int out_w, int out_h,
+                        const Layer* tool_override = nullptr, int tool_index = -1,
+                        int skip_index = -1, Rect out_rect = {},
+                        CompositeWork* work = nullptr) const;
   Color composite_pixel(int x, int y, const Layer* tool_override = nullptr,
                         int tool_index = -1, int skip_index = -1) const;
 

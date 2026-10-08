@@ -234,7 +234,7 @@ test('intro_howdy', test_intro_howdy)
 test_widgets = executable(
   'test_widgets',
   files('tests/test_widgets.cpp', 'src/ui/canvas_view.cpp', 'src/ui/toolbox.cpp',
-  'src/ui/status_bar.cpp', 'src/ui/pattern_strip.cpp',
+  'src/ui/status_bar.cpp', 'src/ui/pattern_strip.cpp', 'src/ui/layers_panel.cpp',
         'src/ui/intro_howdy.cpp', 'src/tools/tool.cpp', 'src/tools/selection_xform.cpp'),
   lunduke_paint_resources,
   include_directories: lunduke_paint_inc,
@@ -342,6 +342,19 @@ test_review_r5 = executable(
   install: false,
 )
 test('review_r5', test_review_r5)
+
+# Round-6 review: FG/BG click policy, toolbox catalog, patterns, free zoom-to-fit,
+# scaled composite, region blur, undo patches and the byte cap, mnemonics.
+test_review_r6 = executable(
+  'test_review_r6',
+  files('tests/test_review_r6.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep],
+  cpp_args: ['-DREVIEW_R6_SOURCE="@0@"'.format(meson.project_source_root())],
+  install: false,
+)
+test('review_r6', test_review_r6)
 
 install_data(
   'data/org.lunduke.LundukePaint.desktop',

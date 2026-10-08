@@ -14,7 +14,8 @@
 namespace lundukepaint {
 
 // Column-of-shades palette (light→dark per hue) + Custom row with "+".
-// L=FG, M=BG, R=store FG into swatch (same as 0.5-5).
+// Left sets the foreground. Right, middle, and Shift+left set the background
+// and never overwrite the cell. Double-click edits that swatch.
 class ColorsPanel : public Gtk::Box {
 public:
   ColorsPanel();
@@ -34,6 +35,7 @@ private:
                       SlotKind kind, int index);
   bool on_swatch_press(GdkEventButton* event, SlotKind kind, int index);
   void add_custom_color();
+  void edit_slot(SlotKind kind, int index);
   Color slot_color(SlotKind kind, int index) const;
   bool color_matches_fg(Color c) const;
 

@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "raster/types.hpp"
 #include "ui/tool_selection.hpp"
 
 namespace lundukepaint {
@@ -39,6 +40,10 @@ public:
   // Passing null hides that block. The toolbox does not own the widget.
   void set_tool_options(Gtk::Widget* widget);
 
+  void set_colors(Color fg, Color bg);
+  int tool_button_width() const;
+  int line_width_picker_width() const;
+
   const std::string& active_tool_id() const { return selection_.active_id(); }
   bool tool_button_selected(const std::string& id) const;
 
@@ -50,6 +55,9 @@ public:
   std::function<void(int width)> on_line_width_chosen;
   std::function<void(int index)> on_brush_tip_chosen;
   std::function<void(int radius)> on_spray_radius_chosen;
+  std::function<void()> on_swap_colors;
+  std::function<void()> on_reset_colors;
+  std::function<void(bool background)> on_edit_color;
 
 private:
   static void ensure_css();
@@ -63,6 +71,13 @@ private:
   bool on_brush_tips_press(GdkEventButton* event);
   bool on_spray_draw(const Cairo::RefPtr<Cairo::Context>& cr);
   bool on_spray_press(GdkEventButton* event);
+  bool on_wells_draw(const Cairo::RefPtr<Cairo::Context>& cr);
+  bool on_wells_press(GdkEventButton* event);
+  bool on_swap_draw(const Cairo::RefPtr<Cairo::Context>& cr);
+  bool on_swap_press(GdkEventButton* event);
+  bool on_reset_draw(const Cairo::RefPtr<Cairo::Context>& cr);
+  bool on_reset_press(GdkEventButton* event);
+  int picker_content_width() const;
   int width_at_y(double y) const;
   int brush_tip_at(double x, double y) const;
   int spray_radius_at_y(double y) const;
@@ -77,7 +92,13 @@ private:
   Gtk::DrawingArea spray_radii_;
   Gtk::Box empty_options_{Gtk::ORIENTATION_VERTICAL};
   Gtk::Box tool_options_{Gtk::ORIENTATION_VERTICAL};
+  Gtk::Box color_row_{Gtk::ORIENTATION_HORIZONTAL, 4};
+  Gtk::DrawingArea wells_;
+  Gtk::DrawingArea swap_colors_;
+  Gtk::DrawingArea reset_colors_;
   Gtk::Widget* hosted_options_{nullptr};
+  Color fg_ = Color::black();
+  Color bg_ = Color::white();
   std::vector<Gtk::Button*> buttons_;
   ToolSelection selection_;
   int next_col_ = 0;

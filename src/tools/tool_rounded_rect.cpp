@@ -148,7 +148,7 @@ void RoundedRectTool::preview(int x1, int y1, bool constrain) {
   const int oy = active.offset_y();
   draw_rounded_rect(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy,
                     x1_ - ox, y1_ - oy, stroke_px(), radius_, stroke_color(button_), fill_mode_,
-                    antialias_, &dirty_);
+                    antialias_, &dirty_, shape_pattern(fill_mode_), pattern_back(button_));
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
   host_->invalidate_canvas(layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
 }

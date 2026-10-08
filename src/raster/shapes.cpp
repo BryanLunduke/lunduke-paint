@@ -2,6 +2,7 @@
 
 #include "raster/shapes.hpp"
 
+#include "raster/pattern.hpp"
 #include "raster/stroke.hpp"
 
 #include <algorithm>
@@ -11,8 +12,22 @@
 namespace lundukepaint {
 namespace {
 
+void put_color(std::uint8_t* p, Color color) {
+  p[0] = color.r;
+  p[1] = color.g;
+  p[2] = color.b;
+  p[3] = color.a;
+}
+
+Color fill_color_at(int x, int y, Color solid, const Pattern* pattern, Color pattern_bg) {
+  if (pattern == nullptr) {
+    return solid;
+  }
+  return pattern->color_at(x, y, solid, pattern_bg);
+}
+
 void fill_rect_color(std::uint8_t* rgba, int width, int height, int stride, Rect rect, Color color,
-                     Rect* dirty) {
+                     Rect* dirty, const Pattern* pattern, Color pattern_bg) {
   rect = rect_intersect(rect, Rect{0, 0, width, height});
   if (rect.empty()) {
     return;
@@ -20,11 +35,8 @@ void fill_rect_color(std::uint8_t* rgba, int width, int height, int stride, Rect
   for (int y = rect.y; y < rect.y2(); ++y) {
     std::uint8_t* row = rgba + static_cast<std::size_t>(y) * stride;
     for (int x = rect.x; x < rect.x2(); ++x) {
-      std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
-      p[0] = color.r;
-      p[1] = color.g;
-      p[2] = color.b;
-      p[3] = color.a;
+      put_color(row + static_cast<std::size_t>(x) * 4,
+                fill_color_at(x, y, color, pattern, pattern_bg));
     }
   }
   if (dirty != nullptr) {
@@ -85,7 +97,7 @@ void draw_line(std::uint8_t* rgba, int width, int height, int stride, int x0, in
 
 void draw_rectangle(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0, int x1,
                     int y1, int thickness, Color color, ShapeFillMode mode, bool antialias,
-                    Rect* dirty) {
+                    Rect* dirty, const Pattern* pattern, Color pattern_bg) {
   if (thickness < 1) {
     thickness = 1;
   }
@@ -95,7 +107,7 @@ void draw_rectangle(std::uint8_t* rgba, int width, int height, int stride, int x
   const int bottom = std::max(y0, y1);
   if (mode == ShapeFillMode::Fill || mode == ShapeFillMode::Both) {
     fill_rect_color(rgba, width, height, stride, Rect{left, top, right - left + 1, bottom - top + 1},
-                    color, dirty);
+                    color, dirty, pattern, pattern_bg);
   }
   if (mode == ShapeFillMode::Stroke || mode == ShapeFillMode::Both) {
     draw_line(rgba, width, height, stride, left, top, right, top, thickness, color, antialias,
@@ -111,7 +123,7 @@ void draw_rectangle(std::uint8_t* rgba, int width, int height, int stride, int x
 
 void draw_ellipse(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0, int x1,
                   int y1, int thickness, Color color, ShapeFillMode mode, bool antialias,
-                  Rect* dirty) {
+                  Rect* dirty, const Pattern* pattern, Color pattern_bg) {
   if (rgba == nullptr) {
     return;
   }
@@ -149,25 +161,18 @@ void draw_ellipse(std::uint8_t* rgba, int width, int height, int stride, int x0,
       const double nx = dx * inv_rx;
       const double ny = dy * inv_ry;
       const double rnorm = std::sqrt(nx * nx + ny * ny);
-      bool hit = false;
-      if (do_fill && rnorm <= 1.0) {
-        hit = true;
-      }
-      if (do_stroke) {
-        const double along = std::hypot(dx / rx, dy / ry);
-        const double dist_px = std::abs(along - 1.0) * std::min(rx, ry);
-        if (dist_px <= thick * 0.5 + (antialias ? 0.5 : 0.0)) {
-          hit = true;
-        }
-      }
-      if (!hit) {
+      const double along = std::hypot(dx / rx, dy / ry);
+      const double dist_px = std::abs(along - 1.0) * std::min(rx, ry);
+      const bool on_fill = do_fill && rnorm <= 1.0;
+      const bool on_stroke = do_stroke && dist_px <= thick * 0.5 + (antialias ? 0.5 : 0.0);
+      if (!on_fill && !on_stroke) {
         continue;
       }
-      std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
-      p[0] = color.r;
-      p[1] = color.g;
-      p[2] = color.b;
-      p[3] = color.a;
+      Color paint = color;
+      if (on_fill && !on_stroke) {
+        paint = fill_color_at(x, y, color, pattern, pattern_bg);
+      }
+      put_color(row + static_cast<std::size_t>(x) * 4, paint);
     }
   }
   if (dirty != nullptr) {
@@ -177,7 +182,7 @@ void draw_ellipse(std::uint8_t* rgba, int width, int height, int stride, int x0,
 
 void draw_rounded_rect(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0,
                        int x1, int y1, int thickness, int radius, Color color, ShapeFillMode mode,
-                       bool antialias, Rect* dirty) {
+                       bool antialias, Rect* dirty, const Pattern* pattern, Color pattern_bg) {
   if (rgba == nullptr) {
     return;
   }
@@ -218,21 +223,16 @@ void draw_rounded_rect(std::uint8_t* rgba, int width, int height, int stride, in
       const double ox = std::max(dx, 0.0);
       const double oy = std::max(dy, 0.0);
       const double sdf = std::sqrt(ox * ox + oy * oy) + std::min(std::max(dx, dy), 0.0) - r;
-      bool hit = false;
-      if (do_fill && sdf <= 0.0) {
-        hit = true;
-      }
-      if (do_stroke && std::abs(sdf) <= thick + aa) {
-        hit = true;
-      }
-      if (!hit) {
+      const bool on_fill = do_fill && sdf <= 0.0;
+      const bool on_stroke = do_stroke && std::abs(sdf) <= thick + aa;
+      if (!on_fill && !on_stroke) {
         continue;
       }
-      std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
-      p[0] = color.r;
-      p[1] = color.g;
-      p[2] = color.b;
-      p[3] = color.a;
+      Color paint = color;
+      if (on_fill && !on_stroke) {
+        paint = fill_color_at(x, y, color, pattern, pattern_bg);
+      }
+      put_color(row + static_cast<std::size_t>(x) * 4, paint);
     }
   }
   if (dirty != nullptr) {
@@ -312,7 +312,7 @@ void fill_polygon_mask(std::uint8_t* mask, int width, int height, const int* xs,
 
 void draw_polygon(std::uint8_t* rgba, int width, int height, int stride, const int* xs,
                   const int* ys, int count, int thickness, Color color, ShapeFillMode mode,
-                  bool antialias, Rect* dirty) {
+                  bool antialias, Rect* dirty, const Pattern* pattern, Color pattern_bg) {
   if (rgba == nullptr || xs == nullptr || ys == nullptr || count < 1) {
     return;
   }
@@ -332,11 +332,8 @@ void draw_polygon(std::uint8_t* rgba, int width, int height, int stride, const i
                    static_cast<std::size_t>(x)] == 0) {
             continue;
           }
-          std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
-          p[0] = color.r;
-          p[1] = color.g;
-          p[2] = color.b;
-          p[3] = color.a;
+          put_color(row + static_cast<std::size_t>(x) * 4,
+                    fill_color_at(x, y, color, pattern, pattern_bg));
           if (x < minx) {
             minx = x;
           }

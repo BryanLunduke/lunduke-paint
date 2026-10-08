@@ -19,8 +19,10 @@
 #include "tools/rail_options.hpp"
 #include "ui/canvas_view.hpp"
 #include "ui/intro_howdy.hpp"
+#include "ui/layers_panel.hpp"
 #include "ui/status_bar.hpp"
 #include "ui/toolbox.hpp"
+#include "ui/toolbox_catalog.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -37,6 +39,7 @@
 
 #include "tools/tool.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -46,6 +49,7 @@ using lundukepaint::CanvasView;
 using lundukepaint::Color;
 using lundukepaint::Document;
 using lundukepaint::Layer;
+using lundukepaint::LayersPanel;
 using lundukepaint::StatusBar;
 using lundukepaint::Toolbox;
 using lundukepaint::configure_rail_check;
@@ -153,7 +157,6 @@ int main(int argc, char** argv) {
     expect(toolbox.tool_columns_equal_width(), "the two tool columns have equal width");
     expect(toolbox.width_tracks_tool_grid(),
            "toolbox width hugs tool grid (allocated <= grid + ~36px of pad/air)");
-    // FG/BG wells live on the MacPaint-style pattern strip (0.5-3), not the toolbox.
     window.hide();
     pump(50);
   }
@@ -422,6 +425,87 @@ int main(int argc, char** argv) {
     }
     window.hide();
     pump(30);
+  }
+
+  // Round 6: catalog tools highlight, square buttons, full-width width picker.
+  {
+    Gtk::Window window;
+    window.set_default_size(280, 640);
+    Toolbox toolbox;
+    int count = 0;
+    const lundukepaint::ToolboxTool* tools = lundukepaint::toolbox_tools(count);
+    for (int i = 0; i < count; ++i) {
+      toolbox.add_tool_button(tools[i].id, tools[i].tooltip, tools[i].icon);
+    }
+    window.add(toolbox);
+    window.show_all();
+    pump(160);
+    toolbox.set_active_tool("curve");
+    pump(40);
+    expect(toolbox.tool_button_selected("curve"), "curve button follows the active tool");
+    expect(!toolbox.tool_button_selected("pencil"), "pencil highlight cleared when curve is active");
+    toolbox.set_active_tool("magic-wand");
+    pump(20);
+    expect(toolbox.tool_button_selected("magic-wand"), "magic wand button follows the key-selectable tool");
+    expect(!toolbox.tool_button_selected("curve"), "previous tool highlight cleared");
+    const int button_w = toolbox.tool_button_width();
+    expect(button_w > 8 && button_w <= 36, "tool buttons stay square");
+    expect(toolbox.width_tracks_tool_grid(), "tool grid does not stretch across the rail");
+    expect(toolbox.get_allocated_width() >= 220, "rail stays at least 220px");
+    toolbox.set_active_tool("line");
+    pump(40);
+    expect(toolbox.line_width_picker_width() >= 160, "line-width picker uses the rail width");
+    window.hide();
+    pump(30);
+  }
+
+  // Zoom to Fit keeps a free ratio for an 800×600 picture in a wide window.
+  {
+    Gtk::Window window;
+    window.set_default_size(1100, 720);
+    Gtk::Box row(Gtk::ORIENTATION_HORIZONTAL, 0);
+    Toolbox rail;
+    rail.set_size_request(220, -1);
+    CanvasView canvas;
+    Gtk::Box dock(Gtk::ORIENTATION_VERTICAL, 0);
+    dock.set_size_request(240, -1);
+    row.pack_start(rail, Gtk::PACK_SHRINK);
+    row.pack_start(canvas, Gtk::PACK_EXPAND_WIDGET);
+    row.pack_start(dock, Gtk::PACK_SHRINK);
+    window.add(row);
+    window.show_all();
+    pump(250);
+    auto picture = Document::create(800, 600, Color::white());
+    canvas.set_document(picture.get());
+    canvas.zoom_fit();
+    pump(80);
+    const double fitted = canvas.zoom();
+    std::printf("test_widgets: zoom-to-fit 800x600 -> %.4f\n", fitted);
+    expect(fitted > 0.55 && fitted < 0.98, "zoom to fit is between 50% and 100%");
+    expect(std::abs(fitted - 0.5) > 0.04 && std::abs(fitted - 1.0) > 0.04,
+           "zoom to fit is not snapped to 50% or 100%");
+    window.hide();
+    pump(30);
+  }
+
+  // Opacity and blend for the current layer live on the layers panel.
+  {
+    Gtk::Window window;
+    window.set_default_size(240, 420);
+    LayersPanel panel;
+    auto picture = Document::create(32, 32, Color::white());
+    window.add(panel);
+    panel.set_document(picture.get());
+    window.show_all();
+    pump(80);
+    expect(panel.opacity_percent() == 100, "new layer shows 100% opacity");
+    expect(panel.blend_text() == "Normal", "new layer shows Normal blend");
+    picture->set_layer_opacity(0, 0.4f);
+    panel.refresh();
+    pump(30);
+    expect(panel.opacity_percent() == 40, "panel shows the current layer opacity");
+    window.hide();
+    pump(20);
   }
 
   if (errors != 0) {

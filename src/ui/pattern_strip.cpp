@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include <gtkmm/label.h>
+
 namespace lundukepaint {
 namespace {
 constexpr int kSwatch = 18;
@@ -15,6 +17,10 @@ PatternStrip::PatternStrip() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 4) {
   set_border_width(3);
   set_size_request(-1, 48);
   get_style_context()->add_class("toolbar");
+  auto* label = Gtk::manage(new Gtk::Label("Patterns"));
+  label->set_valign(Gtk::ALIGN_CENTER);
+  label->set_tooltip_text("Patterns for the brush, the fill bucket, and filled-shape interiors");
+  pack_start(*label, Gtk::PACK_SHRINK);
 
   swatches_.set_row_spacing(1);
   swatches_.set_column_spacing(1);
@@ -23,7 +29,7 @@ PatternStrip::PatternStrip() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 4) {
   for (int i = 0; i < kPatternCount; ++i) {
     auto* area = Gtk::manage(new Gtk::DrawingArea());
     area->set_size_request(kSwatch, kSwatch);
-    area->set_tooltip_text("Pattern");
+    area->set_tooltip_text("Pattern for the brush, fill bucket, and filled shapes");
     area->add_events(Gdk::BUTTON_PRESS_MASK);
     const int index = i;
     area->signal_draw().connect(

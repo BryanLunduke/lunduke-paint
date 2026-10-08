@@ -134,7 +134,8 @@ void RectangleTool::preview(int x1, int y1, bool constrain) {
   const int ox = active.offset_x();
   const int oy = active.offset_y();
   draw_rectangle(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy,
-                 x1_ - ox, y1_ - oy, stroke_px(), stroke_color(button_), mode(), antialias_, &dirty_);
+                 x1_ - ox, y1_ - oy, stroke_px(), stroke_color(button_), mode(), antialias_, &dirty_,
+                 shape_pattern(mode()), pattern_back(button_));
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
   host_->invalidate_canvas(layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
 }

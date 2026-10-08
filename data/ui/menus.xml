@@ -53,11 +53,11 @@
       <attribute name="label" translatable="yes">_Edit</attribute>
       <section>
         <item>
-          <attribute name="label" translatable="yes">Undo</attribute>
+          <attribute name="label" translatable="yes">Und_o</attribute>
           <attribute name="action">win.undo</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Redo</attribute>
+          <attribute name="label" translatable="yes">_Redo</attribute>
           <attribute name="action">win.redo</attribute>
         </item>
       </section>
@@ -116,19 +116,19 @@
       <attribute name="label" translatable="yes">_View</attribute>
       <section>
         <item>
-          <attribute name="label" translatable="yes">Zoom In</attribute>
+          <attribute name="label" translatable="yes">Zoom _In</attribute>
           <attribute name="action">win.zoom-in</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Zoom Out</attribute>
+          <attribute name="label" translatable="yes">Zoom _Out</attribute>
           <attribute name="action">win.zoom-out</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Actual Size</attribute>
+          <attribute name="label" translatable="yes">_Actual Size</attribute>
           <attribute name="action">win.zoom-100</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Zoom to Fit</attribute>
+          <attribute name="label" translatable="yes">Zoom to Fi_t</attribute>
           <attribute name="action">win.zoom-fit</attribute>
         </item>
         <item>
@@ -136,7 +136,7 @@
           <attribute name="action">win.toggle-grid</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Right Dock</attribute>
+          <attribute name="label" translatable="yes">_Layers, History, and Colors</attribute>
           <attribute name="action">win.toggle-right-dock</attribute>
         </item>
         <item>
@@ -149,45 +149,45 @@
       <attribute name="label" translatable="yes">_Image</attribute>
       <section>
         <item>
-          <attribute name="label" translatable="yes">Canvas Size…</attribute>
+          <attribute name="label" translatable="yes">_Canvas Size…</attribute>
           <attribute name="action">win.canvas-size</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Scale…</attribute>
+          <attribute name="label" translatable="yes">_Scale…</attribute>
           <attribute name="action">win.scale</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Crop to Selection</attribute>
+          <attribute name="label" translatable="yes">Cro_p to Selection</attribute>
           <attribute name="action">win.crop</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Autocrop</attribute>
+          <attribute name="label" translatable="yes">_Autocrop</attribute>
           <attribute name="action">win.autocrop</attribute>
         </item>
       </section>
       <section>
         <item>
-          <attribute name="label" translatable="yes">Rotate 90°</attribute>
+          <attribute name="label" translatable="yes">Rotate 90° Cloc_kwise</attribute>
           <attribute name="action">win.rotate-90</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Rotate 180°</attribute>
+          <attribute name="label" translatable="yes">Rotate 1_80°</attribute>
           <attribute name="action">win.rotate-180</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Rotate 270° / CCW</attribute>
+          <attribute name="label" translatable="yes">Rotate 270° CC_W</attribute>
           <attribute name="action">win.rotate-ccw</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Flip Horizontal</attribute>
+          <attribute name="label" translatable="yes">Flip _Horizontal</attribute>
           <attribute name="action">win.flip-h</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Flip Vertical</attribute>
+          <attribute name="label" translatable="yes">Flip _Vertical</attribute>
           <attribute name="action">win.flip-v</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Clear</attribute>
+          <attribute name="label" translatable="yes">Clea_r</attribute>
           <attribute name="action">win.clear</attribute>
         </item>
       </section>
@@ -237,7 +237,7 @@
       <attribute name="label" translatable="yes">_Adjustments</attribute>
       <section>
         <item>
-          <attribute name="label" translatable="yes">Brightness / Contrast…</attribute>
+          <attribute name="label" translatable="yes">_Brightness / Contrast…</attribute>
           <attribute name="action">win.adjust-brightness</attribute>
         </item>
         <item>
@@ -259,7 +259,7 @@
       </section>
     </submenu>
     <submenu>
-      <attribute name="label" translatable="yes">_Effects</attribute>
+      <attribute name="label" translatable="yes">Effec_ts</attribute>
       <section>
         <item>
           <attribute name="label" translatable="yes">_Blur…</attribute>

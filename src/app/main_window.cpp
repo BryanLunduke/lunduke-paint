@@ -23,6 +23,7 @@
 #include "ui/dialogs_new.hpp"
 #include "ui/dialogs_prefs.hpp"
 #include "ui/intro_howdy.hpp"
+#include "ui/toolbox_catalog.hpp"
 #include "tools/tools.hpp"
 
 #include <unistd.h>
@@ -275,28 +276,13 @@ void MainWindow::build_ui() {
   canvas_.set_hexpand(true);
   canvas_.set_vexpand(true);
 
-  // MacPaint order: 2×10 tool grid (lasso/marquee, hand/text, bucket/spray,
-  // brush/pencil, line/eraser, then hollow+filled shapes).
-  toolbox_.add_tool_button("lasso", "Freeform select (M)", "tool-select-lasso-freeform-symbolic");
-  toolbox_.add_tool_button("rect-select", "Rectangle select (S)", "tool-select-rectangle-symbolic");
-  toolbox_.add_tool_button("hand", "Hand / pan (H)", "tool-hand-symbolic");
-  toolbox_.add_tool_button("text", "Text (T)", "tool-text-symbolic");
-  toolbox_.add_tool_button("fill", "Flood fill (F)", "tool-paintbucket-symbolic");
-  toolbox_.add_tool_button("spray", "Spraycan (Y)", "tool-spray-symbolic");
-  toolbox_.add_tool_button("brush", "Brush (B)", "tool-paintbrush-symbolic");
-  toolbox_.add_tool_button("pencil", "Pencil (P)", "tool-pencil-symbolic");
-  toolbox_.add_tool_button("line", "Line (L)", "tool-line-symbolic");
-  toolbox_.add_tool_button("eraser", "Eraser (A)", "tool-eraser-symbolic");
-  toolbox_.add_tool_button("rectangle", "Rectangle outline (R)", "tool-rectangle-symbolic");
-  toolbox_.add_tool_button("rectangle-fill", "Rectangle filled (J)", "tool-rectangle-filled-symbolic");
-  toolbox_.add_tool_button("rounded-rect", "Rounded rectangle outline (U)", "tool-rectangle-rounded-symbolic");
-  toolbox_.add_tool_button("rounded-rect-fill", "Rounded rectangle filled (U)", "tool-rectangle-rounded-filled-symbolic");
-  toolbox_.add_tool_button("ellipse", "Ellipse outline (E)", "tool-ellipse-symbolic");
-  toolbox_.add_tool_button("ellipse-fill", "Ellipse filled (Z)", "tool-ellipse-filled-symbolic");
-  toolbox_.add_tool_button("freeform", "Freeform outline (K)", "tool-freeformshape-symbolic");
-  toolbox_.add_tool_button("freeform-fill", "Freeform filled (O)", "tool-freeformshape-filled-symbolic");
-  toolbox_.add_tool_button("polygon", "Polygon outline (G)", "tool-select-lasso-polygon-symbolic");
-  toolbox_.add_tool_button("polygon-fill", "Polygon filled (Q)", "tool-polygon-filled-symbolic");
+  // MacPaint order, then the tools that used to be keyboard-only. Icons are the
+  // app's own symbolic SVGs.
+  int catalog_count = 0;
+  const ToolboxTool* catalog = toolbox_tools(catalog_count);
+  for (int i = 0; i < catalog_count; ++i) {
+    toolbox_.add_tool_button(catalog[i].id, catalog[i].tooltip, catalog[i].icon);
+  }
   toolbox_.on_tool_chosen = [this](const std::string& id) {
     set_active_tool(id);
     canvas_.focus_canvas();
@@ -307,6 +293,9 @@ void MainWindow::build_ui() {
   toolbox_.set_brush_tip(brush_tip_);
   toolbox_.on_spray_radius_chosen = [this](int radius) { set_spray_radius(radius); };
   toolbox_.set_spray_radius(spray_radius_);
+  toolbox_.on_swap_colors = [this]() { document().swap_colors(); };
+  toolbox_.on_reset_colors = [this]() { document().reset_colors(); };
+  toolbox_.on_edit_color = [this](bool background) { choose_color(background); };
 
   pattern_strip_.on_pattern_chosen = [this](int index) { set_pattern_index(index); };
   colors_panel_.on_swatch = [this](Color color, bool background) {
@@ -424,7 +413,7 @@ void MainWindow::build_toolbar() {
   toolbar_.pack_start(*toolbar_button("zoom-original", "100%", "win.zoom-100"), Gtk::PACK_SHRINK);
   toolbar_.pack_start(*toolbar_button("zoom-in", "Zoom in", "win.zoom-in"), Gtk::PACK_SHRINK);
   toolbar_.pack_start(*Gtk::manage(new Gtk::Separator(Gtk::ORIENTATION_VERTICAL)), Gtk::PACK_SHRINK);
-  toolbar_.pack_start(*toolbar_button("view-sidebar-end-symbolic", "Right dock (F12)",
+  toolbar_.pack_start(*toolbar_button("view-sidebar-end-symbolic", "Layers, history, and colors (F12)",
                                      "win.toggle-right-dock"),
                       Gtk::PACK_SHRINK);
 }
@@ -780,6 +769,7 @@ void MainWindow::update_chrome() {
   }
   pattern_strip_.set_colors(document().foreground(), document().background());
   colors_panel_.set_colors(document().foreground(), document().background());
+  toolbox_.set_colors(document().foreground(), document().background());
   canvas_.refresh_size();
   layers_panel_.refresh();
   history_panel_.refresh();
@@ -2348,12 +2338,26 @@ void MainWindow::action_adjust_posterize() {
 
 void MainWindow::action_effect_blur() {
   BlurDialog dialog(*this);
-  run_adjust_dialog(dialog, "Blur", [&dialog]() -> EffectPreview::EffectFn {
+  Rect region{};
+  bool limited = false;
+  if (document_ptr() != nullptr) {
+    const Selection& sel = document().selection();
+    if (!sel.empty() && !sel.inverted()) {
+      const Layer& layer = document().layers().active_layer();
+      const Rect bounds = sel.bounds();
+      region = rect_intersect(Rect{bounds.x - layer.offset_x(), bounds.y - layer.offset_y(), bounds.w,
+                                   bounds.h},
+                              Rect{0, 0, layer.width(), layer.height()});
+      limited = !region.empty();
+    }
+  }
+  run_adjust_dialog(dialog, "Blur", [&dialog, limited, region]() -> EffectPreview::EffectFn {
     const int radius = dialog.radius();
-    return [radius](std::uint8_t* px, int w, int h, int stride) {
+    return [radius, limited, region](std::uint8_t* px, int w, int h, int stride) {
       std::vector<std::uint8_t> src(static_cast<std::size_t>(h) * static_cast<std::size_t>(stride));
       std::memcpy(src.data(), px, src.size());
-      box_blur_rgba(src.data(), w, h, stride, px, stride, radius);
+      const Rect area = limited ? region : Rect{0, 0, w, h};
+      box_blur_rect(src.data(), w, h, stride, px, stride, radius, area);
     };
   });
 }

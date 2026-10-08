@@ -2,6 +2,7 @@
 #ifndef LUNDUKEPAINT_RASTER_BRUSH_TIP_HPP
 #define LUNDUKEPAINT_RASTER_BRUSH_TIP_HPP
 
+#include "raster/pattern.hpp"
 #include "raster/types.hpp"
 
 #include <cstdint>
@@ -31,11 +32,13 @@ int clamp_brush_tip_index(int index);
 
 // Stamp one tip centered at (cx, cy). Hard edges (MacPaint-like).
 void stamp_brush_tip(std::uint8_t* rgba, int width, int height, int stride, double cx, double cy,
-                     const BrushTip& tip, Color color, Rect* dirty);
+                     const BrushTip& tip, Color color, Rect* dirty, const Pattern* pattern = nullptr,
+                     Color pattern_bg = Color::white());
 
 // Sampled stroke of tip stamps along a segment.
 void stroke_brush_tip(std::uint8_t* rgba, int width, int height, int stride, double x0, double y0,
-                      double x1, double y1, const BrushTip& tip, Color color, Rect* dirty);
+                      double x1, double y1, const BrushTip& tip, Color color, Rect* dirty,
+                      const Pattern* pattern = nullptr, Color pattern_bg = Color::white());
 
 }  // namespace lundukepaint
 

@@ -160,6 +160,7 @@ void blend_layer_rect(std::uint8_t* dest, int dest_w, int dest_h, int dest_strid
   if (vw < 1 || vh < 1) {
     return;
   }
+  const bool replace = mode == BlendMode::Normal && opacity >= 0.999f;
   for (int y = 0; y < vh; ++y) {
     const int src_y = (view.y + y) - offset_y;
     if (src_y < 0 || src_y >= src_h) {
@@ -167,13 +168,32 @@ void blend_layer_rect(std::uint8_t* dest, int dest_w, int dest_h, int dest_strid
     }
     std::uint8_t* drow = dest + static_cast<std::size_t>(y) * dest_stride;
     const std::uint8_t* srow = src + static_cast<std::size_t>(src_y) * src_stride;
-    for (int x = 0; x < vw; ++x) {
+    int x = 0;
+    while (x < vw) {
       const int src_x = (view.x + x) - offset_x;
       if (src_x < 0 || src_x >= src_w) {
+        ++x;
         continue;
       }
-      blend_pixel(drow + static_cast<std::size_t>(x) * 4,
-                  srow + static_cast<std::size_t>(src_x) * 4, mode, opacity);
+      const std::uint8_t* s = srow + static_cast<std::size_t>(src_x) * 4;
+      if (replace && s[3] == 255) {
+        int run = 1;
+        while (x + run < vw) {
+          const int sx = (view.x + x + run) - offset_x;
+          if (sx < 0 || sx >= src_w) {
+            break;
+          }
+          if (srow[static_cast<std::size_t>(sx) * 4 + 3] != 255) {
+            break;
+          }
+          ++run;
+        }
+        std::memcpy(drow + static_cast<std::size_t>(x) * 4, s, static_cast<std::size_t>(run) * 4);
+        x += run;
+        continue;
+      }
+      blend_pixel(drow + static_cast<std::size_t>(x) * 4, s, mode, opacity);
+      ++x;
     }
   }
 }

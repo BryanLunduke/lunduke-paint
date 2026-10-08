@@ -113,7 +113,7 @@ void BrushTool::stamp_to(double x, double y) {
   const double y1 = y - active.offset_y();
   Rect stamp{};
   stroke_brush_tip(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1, tip,
-                   stroke_color(button_), &stamp);
+                   stroke_color(button_), &stamp, &host_->active_pattern(), pattern_back(button_));
   dirty_ = rect_union(dirty_, stamp);
   clip_rect_to_selection(tool, active, stamp, host_->document().selection());
   last_x_ = x;

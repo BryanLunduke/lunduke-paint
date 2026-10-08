@@ -25,7 +25,9 @@ public:
   const char* id() const override { return "fill"; }
   const char* name() const override { return "Flood fill"; }
   char shortcut() const override { return 'F'; }
-  const char* hint() const override { return "Fill: click a region; right uses BG"; }
+  const char* hint() const override {
+    return "Fill: click a region; uses the pattern strip; right uses BG";
+  }
   Gtk::Widget* options_widget() override;
 
   void on_press(CanvasEvent event) override;

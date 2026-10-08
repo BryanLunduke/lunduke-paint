@@ -4,6 +4,7 @@
 
 #include "raster/types.hpp"
 
+#include <cstddef>
 #include <string>
 
 namespace lundukepaint {
@@ -18,6 +19,8 @@ public:
   virtual void apply(Document& document) = 0;
   virtual void undo(Document& document) = 0;
   virtual Rect dirty_rect() const = 0;
+  // Bytes this step keeps so history can enforce kDefaultUndoBytes.
+  virtual std::size_t memory_bytes() const { return 64; }
 };
 
 }  // namespace lundukepaint

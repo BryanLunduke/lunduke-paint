@@ -368,6 +368,68 @@ Color LayerStack::composite_pixel(int x, int y, const Layer* tool_override, int 
   return {dest[0], dest[1], dest[2], dest[3]};
 }
 
+void LayerStack::composite_scaled(std::uint8_t* dest, int dest_stride, Rect view, int out_w, int out_h,
+                                  const Layer* tool_override, int tool_index, int skip_index,
+                                  Rect out_rect, CompositeWork* work) const {
+  if (work != nullptr) {
+    work->samples = 0;
+  }
+  if (dest == nullptr || view.empty() || out_w < 1 || out_h < 1) {
+    return;
+  }
+  if (out_rect.empty()) {
+    out_rect = Rect{0, 0, out_w, out_h};
+  }
+  out_rect = rect_intersect(out_rect, Rect{0, 0, out_w, out_h});
+  if (out_rect.empty()) {
+    return;
+  }
+  const bool ora = has_ora_stack_ && group_affects_composite(ora_stack_);
+  for (int oy = out_rect.y; oy < out_rect.y2(); ++oy) {
+    std::uint8_t* row = dest + static_cast<std::size_t>(oy) * static_cast<std::size_t>(dest_stride);
+    for (int ox = out_rect.x; ox < out_rect.x2(); ++ox) {
+      const int sx = view.x + static_cast<int>((static_cast<long long>(ox) * view.w + view.w / 2) / out_w);
+      const int sy = view.y + static_cast<int>((static_cast<long long>(oy) * view.h + view.h / 2) / out_h);
+      const int cx = std::clamp(sx, view.x, view.x2() - 1);
+      const int cy = std::clamp(sy, view.y, view.y2() - 1);
+      std::uint8_t* pixel = row + static_cast<std::size_t>(ox) * 4;
+      if (ora) {
+        composite_rect(pixel, 4, Rect{cx, cy, 1, 1}, tool_override, tool_index, skip_index);
+        if (work != nullptr) {
+          work->samples += std::max(1, count());
+        }
+        continue;
+      }
+      pixel[0] = pixel[1] = pixel[2] = pixel[3] = 0;
+      for (int i = 0; i < count(); ++i) {
+        if (i == skip_index) {
+          continue;
+        }
+        const Layer& meta = at(i);
+        if (!meta.visible()) {
+          continue;
+        }
+        const Layer* src = display_layer(i, tool_override, tool_index);
+        const int lx = cx - meta.offset_x();
+        const int ly = cy - meta.offset_y();
+        if (lx < 0 || ly < 0 || lx >= src->width() || ly >= src->height()) {
+          continue;
+        }
+        const std::uint8_t* s = src->pixels() + static_cast<std::size_t>(ly) * src->stride() +
+                                static_cast<std::size_t>(lx) * 4;
+        if (work != nullptr) {
+          ++work->samples;
+        }
+        if (meta.blend() == BlendMode::Normal && meta.opacity() >= 0.999f && s[3] == 255) {
+          std::memcpy(pixel, s, 4);
+        } else {
+          blend_pixel(pixel, s, meta.blend(), meta.opacity());
+        }
+      }
+    }
+  }
+}
+
 namespace {
 
 int forward_coverage(int src_a, int dest_a) {
