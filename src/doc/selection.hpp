@@ -31,6 +31,9 @@ struct SelectionState {
   int origin_h = 0;
   std::vector<std::uint8_t> float_pixels;
   std::vector<std::uint8_t> float_coverage;
+  // Coverage of the lifted origin. Transforms resample float_coverage and
+  // leave this grid alone, so the hole stays the lasso that was lifted.
+  std::vector<std::uint8_t> origin_coverage;
   std::vector<std::uint8_t> mask;
   int mask_w = 0;
   int mask_h = 0;
@@ -93,6 +96,8 @@ public:
   }
   bool has_float_coverage() const { return !float_coverage_.empty(); }
   bool float_covers(int local_x, int local_y) const;
+  // Local to the origin rect. Empty coverage means the whole origin is covered.
+  bool origin_covers(int local_x, int local_y) const;
   Color float_pixel(int x, int y) const;
 
   // Layer the pixels were lifted from. -1 until lift / paste.
@@ -114,8 +119,20 @@ public:
   // canvas space. `source_index` is the layer the pixels must commit back to.
   bool lift(const Layer& layer, int source_index = -1);
 
-  void set_float_pixels(int x, int y, int w, int h, std::vector<std::uint8_t> rgba);
-  void transform_float(int x, int y, int w, int h, std::vector<std::uint8_t> rgba);
+  void set_float_pixels(int x, int y, int w, int h, std::vector<std::uint8_t> rgba,
+                        std::vector<std::uint8_t> coverage = {});
+  // `coverage` is local to the new buffer. Empty means every pixel is covered.
+  // The origin hole keeps the coverage captured at lift.
+  void transform_float(int x, int y, int w, int h, std::vector<std::uint8_t> rgba,
+                       std::vector<std::uint8_t> coverage = {});
+  // Nearest-neighbor scale of `src` (and its coverage) into the float.
+  void scale_float_nearest(int x, int y, int new_w, int new_h, const std::uint8_t* src, int src_w,
+                           int src_h, const std::uint8_t* coverage);
+  // Clockwise 90° steps from `src`, placed at (x, y). Coverage turns with the pixels.
+  void rotate_float_steps(int steps, int x, int y, const std::uint8_t* src, int src_w, int src_h,
+                          const std::uint8_t* coverage);
+  void flip_horizontal();
+  void flip_vertical();
   void move_float(int x, int y);
   void drop_float();
 
@@ -136,6 +153,7 @@ private:
   int origin_h_ = 0;
   std::vector<std::uint8_t> float_pixels_;
   std::vector<std::uint8_t> float_coverage_;
+  std::vector<std::uint8_t> origin_coverage_;
   std::vector<std::uint8_t> mask_;
   int mask_w_ = 0;
   int mask_h_ = 0;
@@ -148,9 +166,11 @@ private:
 void clip_rect_to_selection(Layer& dest, const Layer& source, Rect rect, const Selection& sel);
 void fill_selection(Layer& layer, const Selection& sel, Color color, Rect* dirty);
 void copy_selection_rgba(const Layer& layer, const Selection& sel, int canvas_w, int canvas_h,
-                         int& out_w, int& out_h, std::vector<std::uint8_t>& out);
+                         int& out_w, int& out_h, std::vector<std::uint8_t>& out,
+                         std::vector<std::uint8_t>* coverage = nullptr);
 void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas_w, int canvas_h,
-                      int& out_w, int& out_h, std::vector<std::uint8_t>& out);
+                      int& out_w, int& out_h, std::vector<std::uint8_t>& out,
+                      std::vector<std::uint8_t>* coverage = nullptr);
 void blit_rgba(Layer& dest, int dx, int dy, const std::uint8_t* src, int sw, int sh, int sstride,
                bool skip_transparent, const std::uint8_t* coverage = nullptr);
 

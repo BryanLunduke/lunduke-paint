@@ -21,7 +21,7 @@ inline const ShortcutHelpRow* shortcut_help_rows(int& count) {
       {"Cut / Copy / Paste / Select all", "Ctrl+X / C / V / A"},
       {"Deselect", "Ctrl+D"},
       {"Escape",
-       "Cancels the text box or the in-progress shape; deselects only when nothing is in progress"},
+       "Cancels the text box, the in-progress shape, or a resting float; deselects only when nothing is in progress"},
       {"Delete selection", "Delete"},
       {"Duplicate selection", "Ctrl+J"},
       {"New layer", "Ctrl+Shift+N"},

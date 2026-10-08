@@ -325,6 +325,24 @@ test_review_r4 = executable(
 )
 test('review_r4', test_review_r4)
 
+# Round-5 review: float dirty/undo for every origin, masked transforms and
+# paste, close-save that waits for a file name, blank text, Escape on a float.
+test_review_r5 = executable(
+  'test_review_r5',
+  files(
+    'tests/test_review_r5.cpp',
+    'src/app/live_edit.cpp',
+    'src/tools/tool.cpp',
+    'src/tools/tool_text.cpp',
+    'src/tools/selection_xform.cpp',
+  ),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
+test('review_r5', test_review_r5)
+
 install_data(
   'data/org.lunduke.LundukePaint.desktop',
   install_dir: join_paths(get_option('datadir'), 'applications'),

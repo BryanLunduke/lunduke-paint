@@ -19,7 +19,7 @@
 namespace lundukepaint {
 
 namespace {
-constexpr int kToolboxMaxWidth = 92;
+constexpr int kRailMinWidth = 220;
 constexpr int kGridWidthSlop = 36;
 constexpr int kSideAir = 8;
 constexpr int kLineChoices[5] = {1, 2, 3, 5, 8};
@@ -84,10 +84,7 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   grid_.set_halign(Gtk::ALIGN_START);
   grid_.set_margin_start(kSideAir);
   grid_.set_margin_end(kSideAir);
-  pack_start(grid_, Gtk::PACK_SHRINK);
-  set_size_request(tool_grid_natural_width() + static_cast<int>(get_border_width()) * 2 +
-                       kSideAir * 2,
-                   -1);
+  rail_.pack_start(grid_, Gtk::PACK_SHRINK);
   grid_.signal_size_allocate().connect(sigc::mem_fun(*this, &Toolbox::on_grid_size_allocate));
 
   // Little air + hairline between the tool grid and the stroke/brush pickers.
@@ -96,7 +93,7 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   rail_sep->set_margin_end(kSideAir);
   rail_sep->set_margin_top(6);
   rail_sep->set_margin_bottom(6);
-  pack_start(*rail_sep, Gtk::PACK_SHRINK);
+  rail_.pack_start(*rail_sep, Gtk::PACK_SHRINK);
 
   options_stack_.set_transition_type(Gtk::STACK_TRANSITION_TYPE_NONE);
   options_stack_.set_margin_start(kSideAir);
@@ -136,18 +133,30 @@ Toolbox::Toolbox() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   empty_options_.set_size_request(grid_w, 8);
   options_stack_.add(empty_options_, "none", "None");
 
-  pack_start(options_stack_, Gtk::PACK_SHRINK);
+  rail_.pack_start(options_stack_, Gtk::PACK_SHRINK);
   options_stack_.set_visible_child("line");
 
   tool_options_.set_margin_start(kSideAir);
   tool_options_.set_margin_end(kSideAir);
-  tool_options_.set_hexpand(false);
+  tool_options_.set_hexpand(true);
   tool_options_.set_halign(Gtk::ALIGN_FILL);
   tool_options_.get_style_context()->add_class("toolbox-options");
-  tool_options_.set_size_request(grid_w, -1);
   tool_options_.set_no_show_all(true);
   tool_options_.hide();
-  pack_start(tool_options_, Gtk::PACK_SHRINK);
+  rail_.pack_start(tool_options_, Gtk::PACK_SHRINK);
+
+  scroll_.set_policy(Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
+  scroll_.set_propagate_natural_width(true);
+  scroll_.set_propagate_natural_height(false);
+  scroll_.set_min_content_height(72);
+  scroll_.set_shadow_type(Gtk::SHADOW_NONE);
+  scroll_.set_hexpand(false);
+  scroll_.set_vexpand(true);
+  rail_.set_hexpand(false);
+  rail_.set_halign(Gtk::ALIGN_START);
+  scroll_.add(rail_);
+  pack_start(scroll_, Gtk::PACK_EXPAND_WIDGET);
+  set_vexpand(true);
 }
 
 void Toolbox::add_tool_button(const std::string& id, const std::string& tooltip,
@@ -300,7 +309,10 @@ int Toolbox::tool_grid_natural_width() const {
 
 void Toolbox::get_preferred_width_vfunc(int& minimum_width, int& natural_width) const {
   const int border = static_cast<int>(get_border_width()) * 2;
-  const int w = tool_grid_natural_width() + border + kSideAir * 2;
+  const int grid = tool_grid_natural_width() + border + kSideAir * 2;
+  // The rail is at least wide enough for the font, size, and check labels.
+  // Their own minimums are what the widgets test compares against allocation.
+  const int w = std::max(kRailMinWidth, grid);
   minimum_width = w;
   natural_width = w;
 }
@@ -315,26 +327,20 @@ void Toolbox::size_option_panels() {
 
 void Toolbox::on_grid_size_allocate(Gtk::Allocation& allocation) {
   (void)allocation;
-  const int grid_w = tool_grid_natural_width();
-  const int border = static_cast<int>(get_border_width()) * 2;
-  const int want = grid_w + border + kSideAir * 2;
-  int req_w = 0;
-  int req_h = 0;
-  get_size_request(req_w, req_h);
-  if (req_w != want) {
-    set_size_request(want, -1);
-    size_option_panels();
-  }
+  // Do not pin the rail back to the tool-grid width. That request was what
+  // clipped the font, size, and check labels. The preferred width is the
+  // wider rail, and a size request here would override it.
+  size_option_panels();
 }
 
 bool Toolbox::width_tracks_tool_grid() const {
-  const int box_w = get_allocated_width();
+  const int alloc = grid_.get_allocated_width();
   const int grid_w = tool_grid_natural_width();
-  if (box_w < 1 || grid_w < 1) {
+  if (alloc < 1 || grid_w < 1) {
     return false;
   }
-  const int pad = box_w - grid_w;
-  return pad >= 0 && pad <= kGridWidthSlop && box_w <= kToolboxMaxWidth + kGridWidthSlop;
+  const int pad = alloc - grid_w;
+  return pad >= -1 && pad <= kGridWidthSlop;
 }
 
 int Toolbox::width_at_y(double y) const {

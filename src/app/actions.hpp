@@ -30,6 +30,7 @@ constexpr const char* kCut = "cut";
 constexpr const char* kCopy = "copy";
 constexpr const char* kCopyMerged = "copy-merged";
 constexpr const char* kPaste = "paste";
+constexpr const char* kPasteIntoNew = "paste-into-new";
 constexpr const char* kDelete = "delete";
 constexpr const char* kDuplicate = "duplicate";
 constexpr const char* kSelectAll = "select-all";

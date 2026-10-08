@@ -31,7 +31,10 @@ public:
   double view_zoom() const { return view_zoom_; }
   void set_view_zoom(double zoom) { view_zoom_ = zoom; }
 
-  bool dirty() const { return dirty_ || unsaved_overlay_; }
+  // A floating selection is unsaved work even before it is stamped, including
+  // a paste, move, drag-copy, transform, nudge, or a float that sits entirely
+  // in the margin.
+  bool dirty() const { return dirty_ || unsaved_overlay_ || selection_.floating(); }
   void set_dirty(bool dirty);
   void mark_clean();
   // An open text box (or any overlay) that is not in the layer stack yet.
@@ -83,9 +86,20 @@ public:
   // True when there is no float, or the float was stamped. False when the
   // source layer is locked; the float stays up and nothing else should proceed.
   bool try_commit_floating(const char* name = "Move selection");
+  // Drop a paste/copy, or put a move back on its origin, without stamping.
+  bool cancel_floating();
+  void nudge_floating(int dx, int dy);
+  // Crop to the selection bounds. Pixels the mask does not cover are cleared
+  // so a lasso does not become its bounding rectangle.
+  bool crop_to_selection();
   void delete_selection();
   void duplicate_selection();
-  void paste_floating(int x, int y, int w, int h, std::vector<std::uint8_t> rgba);
+  void paste_floating(int x, int y, int w, int h, std::vector<std::uint8_t> rgba,
+                      std::vector<std::uint8_t> coverage = {});
+  // A new document containing only the covered pixels of a copied selection.
+  static std::unique_ptr<Document> from_masked_paste(int width, int height,
+                                                     const std::uint8_t* rgba,
+                                                     const std::uint8_t* coverage);
   void replace_active_buffer(int width, int height, const std::uint8_t* rgba, int stride);
   void replace_stack(int width, int height, std::vector<std::unique_ptr<Layer>> layers,
                      int active_index);

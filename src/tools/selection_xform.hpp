@@ -34,6 +34,7 @@ private:
   SelHandle handle_{SelHandle::None};
   Rect start_rect_{};
   std::vector<std::uint8_t> orig_pixels_;
+  std::vector<std::uint8_t> orig_coverage_;
   int orig_w_ = 0;
   int orig_h_ = 0;
   double start_angle_ = 0;

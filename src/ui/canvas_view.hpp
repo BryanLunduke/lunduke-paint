@@ -32,6 +32,9 @@ public:
   void set_document(Document* document);
   void set_tool(Tool* tool);
   void set_space_down(bool down);
+  // "crosshair" for draw and select, "text" for the text tool, "hand" for the
+  // hand tool and while Space is held, "default" when no tool is set.
+  const char* canvas_cursor_name() const { return cursor_name_; }
 
   void reset_blank();
   void invalidate_rect(Rect rect);
@@ -98,6 +101,7 @@ private:
   bool on_area_scroll(GdkEventScroll* event);
 
   void update_area_size();
+  void update_cursor();
   unsigned modifiers_from_state(guint state) const;
   CanvasEvent make_event(double widget_x, double widget_y, unsigned button, guint state) const;
   void begin_pan(double root_x, double root_y);
@@ -124,6 +128,7 @@ private:
   Gtk::DrawingArea area_;
   Document* document_{nullptr};
   Tool* tool_{nullptr};
+  const char* cursor_name_{"default"};
   double zoom_{1.0};
   bool grid_visible_{true};
   Color checker_light_{209, 209, 209, 255};

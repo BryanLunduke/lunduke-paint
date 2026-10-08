@@ -502,7 +502,10 @@ bool TextTool::on_commit() {
     return false;
   }
   if (!commit_text_box(host_->document(), state_)) {
-    return false;
+    // Ink that changes no pixels (off the picture, or the same color as the
+    // layer) is an empty edit. Close it so Save and the next tool proceed.
+    close_box();
+    return true;
   }
   close_box();
   return true;

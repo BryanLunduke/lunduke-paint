@@ -12,9 +12,12 @@
 #include "tools/selection_xform.hpp"
 #include "ui/intro_howdy.hpp"
 
+#include <gdkmm/cursor.h>
 #include <glib.h>
 #include <glibmm/main.h>
 #include <gtkmm/adjustment.h>
+
+#include <cstring>
 
 #include <algorithm>
 #include <cmath>
@@ -208,7 +211,41 @@ CanvasView::CanvasView() {
   layout_.set_vexpand(true);
   layout_.put(area_, 0, 0);
   add(layout_);
+  signal_realize().connect(sigc::mem_fun(*this, &CanvasView::update_cursor));
+  area_.signal_realize().connect(sigc::mem_fun(*this, &CanvasView::update_cursor));
   update_area_size();
+}
+
+void CanvasView::update_cursor() {
+  const char* id = tool_ != nullptr && tool_->id() != nullptr ? tool_->id() : "";
+  if (space_down_ || std::strcmp(id, "hand") == 0) {
+    cursor_name_ = "hand";
+  } else if (std::strcmp(id, "text") == 0) {
+    cursor_name_ = "text";
+  } else if (tool_ != nullptr) {
+    cursor_name_ = "crosshair";
+  } else {
+    cursor_name_ = "default";
+  }
+  auto display = get_display();
+  if (!display) {
+    return;
+  }
+  Gdk::CursorType type = Gdk::LEFT_PTR;
+  if (std::strcmp(cursor_name_, "hand") == 0) {
+    type = Gdk::HAND2;
+  } else if (std::strcmp(cursor_name_, "text") == 0) {
+    type = Gdk::XTERM;
+  } else if (std::strcmp(cursor_name_, "crosshair") == 0) {
+    type = Gdk::CROSSHAIR;
+  }
+  auto cursor = Gdk::Cursor::create(display, type);
+  if (auto window = get_window()) {
+    window->set_cursor(cursor);
+  }
+  if (auto window = area_.get_window()) {
+    window->set_cursor(cursor);
+  }
 }
 
 void CanvasView::set_document(Document* document) {
@@ -226,10 +263,12 @@ void CanvasView::set_document(Document* document) {
 
 void CanvasView::set_tool(Tool* tool) {
   tool_ = tool;
+  update_cursor();
 }
 
 void CanvasView::set_space_down(bool down) {
   space_down_ = down;
+  update_cursor();
 }
 
 void CanvasView::reset_blank() {

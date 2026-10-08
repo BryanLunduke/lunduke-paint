@@ -1,3 +1,15 @@
+lunduke-paint (0.9-6) unstable; urgency=medium
+
+  * A floating selection from paste, move, drag-in, transform, nudge, or a
+    margin placement is unsaved work: it is undoable, and crash recovery
+    stores it. A lasso or ellipse mask stays with scale, rotate, flip, nudge,
+    crop, copy, cut, paste, copy-merged, and paste-into-new.
+  * Save on close waits for a file name. Text that paints nothing no longer
+    blocks Save. The tool rail scrolls instead of clipping, the canvas cursor
+    follows the tool, and Escape cancels a resting float.
+
+ -- Phil <phil@brushpad.local>  Thu, 08 Oct 2026 16:00:00 -0500
+
 lunduke-paint (0.9-5) unstable; urgency=medium
 
   * An in-progress shape, an open text box, pasted text, or a floating

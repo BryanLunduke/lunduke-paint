@@ -134,6 +134,11 @@ bool SelectionXform::on_press(ToolHost* host, CanvasEvent event, double zoom) {
   orig_pixels_.assign(sel.float_pixels(),
                       sel.float_pixels() + static_cast<std::size_t>(orig_w_) *
                                                static_cast<std::size_t>(orig_h_) * 4);
+  orig_coverage_.clear();
+  if (sel.has_float_coverage() && sel.float_coverage() != nullptr) {
+    const std::size_t n = static_cast<std::size_t>(orig_w_) * static_cast<std::size_t>(orig_h_);
+    orig_coverage_.assign(sel.float_coverage(), sel.float_coverage() + n);
+  }
   if (h == SelHandle::Rotate) {
     mode_ = Mode::Rotate;
     const double cx = start_rect_.x + start_rect_.w * 0.5;
@@ -217,10 +222,8 @@ void SelectionXform::on_motion(ToolHost* host, CanvasEvent event) {
         ny = bottom - nh;
       }
     }
-    std::vector<std::uint8_t> scaled(static_cast<std::size_t>(nw) * static_cast<std::size_t>(nh) * 4,
-                                     0);
-    scale_nearest(orig_pixels_.data(), orig_w_, orig_h_, orig_w_ * 4, scaled.data(), nw, nh, nw * 4);
-    sel.transform_float(nx, ny, nw, nh, std::move(scaled));
+    sel.scale_float_nearest(nx, ny, nw, nh, orig_pixels_.data(), orig_w_, orig_h_,
+                            orig_coverage_.empty() ? nullptr : orig_coverage_.data());
   } else if (mode_ == Mode::Rotate) {
     const double cx = start_rect_.x + start_rect_.w * 0.5;
     const double cy = start_rect_.y + start_rect_.h * 0.5;
@@ -230,21 +233,10 @@ void SelectionXform::on_motion(ToolHost* host, CanvasEvent event) {
     if (steps < 0) {
       steps += 4;
     }
-    std::vector<std::uint8_t> cur = orig_pixels_;
-    int cw = orig_w_;
-    int ch = orig_h_;
-    for (int i = 0; i < steps; ++i) {
-      std::vector<std::uint8_t> next(static_cast<std::size_t>(ch) * static_cast<std::size_t>(cw) * 4,
-                                     0);
-      rotate_90_cw(cur.data(), cw, ch, cw * 4, next.data(), ch * 4);
-      cur.swap(next);
-      const int tmp = cw;
-      cw = ch;
-      ch = tmp;
-    }
-    const int nx = static_cast<int>(std::lround(cx - cw * 0.5));
-    const int ny = static_cast<int>(std::lround(cy - ch * 0.5));
-    sel.transform_float(nx, ny, cw, ch, std::move(cur));
+    const int nx = static_cast<int>(std::lround(cx - (steps % 2 == 0 ? orig_w_ : orig_h_) * 0.5));
+    const int ny = static_cast<int>(std::lround(cy - (steps % 2 == 0 ? orig_h_ : orig_w_) * 0.5));
+    sel.rotate_float_steps(steps, nx, ny, orig_pixels_.data(), orig_w_, orig_h_,
+                           orig_coverage_.empty() ? nullptr : orig_coverage_.data());
   }
   host->invalidate_canvas(rect_union(before, sel.dirty_union()));
   doc.notify_selection();
@@ -257,17 +249,19 @@ void SelectionXform::on_release(ToolHost* host) {
   }
   mode_ = Mode::None;
   orig_pixels_.clear();
+  orig_coverage_.clear();
 }
 
 void SelectionXform::on_cancel(ToolHost* host) {
   if (host != nullptr && mode_ != Mode::None && !orig_pixels_.empty()) {
     Selection& sel = host->document().selection();
     const Rect dirty = sel.dirty_union();
-    sel.transform_float(start_rect_.x, start_rect_.y, orig_w_, orig_h_, orig_pixels_);
+    sel.transform_float(start_rect_.x, start_rect_.y, orig_w_, orig_h_, orig_pixels_, orig_coverage_);
     host->invalidate_canvas(rect_union(dirty, sel.dirty_union()));
   }
   mode_ = Mode::None;
   orig_pixels_.clear();
+  orig_coverage_.clear();
 }
 
 }  // namespace lundukepaint

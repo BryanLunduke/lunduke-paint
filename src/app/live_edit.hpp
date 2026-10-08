@@ -214,6 +214,50 @@ inline LiveDisposition live_edit_disposition(LiveKind kind, LivePath path) {
   return LiveDisposition::Stamp;
 }
 
+// Save on close stamps only after a file name has been accepted. Cancelling
+// the chooser (or never reaching a path) leaves the live edit up.
+struct CloseSavePlan {
+  bool keep_edit = true;
+  bool discard_edit = false;
+  bool commit_then_write = false;
+};
+
+inline CloseSavePlan plan_close_save(CloseAnswer answer, bool path_needs_chooser,
+                                    bool chooser_accepted) {
+  CloseSavePlan plan;
+  if (answer == CloseAnswer::Discard) {
+    plan.keep_edit = false;
+    plan.discard_edit = true;
+    plan.commit_then_write = false;
+    return plan;
+  }
+  if (answer != CloseAnswer::Save) {
+    return plan;
+  }
+  if (path_needs_chooser && !chooser_accepted) {
+    plan.keep_edit = true;
+    plan.commit_then_write = false;
+    return plan;
+  }
+  plan.keep_edit = false;
+  plan.commit_then_write = true;
+  return plan;
+}
+
+// Escape cancels a resting float instead of placing it. A stroke or a text
+// box still belongs to the tool. Deselect is only the idle case.
+enum class EscapeTarget { ToolCancel, FloatCancel, Deselect };
+
+inline EscapeTarget escape_target(bool tool_busy, bool floating) {
+  if (tool_busy) {
+    return EscapeTarget::ToolCancel;
+  }
+  if (floating) {
+    return EscapeTarget::FloatCancel;
+  }
+  return EscapeTarget::Deselect;
+}
+
 // Close and quit must ask before destroying content that is not in the file
 // yet, even when the history dirty bit is still clear (a float that has not
 // been stamped). An empty text box is not content.

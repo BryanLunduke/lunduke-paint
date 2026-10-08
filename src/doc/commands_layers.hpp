@@ -136,6 +136,9 @@ struct StackXform {
   bool nearest = false;
   Color fill{};
   Rect crop{};
+  // Crop-local coverage. Empty means the whole crop rectangle is kept.
+  // A zero byte clears that pixel so a lasso is not promoted to its box.
+  std::vector<std::uint8_t> crop_mask;
 };
 
 class AllLayersBufferCommand : public Command {

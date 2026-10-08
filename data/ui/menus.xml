@@ -79,6 +79,10 @@
           <attribute name="action">win.paste</attribute>
         </item>
         <item>
+          <attribute name="label" translatable="yes">Paste into _New</attribute>
+          <attribute name="action">win.paste-into-new</attribute>
+        </item>
+        <item>
           <attribute name="label" translatable="yes">_Delete</attribute>
           <attribute name="action">win.delete</attribute>
         </item>
