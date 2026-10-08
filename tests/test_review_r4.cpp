@@ -405,6 +405,27 @@ void test_locked_finish_keeps_preview() {
   expect(ink_count(*doc) > 0, "the shape lands after unlock");
 }
 
+void test_locked_text_blocks_switch() {
+  auto doc = Document::create(80, 40, Color::white());
+  StubHost host(*doc);
+  std::unique_ptr<Tool> text(create_text_tool());
+  text->set_host(&host);
+  text->on_press(CanvasEvent{4, 4, 1, 0});
+  expect(text->on_key(GDK_KEY_H, 0, "H"), "typing opens content");
+  doc->set_layer_locked(0, true);
+  expect(settle_tool_live(text.get(), doc.get(), LivePath::ToolChange) == SettleResult::Blocked,
+         "a locked layer blocks the tool change");
+  expect(text->captures_keys(), "the text box stays on this document");
+  expect(settle_tool_live(text.get(), doc.get(), LivePath::TabSwitch) == SettleResult::Blocked,
+         "a locked layer blocks the tab switch");
+  expect(text->captures_keys() && doc->unsaved_overlay(), "the words stay on this tab");
+  doc->set_layer_locked(0, false);
+  expect(settle_tool_live(text.get(), doc.get(), LivePath::TabSwitch) == SettleResult::Proceed,
+         "an unlocked layer stamps before the tab switch");
+  expect(!text->captures_keys(), "a successful stamp closes the box first");
+  expect(doc->history().can_undo(), "the words are a history entry on this document");
+}
+
 void test_tool_change_keeps_float() {
   Fix fix = make_live(LiveKind::Floating);
   const int history = fix.doc->history().count();
@@ -741,6 +762,7 @@ int main() {
   test_undo_does_not_drop_shape();
   test_layer_change_stamps_source();
   test_locked_finish_keeps_preview();
+  test_locked_text_blocks_switch();
   test_tool_change_keeps_float();
   test_pasted_text();
   test_recovery_composites_without_commit();
