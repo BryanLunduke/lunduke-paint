@@ -2,6 +2,7 @@
 
 #include "tools/tool.hpp"
 #include "tools/rail_options.hpp"
+#include "tools/shape_options.hpp"
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
@@ -39,10 +40,11 @@ public:
   void on_motion(CanvasEvent event) override;
   void on_release(CanvasEvent event) override;
   void on_cancel() override;
+  bool on_commit() override;
 
 private:
   void preview(int x1, int y1, bool constrain);
-  void finish();
+  bool finish();
 
   bool drawing_ = false;
   int x0_ = 0;
@@ -52,6 +54,9 @@ private:
   unsigned button_ = 1;
   int radius_ = 12;
   bool antialias_ = false;
+  const char* family_ = "rounded-rect";
+  Gtk::CheckButton* aa_button_ = nullptr;
+  Gtk::SpinButton* radius_spin_ = nullptr;
   ShapeFillMode fill_mode_ = ShapeFillMode::Stroke;
   const char* id_ = "rounded-rect";
   const char* name_ = "Rounded rectangle";
@@ -69,19 +74,34 @@ Gtk::Widget* RoundedRectTool::options_widget() {
     rspin->set_range(0, 256);
     rspin->set_increments(1, 8);
     rspin->set_digits(0);
-    rspin->set_value(radius_);
+    radius_spin_ = rspin;
     rspin->set_tooltip_text("Corner radius in pixels");
     configure_rail_spin(*rspin);
-    rspin->signal_value_changed().connect([this, rspin]() { radius_ = rspin->get_value_as_int(); });
+    rspin->signal_value_changed().connect([this, rspin]() {
+      radius_ = rspin->get_value_as_int();
+      shape_family_options(family_).corner_radius = radius_;
+    });
     auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
-    aa->set_active(antialias_);
+    aa_button_ = aa;
     aa->set_tooltip_text("Smooth the rounded corners");
     configure_rail_check(*aa);
-    aa->signal_toggled().connect([this, aa]() { antialias_ = aa->get_active(); });
+    aa->signal_toggled().connect([this, aa]() {
+      antialias_ = aa->get_active();
+      shape_family_options(family_).antialias = antialias_;
+    });
     options_->pack_start(*rlabel, Gtk::PACK_SHRINK);
     options_->pack_start(*rspin, Gtk::PACK_SHRINK);
     options_->pack_start(*aa, Gtk::PACK_SHRINK);
     options_->show_all();
+  }
+  const ShapeFamilyOptions& shared = shape_family_options(family_);
+  antialias_ = shared.antialias;
+  radius_ = shared.corner_radius;
+  if (aa_button_ != nullptr && aa_button_->get_active() != antialias_) {
+    aa_button_->set_active(antialias_);
+  }
+  if (radius_spin_ != nullptr && radius_spin_->get_value_as_int() != radius_) {
+    radius_spin_->set_value(radius_);
   }
   return options_.get();
 }
@@ -103,7 +123,7 @@ void RoundedRectTool::on_press(CanvasEvent event) {
   x1_ = x0_;
   y1_ = y0_;
   dirty_ = {};
-  host_->document().layers().copy_active_to_tool();
+  arm_preview_layer();
   preview(x1_, y1_, false);
 }
 
@@ -112,7 +132,9 @@ void RoundedRectTool::preview(int x1, int y1, bool constrain) {
     return;
   }
   Document& doc = host_->document();
-  const Layer& active = doc.layers().active_layer();
+  antialias_ = shape_family_options(family_).antialias;
+  radius_ = shape_family_options(family_).corner_radius;
+  const Layer& active = preview_layer_ref();
   Layer& tool = doc.layers().tool_layer();
   const Rect previous = dirty_;
   restore_shape_preview(tool, active, previous);
@@ -128,8 +150,7 @@ void RoundedRectTool::preview(int x1, int y1, bool constrain) {
                     x1_ - ox, y1_ - oy, stroke_px(), radius_, stroke_color(button_), fill_mode_,
                     antialias_, &dirty_);
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
-  host_->invalidate_canvas(
-      layer_dirty_to_canvas(host_->document().layers().active_layer(), rect_union(previous, dirty_)));
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
 }
 
 void RoundedRectTool::on_motion(CanvasEvent event) {
@@ -151,30 +172,36 @@ void RoundedRectTool::on_release(CanvasEvent event) {
 void RoundedRectTool::on_cancel() {
   if (!drawing_ || host_ == nullptr) {
     drawing_ = false;
+    clear_preview_overlay();
     return;
   }
   drawing_ = false;
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  host_->invalidate_canvas(layer_dirty_to_canvas(preview_layer_ref(), dirty_));
   dirty_ = {};
+  clear_preview_overlay();
 }
 
-void RoundedRectTool::finish() {
+bool RoundedRectTool::on_commit() {
+  if (!drawing_) {
+    return false;
+  }
+  return finish();
+}
+
+bool RoundedRectTool::finish() {
   if (host_ == nullptr) {
     drawing_ = false;
-    return;
+    return false;
+  }
+  radius_ = shape_family_options(family_).corner_radius;
+  antialias_ = shape_family_options(family_).antialias;
+  if (!commit_preview("Rounded rectangle", dirty_)) {
+    return false;
   }
   drawing_ = false;
-  Document& doc = host_->document();
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), doc.layers().tool_layer(),
-                                            dirty_, "Rounded rectangle", doc.layers().active_index());
-  doc.layers().clear_tool_layer();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
-  } else {
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
-  }
   dirty_ = {};
+  return true;
 }
 
 Tool* create_rounded_rect_tool() {

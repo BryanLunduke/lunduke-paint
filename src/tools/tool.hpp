@@ -115,24 +115,31 @@ public:
   // Polygon, polyline, and curve keep a visible preview after the mouse
   // button comes up. Save, quit, and tab switches must finish it.
   virtual bool has_uncommitted_preview() const { return false; }
-  // Draw an open text box into a recovery snapshot of one layer. Default
-  // does nothing.
-  // Returns true when glyphs were composited into the snapshot.
+  // Draw an open text box or an in-progress tool-layer preview into a
+  // recovery snapshot of one layer. Does not commit the live document.
+  // Returns true when pixels were composited into the snapshot.
   virtual bool paint_recovery_overlay(int layer_index, std::uint8_t* pixels, int width, int height,
-                                     int stride) {
-    (void)layer_index;
-    (void)pixels;
-    (void)width;
-    (void)height;
-    (void)stride;
+                                     int stride);
+  // Insert clipboard text into an open text box. Default ignores it.
+  virtual bool paste_text(const std::string& utf8) {
+    (void)utf8;
     return false;
   }
+  // Push shared document options (transparent move, shape family) into the
+  // widgets that are about to be shown.
+  virtual void sync_options_from_document() {}
+  // Layer the tool-layer preview was copied from. -1 when there is none.
+  int preview_layer() const { return preview_layer_; }
   // When is_stroking() is true, CanvasView may composite tool_layer in place of
   // the active layer. Selection tools set is_stroking for pointer capture only
   // and must return false here so an empty tool_layer does not flash the
   // transparency checker over opaque canvas content (R-F03).
   virtual bool uses_tool_layer() const { return is_stroking(); }
   virtual bool captures_keys() const { return false; }
+  // Drop a half-finished pointer gesture (rubber band, scale drag) without
+  // moving a floating selection back to its origin. Tool changes call this
+  // when the float itself is being kept.
+  virtual void release_pointer() {}
   // Shape tools: hollow vs filled toolbox buttons call this.
   virtual void set_shape_fill_mode(ShapeFillMode /*mode*/) {}
 
@@ -148,6 +155,15 @@ protected:
   int stroke_px() const;
   // Stamp a float, or stop the action when its layer is locked.
   bool commit_float_or_stop();
+  // Remember the active layer and copy it into the tool layer.
+  void arm_preview_layer();
+  const Layer& preview_layer_ref() const;
+  // Diff the tool layer against the layer the preview started on.
+  // False when that layer is locked: the preview stays up.
+  bool commit_preview(const char* name, Rect dirty);
+  void clear_preview_overlay();
+
+  int preview_layer_ = -1;
 };
 
 }  // namespace lundukepaint

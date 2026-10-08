@@ -2,6 +2,7 @@
 
 #include "tools/tool.hpp"
 #include "tools/rail_options.hpp"
+#include "app/live_edit.hpp"
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
@@ -52,9 +53,6 @@ Gtk::Widget* FillTool::options_widget() {
     configure_rail_spin(*spin);
     spin->signal_value_changed().connect([this, spin]() {
       tolerance_ = spin->get_value_as_int();
-      if (host_ != nullptr) {
-        host_->set_fill_tolerance(tolerance_);
-      }
     });
     options_->pack_start(*label, Gtk::PACK_SHRINK);
     options_->pack_start(*spin, Gtk::PACK_SHRINK);
@@ -79,7 +77,7 @@ void FillTool::on_press(CanvasEvent event) {
   if (!commit_float_or_stop()) {
     return;
   }
-  tolerance_ = host_->fill_tolerance();
+  tolerance_ = tolerance_for_click(tolerance_, host_->fill_tolerance());
   doc.layers().copy_active_to_tool();
   const Layer& active = doc.layers().active_layer();
   Layer& tool = doc.layers().tool_layer();

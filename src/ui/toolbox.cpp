@@ -2,6 +2,7 @@
 
 #include "ui/toolbox.hpp"
 
+#include "app/live_edit.hpp"
 #include "ui/symbolic_icon.hpp"
 
 #include "raster/brush_tip.hpp"
@@ -361,13 +362,12 @@ bool Toolbox::on_line_width_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const int h = line_widths_.get_allocated_height();
   fill_picker_bg(*this, cr, w, h);
 
-  int best = 0;
-  int bestd = 999;
+  const int marked = marked_line_width(line_width_, kLineChoices, 5);
+  int best = -1;
   for (int j = 0; j < 5; ++j) {
-    const int d = std::abs(line_width_ - kLineChoices[j]);
-    if (d < bestd) {
-      bestd = d;
+    if (kLineChoices[j] == marked) {
       best = j;
+      break;
     }
   }
 
@@ -375,7 +375,7 @@ bool Toolbox::on_line_width_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   for (int i = 0; i < 5; ++i) {
     const double cy = row_h * (i + 0.5);
     const int lw = kLineChoices[i];
-    if (i == best) {
+    if (best >= 0 && i == best) {
       cr->set_source_rgb(0.1, 0.1, 0.1);
       cr->move_to(4, cy);
       cr->line_to(7, cy + 3);

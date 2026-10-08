@@ -382,7 +382,13 @@ Color CanvasView::sample_pixel(int canvas_x, int canvas_y) const {
   const bool tool_preview =
       tool_ != nullptr && tool_->is_stroking() && tool_->uses_tool_layer();
   const Layer* tool = tool_preview ? &document_->layers().tool_layer() : nullptr;
-  const int tool_i = tool_preview ? document_->layers().active_index() : -1;
+  int tool_i = -1;
+  if (tool_preview) {
+    tool_i = tool_->preview_layer();
+    if (tool_i < 0) {
+      tool_i = document_->layers().active_index();
+    }
+  }
   Color c = document_->layers().composite_pixel(canvas_x, canvas_y, tool, tool_i);
   return apply_floating_overlay(document_, c, canvas_x, canvas_y);
 }
@@ -662,7 +668,13 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const bool tool_preview =
       tool_ != nullptr && tool_->is_stroking() && tool_->uses_tool_layer();
   const Layer* tool_override = tool_preview ? &document_->layers().tool_layer() : nullptr;
-  const int tool_index = tool_preview ? document_->layers().active_index() : -1;
+  int tool_index = -1;
+  if (tool_preview) {
+    tool_index = tool_->preview_layer();
+    if (tool_index < 0) {
+      tool_index = document_->layers().active_index();
+    }
+  }
   const int sw = vis_x1 - vis_x0;
   const int sh = vis_y1 - vis_y0;
   const Rect view{vis_x0, vis_y0, sw, sh};

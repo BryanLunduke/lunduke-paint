@@ -2,6 +2,7 @@
 
 #include "tools/tool.hpp"
 #include "tools/rail_options.hpp"
+#include "tools/shape_options.hpp"
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
@@ -39,7 +40,7 @@ public:
 private:
   void set_point(int which, int x, int y, bool constrain);
   void preview();
-  void finish();
+  bool finish();
   void reset();
   void sync_overlay();
 
@@ -54,6 +55,8 @@ private:
   int y3_ = 0;
   unsigned button_ = 1;
   bool antialias_ = false;
+  const char* family_ = "curve";
+  Gtk::CheckButton* aa_button_ = nullptr;
   Rect dirty_{};
   std::unique_ptr<Gtk::Box> options_;
 };
@@ -63,12 +66,19 @@ Gtk::Widget* CurveTool::options_widget() {
     options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
     prepare_rail_box(*options_);
     auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
-    aa->set_active(antialias_);
+    aa_button_ = aa;
     aa->set_tooltip_text("Smooth the curve");
     configure_rail_check(*aa);
-    aa->signal_toggled().connect([this, aa]() { antialias_ = aa->get_active(); });
+    aa->signal_toggled().connect([this, aa]() {
+      antialias_ = aa->get_active();
+      shape_family_options(family_).antialias = antialias_;
+    });
     options_->pack_start(*aa, Gtk::PACK_SHRINK);
     options_->show_all();
+  }
+  antialias_ = shape_family_options(family_).antialias;
+  if (aa_button_ != nullptr && aa_button_->get_active() != antialias_) {
+    aa_button_->set_active(antialias_);
   }
   return options_.get();
 }
@@ -101,7 +111,7 @@ void CurveTool::preview() {
     return;
   }
   Document& doc = host_->document();
-  const Layer& active = doc.layers().active_layer();
+  const Layer& active = preview_layer_ref();
   Layer& tool = doc.layers().tool_layer();
   const Rect previous = dirty_;
   restore_shape_preview(tool, active, previous);
@@ -117,22 +127,23 @@ void CurveTool::preview() {
                       stroke_color(button_), antialias_, &dirty_);
   }
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
-  host_->invalidate_canvas(
-      layer_dirty_to_canvas(host_->document().layers().active_layer(), rect_union(previous, dirty_)));
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
   sync_overlay();
 }
 
 void CurveTool::reset() {
   phase_ = 0;
   dirty_ = {};
+  preview_layer_ = -1;
   sync_overlay();
 }
 
-void CurveTool::finish() {
-  if (host_ == nullptr) {
+bool CurveTool::finish() {
+  if (host_ == nullptr || phase_ == 0) {
     reset();
-    return;
+    return true;
   }
+  antialias_ = shape_family_options(family_).antialias;
   if (phase_ == 1) {
     x1_ = x0_ + (x3_ - x0_) / 3;
     y1_ = y0_ + (y3_ - y0_) / 3;
@@ -143,16 +154,13 @@ void CurveTool::finish() {
     y2_ = y0_ + 2 * (y3_ - y0_) / 3;
   }
   preview();
-  Document& doc = host_->document();
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), doc.layers().tool_layer(),
-                                            dirty_, "Curve", doc.layers().active_index());
-  doc.layers().clear_tool_layer();
-  reset();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
-  } else {
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  if (!commit_preview("Curve", dirty_)) {
+    return false;
   }
+  phase_ = 0;
+  dirty_ = {};
+  sync_overlay();
+  return true;
 }
 
 void CurveTool::on_press(CanvasEvent event) {
@@ -168,7 +176,7 @@ void CurveTool::on_press(CanvasEvent event) {
     if (!commit_float_or_stop()) {
       return;
     }
-    host_->document().layers().copy_active_to_tool();
+    arm_preview_layer();
     button_ = event.button;
     x0_ = x1_ = x2_ = x3_ = x;
     y0_ = y1_ = y2_ = y3_ = y;
@@ -237,8 +245,7 @@ bool CurveTool::on_commit() {
   if (phase_ == 0) {
     return false;
   }
-  finish();
-  return true;
+  return finish();
 }
 
 void CurveTool::on_cancel() {
@@ -247,7 +254,7 @@ void CurveTool::on_cancel() {
   }
   if (host_ != nullptr) {
     host_->document().layers().clear_tool_layer();
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+    host_->invalidate_canvas(layer_dirty_to_canvas(preview_layer_ref(), dirty_));
   }
   reset();
 }

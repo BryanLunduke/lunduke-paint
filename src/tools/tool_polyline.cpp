@@ -2,6 +2,7 @@
 
 #include "tools/tool.hpp"
 #include "tools/rail_options.hpp"
+#include "tools/shape_options.hpp"
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
@@ -41,7 +42,7 @@ public:
 private:
   void add_point(int x, int y, bool constrain);
   void preview();
-  void finish();
+  bool finish();
   void clear_preview();
   void sync_overlay();
 
@@ -51,6 +52,8 @@ private:
   int hover_y_ = 0;
   unsigned button_ = 1;
   bool antialias_ = false;
+  const char* family_ = "polyline";
+  Gtk::CheckButton* aa_button_ = nullptr;
   Rect dirty_{};
   std::unique_ptr<Gtk::Box> options_;
 };
@@ -60,12 +63,19 @@ Gtk::Widget* PolylineTool::options_widget() {
     options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
     prepare_rail_box(*options_);
     auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
-    aa->set_active(antialias_);
+    aa_button_ = aa;
     aa->set_tooltip_text("Smooth the polyline edges");
     configure_rail_check(*aa);
-    aa->signal_toggled().connect([this, aa]() { antialias_ = aa->get_active(); });
+    aa->signal_toggled().connect([this, aa]() {
+      antialias_ = aa->get_active();
+      shape_family_options(family_).antialias = antialias_;
+    });
     options_->pack_start(*aa, Gtk::PACK_SHRINK);
     options_->show_all();
+  }
+  antialias_ = shape_family_options(family_).antialias;
+  if (aa_button_ != nullptr && aa_button_->get_active() != antialias_) {
+    aa_button_->set_active(antialias_);
   }
   return options_.get();
 }
@@ -95,7 +105,7 @@ void PolylineTool::preview() {
     return;
   }
   Document& doc = host_->document();
-  const Layer& active = doc.layers().active_layer();
+  const Layer& active = preview_layer_ref();
   Layer& tool = doc.layers().tool_layer();
   const Rect previous = dirty_;
   restore_shape_preview(tool, active, previous);
@@ -118,41 +128,38 @@ void PolylineTool::preview() {
                 static_cast<int>(xs.size()), stroke_px(), stroke_color(button_), antialias_,
                 &dirty_);
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
-  host_->invalidate_canvas(
-      layer_dirty_to_canvas(host_->document().layers().active_layer(), rect_union(previous, dirty_)));
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
   sync_overlay();
 }
 
 void PolylineTool::clear_preview() {
   if (host_ != nullptr) {
+    const Layer& shown = preview_layer_ref();
     host_->document().layers().clear_tool_layer();
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+    host_->invalidate_canvas(layer_dirty_to_canvas(shown, dirty_));
   }
   xs_.clear();
   ys_.clear();
   dirty_ = {};
+  preview_layer_ = -1;
   sync_overlay();
 }
 
-void PolylineTool::finish() {
+bool PolylineTool::finish() {
   if (host_ == nullptr || xs_.size() < 2) {
     clear_preview();
-    return;
+    return true;
   }
+  antialias_ = shape_family_options(family_).antialias;
   preview();
-  Document& doc = host_->document();
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), doc.layers().tool_layer(),
-                                            dirty_, "Polyline", doc.layers().active_index());
-  doc.layers().clear_tool_layer();
+  if (!commit_preview("Polyline", dirty_)) {
+    return false;
+  }
   xs_.clear();
   ys_.clear();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
-  } else {
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
-  }
   dirty_ = {};
   sync_overlay();
+  return true;
 }
 
 void PolylineTool::on_press(CanvasEvent event) {
@@ -166,7 +173,7 @@ void PolylineTool::on_press(CanvasEvent event) {
     if (!commit_float_or_stop()) {
       return;
     }
-    host_->document().layers().copy_active_to_tool();
+    arm_preview_layer();
     button_ = event.button;
   }
   add_point(static_cast<int>(std::floor(event.x)), static_cast<int>(std::floor(event.y)),
@@ -199,8 +206,7 @@ bool PolylineTool::on_commit() {
   if (xs_.empty()) {
     return false;
   }
-  finish();
-  return true;
+  return finish();
 }
 
 void PolylineTool::on_cancel() {

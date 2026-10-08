@@ -4,6 +4,7 @@
 
 #include "app/actions.hpp"
 #include "app/live_edit.hpp"
+#include "raster/brush_tip.hpp"
 #include "app/shortcut_dispatch.hpp"
 #include "app/shortcut_help.hpp"
 #include "doc/commands_image.hpp"
@@ -371,7 +372,12 @@ void MainWindow::build_ui() {
     if (static_cast<int>(page) == workspace_.active_index()) {
       return;
     }
-    preserve_live_edits_for_tab_switch();
+    if (!preserve_live_edits_for_tab_switch()) {
+      switching_tabs_ = true;
+      tab_bar_.set_current_page(workspace_.active_index());
+      switching_tabs_ = false;
+      return;
+    }
     workspace_.set_active(static_cast<int>(page));
     attach_active_document();
   });
@@ -460,13 +466,9 @@ void MainWindow::attach_active_document() {
   canvas_.set_document(document_ptr());
   canvas_.apply_zoom(document().view_zoom());
   canvas_.set_tool(active_tool_);
-  history_panel_.on_jump = [this](int index) {
-    if (active_tool_ != nullptr) {
-      active_tool_->on_cancel();
-    }
-    document().jump_history(index);
-  };
+  history_panel_.on_jump = [this](int index) { document().jump_history(index); };
   document().set_on_blocked([this](const char* message) { report_blocked(message); });
+  document().set_on_disrupt([this](const char* action) { return disrupt_allowed(action); });
   document().set_on_changed([this]() {
     last_edit_us_ = g_get_monotonic_time();
     update_chrome();
@@ -485,14 +487,14 @@ void MainWindow::new_document(int width, int height, Color background) {
   adopt_document(Document::create(width, height, background), false);
 }
 
-void MainWindow::adopt_document(std::unique_ptr<Document> document, bool prefer_replace) {
+bool MainWindow::adopt_document(std::unique_ptr<Document> document, bool prefer_replace, LivePath path) {
   if (!document) {
-    return;
+    return false;
   }
   document->history().set_depth(prefs_.undo_limit);
-  preserve_live_edits_for_tab_switch();
-  if (active_tool_ != nullptr && active_tool_->is_stroking()) {
-    active_tool_->on_cancel();
+  if (document_ptr() != nullptr &&
+      settle_tool_live(active_tool_, document_ptr(), path) == SettleResult::Blocked) {
+    return false;
   }
   detach_document();
   if (prefer_replace && workspace_.count() == 1 && workspace_.is_placeholder(0)) {
@@ -502,6 +504,7 @@ void MainWindow::adopt_document(std::unique_ptr<Document> document, bool prefer_
   }
   attach_active_document();
   rebuild_tabs();
+  return true;
 }
 
 void MainWindow::play_intro() {
@@ -539,23 +542,42 @@ void MainWindow::report_blocked(const char* message) {
   blocked_dialog_ = false;
 }
 
-void MainWindow::preserve_live_edits_for_tab_switch() {
+bool MainWindow::preserve_live_edits_for_tab_switch() {
   if (active_tool_ == nullptr || document_ptr() == nullptr) {
-    return;
+    return true;
   }
-  const bool text = active_tool_->captures_keys();
-  const bool nonempty = text && document().unsaved_overlay();
-  const bool preview = active_tool_->has_uncommitted_preview();
-  const LiveEditAction action = live_edit_for_tab_switch(text, nonempty, preview);
-  if (action == LiveEditAction::Stamp) {
-    if (!active_tool_->on_commit() && text) {
-      report_blocked("Unlock the layer to place the text");
+  return settle_tool_live(active_tool_, document_ptr(), LivePath::TabSwitch) != SettleResult::Blocked;
+}
+
+bool MainWindow::disrupt_allowed(const char* action) {
+  LivePath path = LivePath::LayerChange;
+  if (action != nullptr) {
+    const std::string name(action);
+    if (name == "undo") {
+      path = LivePath::Undo;
+    } else if (name == "redo") {
+      path = LivePath::Redo;
+    } else if (name == "history-jump") {
+      path = LivePath::HistoryJump;
+    } else if (name == "layer-add") {
+      path = LivePath::LayerAdd;
+    } else if (name == "layer-delete") {
+      path = LivePath::LayerDelete;
+    } else if (name == "layer-move") {
+      path = LivePath::LayerMove;
+    } else if (name == "layer-lock") {
+      path = LivePath::LayerLock;
+    } else if (name == "paste") {
+      path = LivePath::Paste;
     }
-    return;
   }
-  if (action == LiveEditAction::Cancel || active_tool_->is_stroking()) {
-    active_tool_->on_cancel();
+  if (settle_tool_live(active_tool_, document_ptr(), path) == SettleResult::Blocked) {
+    if (path == LivePath::Undo || path == LivePath::Redo || path == LivePath::HistoryJump) {
+      show_status("Finish or cancel the in-progress edit first");
+    }
+    return false;
   }
+  return true;
 }
 
 bool MainWindow::other_documents_dirty(const Document* except) const {
@@ -593,15 +615,23 @@ void MainWindow::set_active_tool(const std::string& id) {
     return;
   }
   if (active_tool_ != nullptr) {
-    if (active_tool_->captures_keys()) {
-      active_tool_->on_commit();
+    if (settle_tool_live(active_tool_, document_ptr(), LivePath::ToolChange) == SettleResult::Blocked) {
+      toolbox_.set_active_tool(active_tool_->id());
+      toolbox_.set_tool_options(active_tool_->options_widget());
+      return;
     }
-    active_tool_->on_cancel();
+    const bool floating = document_ptr() != nullptr && document().selection().floating();
+    if (!floating && active_tool_->is_stroking() && !active_tool_->uses_tool_layer()) {
+      active_tool_->on_cancel();
+    } else {
+      active_tool_->release_pointer();
+    }
     previous_tool_ = active_tool_;
   }
   active_tool_ = found;
   canvas_.set_tool(active_tool_);
   toolbox_.set_active_tool(id);
+  active_tool_->sync_options_from_document();
   toolbox_.set_tool_options(active_tool_->options_widget());
   status_bar_.set_hint(active_tool_->hint());
 }
@@ -626,9 +656,10 @@ const Pattern& MainWindow::active_pattern() const {
 void MainWindow::set_brush_tip(int index) {
   brush_tip_ = clamp_brush_tip_index(index);
   toolbox_.set_brush_tip(brush_tip_);
-  // Sync stroke size to the tip's extent so pencil/line width stays coherent.
+  // The tip picker is its own control. It must not move the line-width mark
+  // onto a size that stack cannot show.
   const BrushTip tip = brush_tip_at(brush_tip_);
-  set_stroke_size(std::max(1, tip.size));
+  set_stroke_size(stroke_after_selecting_brush_tip(stroke_size_, std::max(1, tip.size)));
 }
 
 void MainWindow::set_spray_radius(int radius) {
@@ -675,16 +706,10 @@ bool MainWindow::canvas_to_screen(int canvas_x, int canvas_y, int& screen_x, int
 }
 
 void MainWindow::on_undo() {
-  if (active_tool_ != nullptr) {
-    active_tool_->on_cancel();
-  }
   document().undo();
 }
 
 void MainWindow::on_redo() {
-  if (active_tool_ != nullptr) {
-    active_tool_->on_cancel();
-  }
   document().redo();
 }
 
@@ -960,9 +985,6 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
   if (path.empty()) {
     return false;
   }
-  if (active_tool_ != nullptr) {
-    active_tool_->on_cancel();
-  }
   if (format_from_path(path) == ImageFormat::Ora) {
     LoadedOra loaded = load_ora(path);
     if (!loaded.ok()) {
@@ -1010,8 +1032,8 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
       workspace_.replace_active(std::move(doc));
       attach_active_document();
       rebuild_tabs();
-    } else {
-      adopt_document(std::move(doc), true);
+    } else if (!adopt_document(std::move(doc), true, LivePath::Open)) {
+      return false;
     }
     remember_recent(path);
     show_status("Opened " + Glib::path_get_basename(path));
@@ -1045,8 +1067,7 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
   doc->set_path(path);
   doc->mark_clean();
   if (force_replace) {
-    preserve_live_edits_for_tab_switch();
-    if (active_tool_ != nullptr && active_tool_->is_stroking()) {
+    if (active_tool_ != nullptr) {
       active_tool_->on_cancel();
     }
     doc->history().set_depth(prefs_.undo_limit);
@@ -1054,8 +1075,8 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
     workspace_.replace_active(std::move(doc));
     attach_active_document();
     rebuild_tabs();
-  } else {
-    adopt_document(std::move(doc), true);
+  } else if (!adopt_document(std::move(doc), true, LivePath::Open)) {
+    return false;
   }
   remember_recent(path);
   show_status("Opened " + Glib::path_get_basename(path));
@@ -1126,6 +1147,13 @@ void MainWindow::action_save_as() {
   }
 }
 
+bool MainWindow::active_document_holds_live_work(const Document* document) {
+  if (document == nullptr || document != document_ptr()) {
+    return false;
+  }
+  return live_edit_blocks_silent_close(classify_live(active_tool_, document));
+}
+
 bool MainWindow::confirm_close() {
   const int original = workspace_.active_index();
   std::vector<int> order;
@@ -1143,7 +1171,7 @@ bool MainWindow::confirm_close() {
       continue;
     }
     Document& doc = workspace_.at(i);
-    if (!doc.dirty()) {
+    if (!doc.dirty() && !active_document_holds_live_work(&doc)) {
       continue;
     }
     if (!confirm_lose_document(doc)) {
@@ -1169,7 +1197,7 @@ bool MainWindow::confirm_lose_changes() {
 }
 
 bool MainWindow::confirm_lose_document(Document& document) {
-  if (!document.dirty()) {
+  if (!document.dirty() && !active_document_holds_live_work(&document)) {
     return true;
   }
   Glib::ustring name = document.path().empty() ? "Untitled" : Glib::path_get_basename(document.path());
@@ -1200,7 +1228,9 @@ bool MainWindow::confirm_lose_document(Document& document) {
     return true;
   }
   if (!is_active && idx >= 0) {
-    preserve_live_edits_for_tab_switch();
+    if (!preserve_live_edits_for_tab_switch()) {
+      return false;
+    }
     workspace_.set_active(idx);
     attach_active_document();
   } else if (edit == LiveEditAction::Stamp && !commit_live_edits()) {
@@ -1234,24 +1264,10 @@ bool MainWindow::confirm_large_canvas(int width, int height) {
 }
 
 bool MainWindow::commit_live_edits() {
-  if (active_tool_ != nullptr && document_ptr() != nullptr) {
-    const bool text = active_tool_->captures_keys();
-    const bool preview = active_tool_->has_uncommitted_preview();
-    if (text && !document().unsaved_overlay()) {
-      active_tool_->on_cancel();
-    } else if (text || preview) {
-      if (!active_tool_->on_commit()) {
-        report_blocked(text ? "Unlock the layer to place the text" : "Could not finish the shape");
-        return false;
-      }
-    }
+  if (document_ptr() == nullptr) {
+    return true;
   }
-  if (document_ptr() != nullptr && document().selection().floating() &&
-      !document().try_commit_floating()) {
-    document().notify_blocked("Unlock the layer to place the selection");
-    return false;
-  }
-  return true;
+  return settle_tool_live(active_tool_, document_ptr(), LivePath::Save) != SettleResult::Blocked;
 }
 
 bool MainWindow::save_to_path(const std::string& path, ImageFormat format) {
@@ -1671,10 +1687,8 @@ void MainWindow::action_select_all() {
 }
 
 void MainWindow::action_deselect() {
-  if (active_tool_ != nullptr && active_tool_->captures_keys()) {
-    active_tool_->on_commit();
-  } else if (active_tool_ != nullptr && active_tool_->is_stroking()) {
-    active_tool_->on_cancel();
+  if (!commit_live_edits()) {
+    return;
   }
   document().deselect();
 }
@@ -2390,11 +2404,10 @@ void MainWindow::action_revert() {
     show_status("Nothing to revert");
     return;
   }
-  if (document().selection().floating() && !document().try_commit_floating()) {
-    document().notify_blocked("Unlock the layer to place the selection");
-    return;
-  }
-  if (document().dirty() || (active_tool_ != nullptr && active_tool_->captures_keys())) {
+  const bool live = active_tool_ != nullptr &&
+                    (active_tool_->captures_keys() || active_tool_->has_uncommitted_preview() ||
+                     active_tool_->is_stroking());
+  if (document().dirty() || live || document().selection().floating()) {
     Gtk::MessageDialog dialog(*this, "Revert to last saved file? Unsaved changes will be lost.",
                               false, Gtk::MESSAGE_QUESTION, Gtk::BUTTONS_NONE, true);
     dialog.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
@@ -2402,9 +2415,6 @@ void MainWindow::action_revert() {
     if (dialog.run() != Gtk::RESPONSE_YES) {
       return;
     }
-  }
-  if (active_tool_ != nullptr) {
-    active_tool_->on_cancel();
   }
   if (!open_path(path, true)) {
     return;
@@ -2474,11 +2484,13 @@ void MainWindow::offer_recovery() {
   const int response = dialog.run();
   if (response == Gtk::RESPONSE_YES) {
     for (const std::string& path : files) {
-      if (open_path(path) && document_ptr() != nullptr) {
+      if (open_path(path) && document_ptr() != nullptr && recovery_file_consumed(true)) {
         document().set_path(std::string());
         document().set_dirty(true);
+        crash_recovery::clear_file(path);
+      } else {
+        show_status("Recovery was not applied. The file was kept.");
       }
-      crash_recovery::clear_file(path);
     }
   } else {
     for (const std::string& path : files) {
@@ -2527,12 +2539,30 @@ void MainWindow::start_recovery_save() {
       }
     }
     if (i == active && active_tool_ != nullptr) {
-      const int layer_index = doc.layers().active_index();
-      if (layer_index >= 0 && layer_index < static_cast<int>(snapshot.layers.size())) {
-        OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(layer_index)];
-        if (active_tool_->paint_recovery_overlay(layer_index, item.pixels.data(), item.width,
+      int overlay_index = active_tool_->preview_layer();
+      if (overlay_index < 0) {
+        overlay_index = doc.layers().active_index();
+      }
+      if (overlay_index >= 0 && overlay_index < static_cast<int>(snapshot.layers.size())) {
+        OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(overlay_index)];
+        if (active_tool_->paint_recovery_overlay(overlay_index, item.pixels.data(), item.width,
                                                 item.height, item.stride)) {
           item.revision += 1;
+        }
+      }
+      if (doc.selection().floating()) {
+        int float_index = doc.selection().source_layer();
+        if (float_index < 0 || float_index >= static_cast<int>(snapshot.layers.size())) {
+          float_index = doc.layers().active_index();
+        }
+        if (float_index >= 0 && float_index < static_cast<int>(snapshot.layers.size())) {
+          OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(float_index)];
+          const Layer& layer = doc.layers().at(float_index);
+          if (composite_floating_into_buffer(doc.selection(), item.pixels.data(), item.width,
+                                            item.height, item.stride, layer.offset_x(),
+                                            layer.offset_y())) {
+            item.revision += 1;
+          }
         }
       }
     }

@@ -1,3 +1,18 @@
+lunduke-paint (0.9-5) unstable; urgency=medium
+
+  * An in-progress shape, an open text box, pasted text, or a floating
+    selection is stamped onto its own layer, kept, or asked about. Tool
+    changes, undo, open, tabs, quit, layer edits, save, paste, and recovery
+    no longer drop that work or put it on the wrong layer.
+  * Shape options follow the fill-mode key. Transparent move is one setting.
+    Brush tips do not move the line-width mark. Fill and the wand run the
+    similarity number on their own spin.
+  * A failed recovery open keeps the file. The package build runs the GUI
+    tests under Xvfb when DISPLAY is unset (Build-Depends: xvfb, xauth) and
+    fails if those tests cannot get a display.
+
+ -- Phil <phil@brushpad.local>  Thu, 08 Oct 2026 12:45:00 -0500
+
 lunduke-paint (0.9-4) unstable; urgency=medium
 
   * Stroke width follows the left-rail picker for lines, shapes, and the

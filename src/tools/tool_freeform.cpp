@@ -35,11 +35,12 @@ public:
   void on_motion(CanvasEvent event) override;
   void on_release(CanvasEvent event) override;
   void on_cancel() override;
+  bool on_commit() override;
   void set_shape_fill_mode(ShapeFillMode mode) override { fill_mode_ = mode; sync_mode_combo(); }
 
 private:
   void preview();
-  void finish();
+  bool finish();
   void clear_preview();
   void sync_mode_combo();
 
@@ -93,7 +94,7 @@ void FreeformShapeTool::on_press(CanvasEvent event) {
   const int y = static_cast<int>(std::floor(event.y));
   xs_.push_back(x);
   ys_.push_back(y);
-  host_->document().layers().copy_active_to_tool();
+  arm_preview_layer();
   preview();
 }
 
@@ -133,7 +134,7 @@ void FreeformShapeTool::preview() {
     return;
   }
   Document& doc = host_->document();
-  const Layer& active = doc.layers().active_layer();
+  const Layer& active = preview_layer_ref();
   Layer& tool = doc.layers().tool_layer();
   const Rect previous = dirty_;
   restore_shape_preview(tool, active, previous);
@@ -155,39 +156,46 @@ void FreeformShapeTool::preview() {
       layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
 }
 
-void FreeformShapeTool::finish() {
-  drawing_ = false;
+bool FreeformShapeTool::on_commit() {
+  if (!drawing_) {
+    return false;
+  }
+  return finish();
+}
+
+bool FreeformShapeTool::finish() {
   if (host_ == nullptr) {
+    drawing_ = false;
     xs_.clear();
     ys_.clear();
-    return;
+    return false;
   }
-  if (xs_.size() < 3) {
+  if (xs_.size() < 2) {
     clear_preview();
+    drawing_ = false;
     xs_.clear();
     ys_.clear();
-    return;
+    return true;
   }
-  Document& doc = host_->document();
-  auto cmd = PixelPatchCommand::from_layers(doc.layers().active_layer(), doc.layers().tool_layer(),
-                                            dirty_, "Freeform", doc.layers().active_index());
-  doc.layers().clear_tool_layer();
-  if (cmd && !cmd->empty()) {
-    doc.commit(std::move(cmd));
-  } else {
-    host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  if (!commit_preview("Freeform", dirty_)) {
+    return false;
   }
+  drawing_ = false;
   xs_.clear();
   ys_.clear();
   dirty_ = {};
+  return true;
 }
 
 void FreeformShapeTool::clear_preview() {
   if (host_ == nullptr) {
+    preview_layer_ = -1;
     return;
   }
+  const Layer& shown = preview_layer_ref();
   host_->document().layers().clear_tool_layer();
-  host_->invalidate_canvas(layer_dirty_to_canvas(host_->document().layers().active_layer(), dirty_));
+  clear_preview_overlay();
+  host_->invalidate_canvas(layer_dirty_to_canvas(shown, dirty_));
   dirty_ = {};
 }
 

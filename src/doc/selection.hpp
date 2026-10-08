@@ -154,6 +154,12 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
 void blit_rgba(Layer& dest, int dx, int dy, const std::uint8_t* src, int sw, int sh, int sstride,
                bool skip_transparent, const std::uint8_t* coverage = nullptr);
 
+// Paint a floating selection into a layer-sized straight-RGBA buffer the way
+// a commit would: punch the origin hole, then blit the float. Does not modify
+// the selection or the live layer. Used by crash recovery.
+bool composite_floating_into_buffer(const Selection& sel, std::uint8_t* pixels, int width, int height,
+                                   int stride, int offset_x, int offset_y);
+
 // Composite `sel` onto a view-sized straight-RGBA buffer. `dest` row 0 is
 // `view.y`. The origin hole is composited once with the source layer skipped,
 // then the float is blended in bulk. Never samples the stack per pixel.
