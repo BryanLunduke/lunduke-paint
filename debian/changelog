@@ -1,3 +1,20 @@
+lunduke-paint (0.9-10) unstable; urgency=medium
+
+  * The main window fits a 1280x768 screen with a panel. The Layers,
+    History, and Colors column scrolls, and those lists can shrink, so the
+    wells, pattern strip, and status bar stay on screen.
+  * New pictures follow the umask. Saving over an existing file keeps its
+    permission bits and, where the system allows, its owner and group.
+  * Flatten and keep .ora names the companion file, asks before replacing
+    one that is not this picture, and updates that file on later saves.
+  * Undo keeps the newest step, says when older steps are dropped, and the
+    history list names the oldest state it can actually restore.
+  * A flat save warns once for each document and target. Enter confirms
+    New Image, Canvas Size, Scale, and the other dialogs. Save Image shows
+    JPEG quality only when the file that will be written is a JPEG.
+
+ -- Phil <phil@brushpad.local>  Thu, 08 Oct 2026 23:20:00 -0500
+
 lunduke-paint (0.9-9) unstable; urgency=medium
 
   * Foreground and background wells, and the swap and reset controls, have

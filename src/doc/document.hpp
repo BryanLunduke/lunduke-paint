@@ -28,6 +28,15 @@ public:
   const std::string& path() const { return path_; }
   void set_path(std::string path) { path_ = std::move(path); }
 
+  // Layered copy kept beside a flat file. Empty when Save does not update one.
+  // Updated on every successful Save and Save As after "Flatten and keep .ora".
+  const std::string& companion_ora_path() const { return companion_ora_path_; }
+  void set_companion_ora_path(std::string path) { companion_ora_path_ = std::move(path); }
+  void clear_companion_ora_path() { companion_ora_path_.clear(); }
+
+  bool flat_save_acked(const std::string& key) const;
+  void ack_flat_save(const std::string& key);
+
   double view_zoom() const { return view_zoom_; }
   void set_view_zoom(double zoom) { view_zoom_ = zoom; }
 
@@ -149,6 +158,8 @@ private:
   int height_ = kDefaultHeight;
   int dpi_ = 96;
   std::string path_;
+  std::string companion_ora_path_;
+  std::vector<std::string> flat_save_acks_;
   double view_zoom_ = 1.0;
   bool dirty_ = false;
   bool unsaved_overlay_ = false;

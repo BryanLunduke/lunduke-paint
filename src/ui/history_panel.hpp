@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <gtkmm/box.h>
+#include <gtkmm/label.h>
 #include <gtkmm/listbox.h>
 #include <gtkmm/scrolledwindow.h>
 
@@ -27,6 +28,7 @@ private:
   Document* document_{nullptr};
   bool refreshing_{false};
 
+  Gtk::Label notice_;
   Gtk::ScrolledWindow scroll_;
   Gtk::ListBox list_;
 };

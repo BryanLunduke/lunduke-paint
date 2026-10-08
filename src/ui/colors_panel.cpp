@@ -107,10 +107,12 @@ ColorsPanel::ColorsPanel()
   custom_label_.set_xalign(0.0f);
   custom_label_.get_style_context()->add_class("dim-label");
 
-  hint_.set_text("Left: foreground. Right, middle, or Shift+left: background. Double-click a swatch to edit it.");
+  hint_.set_text("Left: foreground. Other: background.");
+  hint_.set_tooltip_text(
+      "Left: foreground. Right, middle, or Shift+left: background. Double-click a swatch to edit it.");
   hint_.set_xalign(0.0f);
-  hint_.set_line_wrap(true);
-  hint_.set_max_width_chars(22);
+  hint_.set_line_wrap(false);
+  hint_.set_ellipsize(Pango::ELLIPSIZE_END);
   hint_.get_style_context()->add_class("dim-label");
 
   pack_start(palette_grid_, Gtk::PACK_SHRINK);

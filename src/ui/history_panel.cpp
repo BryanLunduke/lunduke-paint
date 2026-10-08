@@ -3,6 +3,7 @@
 #include "ui/history_panel.hpp"
 
 #include "doc/document.hpp"
+#include "doc/history.hpp"
 
 #include <gtkmm/label.h>
 #include <gtkmm/listboxrow.h>
@@ -38,8 +39,17 @@ HistoryPanel::HistoryPanel() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 4) {
   list_.set_activate_on_single_click(true);
   list_.signal_row_activated().connect(sigc::mem_fun(*this, &HistoryPanel::on_row_activated));
   scroll_.set_policy(Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
-  scroll_.set_min_content_height(160);
+  scroll_.set_min_content_height(80);
+  scroll_.set_propagate_natural_height(false);
   scroll_.add(list_);
+  notice_.set_text(kUndoDroppedNotice);
+  notice_.set_xalign(0.0f);
+  notice_.set_line_wrap(true);
+  notice_.set_max_width_chars(28);
+  notice_.get_style_context()->add_class("dim-label");
+  notice_.set_no_show_all(true);
+  notice_.hide();
+  pack_start(notice_, Gtk::PACK_SHRINK);
   pack_start(scroll_, Gtk::PACK_EXPAND_WIDGET);
 }
 
@@ -57,8 +67,15 @@ void HistoryPanel::refresh() {
 
   const int current = document_ != nullptr ? document_->history().index() : -1;
   const int count = document_ != nullptr ? document_->history().count() : 0;
+  const bool dropped = document_ != nullptr && document_->history().base_dropped();
+  if (dropped) {
+    notice_.show();
+  } else {
+    notice_.hide();
+  }
+  const char* base = document_ != nullptr ? document_->history().base_label() : "New document";
 
-  auto* initial = Gtk::manage(new HistoryRow(-1, "New document", current == -1, false));
+  auto* initial = Gtk::manage(new HistoryRow(-1, base, current == -1, false));
   list_.append(*initial);
 
   for (int i = 0; i < count; ++i) {
@@ -69,7 +86,7 @@ void HistoryPanel::refresh() {
   }
 
   list_.show_all();
-  const int select = current + 1;  // row 0 is "New document"
+  const int select = current + 1;  // row 0 is the oldest restorable state
   if (Gtk::ListBoxRow* row = list_.get_row_at_index(select)) {
     list_.select_row(*row);
   }

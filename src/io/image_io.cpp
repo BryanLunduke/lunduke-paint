@@ -214,11 +214,29 @@ bool atomic_create(const std::string& path, AtomicFile& out, std::string& error)
                 rnd[1], rnd[2], rnd[3], rnd[4], rnd[5], rnd[6], rnd[7]);
   out.dest_path = path;
   out.tmp_path = dir + "/." + base + ".tmp" + suffix;
-  out.fd = ::open(out.tmp_path.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY | O_CLOEXEC, 0600);
+  // A new file is created with 0666 so the process umask applies (0644 when
+  // umask is 022). Replacing an existing file keeps that file's permission
+  // bits; the temp inode is private until fchmod copies them across.
+  const bool replacing = lstat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+  const mode_t create_mode = replacing ? static_cast<mode_t>(0600) : static_cast<mode_t>(0666);
+  out.fd = ::open(out.tmp_path.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY | O_CLOEXEC,
+                  create_mode);
   if (out.fd < 0) {
     error = with_errno("Could not create a temporary file");
     out.tmp_path.clear();
     return false;
+  }
+  if (replacing) {
+    // Best effort. A process that does not own the file, or may not take the
+    // group, still writes the bytes and keeps the permission bits below.
+    if (::fchown(out.fd, st.st_uid, st.st_gid) != 0) {
+      // Leave the temp file owned by this process. fchmod still runs.
+    }
+    if (::fchmod(out.fd, st.st_mode & 0777) != 0) {
+      error = with_errno("Could not preserve file permissions");
+      atomic_abort(out);
+      return false;
+    }
   }
   return true;
 }

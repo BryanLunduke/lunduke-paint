@@ -64,8 +64,7 @@ lunduke_paint_core = static_library(
   dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, pangocairo_dep, zlib_dep],
 )
 
-lunduke_paint_sources = files(
-  'src/main.cpp',
+lunduke_paint_app_sources = files(
   'src/app/application.cpp',
   'src/app/live_edit.cpp',
   'src/app/main_window.cpp',
@@ -111,7 +110,8 @@ lunduke_paint_sources = files(
 
 executable(
   'lunduke-paint',
-  lunduke_paint_sources,
+  files('src/main.cpp'),
+  lunduke_paint_app_sources,
   lunduke_paint_resources,
   dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep],
   include_directories: lunduke_paint_inc,
@@ -377,6 +377,44 @@ test_review_r6 = executable(
   install: false,
 )
 test('review_r6', test_review_r6)
+
+# Round-7 review: file modes, companion .ora naming, honest undo budget,
+# and one flatten warning per target. No display.
+test_review_r7 = executable(
+  'test_review_r7',
+  files('tests/test_review_r7.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, zlib_dep],
+  install: false,
+)
+test('review_r7', test_review_r7)
+
+# Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
+# history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
+test_review_r7_ui = executable(
+  'test_review_r7_ui',
+  files('tests/test_review_r7_ui.cpp'),
+  lunduke_paint_app_sources,
+  lunduke_paint_resources,
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
+test('review_r7_ui', test_review_r7_ui)
+
+# The shipped binary must not contain a workspace path or a test-only hook.
+test_release_binary = executable(
+  'test_release_binary',
+  files('tests/test_release_binary.cpp'),
+  install: false,
+)
+test(
+  'release_binary',
+  test_release_binary,
+  args: [join_paths(meson.current_build_dir(), 'lunduke-paint')],
+)
 
 install_data(
   'data/org.lunduke.LundukePaint.desktop',

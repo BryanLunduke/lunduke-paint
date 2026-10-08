@@ -15,7 +15,9 @@ namespace lundukepaint {
 class Layer;
 
 // One history item for a stroke or fill. Stores only changed tiles of the
-// dirty rectangle (not the whole layer).
+// dirty rectangle (not the whole layer). Non-solid pixels are packed into
+// one compressed buffer per side so a full-canvas step on a 16 megapixel
+// picture does not keep two raw copies.
 class PixelPatchCommand : public Command {
 public:
   static std::unique_ptr<PixelPatchCommand> from_layers(const Layer& before, const Layer& after,
@@ -43,14 +45,28 @@ private:
     bool after_solid = false;
     Color before_color{};
     Color after_color{};
-    std::vector<std::uint8_t> before;
-    std::vector<std::uint8_t> after;
+    std::uint32_t before_off = 0;
+    std::uint32_t before_len = 0;
+    std::uint32_t after_off = 0;
+    std::uint32_t after_len = 0;
   };
+
+  struct PackedPixels {
+    std::uint32_t raw_size = 0;
+    bool compressed = false;
+    std::vector<std::uint8_t> data;
+    std::size_t bytes() const { return data.size() + 8; }
+  };
+
+  static void pack_pixels(const std::vector<std::uint8_t>& raw, PackedPixels& out);
+  static bool unpack_pixels(const PackedPixels& in, std::vector<std::uint8_t>& raw);
 
   std::string name_;
   int layer_index_ = 0;
   Rect bounds_;
   std::vector<Tile> tiles_;
+  PackedPixels before_packed_;
+  PackedPixels after_packed_;
   bool has_selection_ = false;
   SelectionState selection_before_{};
   SelectionState selection_after_{};

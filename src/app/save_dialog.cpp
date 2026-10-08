@@ -4,6 +4,9 @@
 
 #include <memory>
 
+#include <gtkmm/entry.h>
+#include <gtkmm/container.h>
+
 namespace lundukepaint {
 
 SaveFilters add_save_filters(Gtk::FileChooser& chooser) {
@@ -75,6 +78,51 @@ void watch_save_filter(Gtk::FileChooser& chooser, const SaveFilters& filters, Im
     chooser.set_current_name(updated);
     *updating = false;
   });
+}
+
+namespace {
+
+void connect_name_entries(Gtk::Widget& widget, const sigc::slot<void>& on_change) {
+  if (auto* entry = dynamic_cast<Gtk::Entry*>(&widget)) {
+    entry->signal_changed().connect(on_change);
+  }
+  if (auto* container = dynamic_cast<Gtk::Container*>(&widget)) {
+    for (Gtk::Widget* child : container->get_children()) {
+      if (child != nullptr && child != &widget) {
+        connect_name_entries(*child, on_change);
+      }
+    }
+  }
+}
+
+}  // namespace
+
+void watch_jpeg_quality(Gtk::FileChooser& chooser, const SaveFilters& filters, Gtk::Widget& row) {
+  auto* widget = dynamic_cast<Gtk::Widget*>(&chooser);
+  auto sync = std::make_shared<std::function<void()>>();
+  *sync = [&chooser, &filters, &row]() {
+    const ImageFormat filter = format_of_save_filter(chooser.get_filter(), filters);
+    const bool show = save_shows_jpeg_quality(chooser.get_current_name(), filter);
+    if (show) {
+      row.show();
+    } else {
+      row.hide();
+    }
+  };
+  chooser.property_filter().signal_changed().connect([sync]() { (*sync)(); });
+  auto wired = std::make_shared<bool>(false);
+  if (widget != nullptr) {
+    widget->signal_map().connect([widget, sync, wired]() {
+      if (*wired) {
+        (*sync)();
+        return;
+      }
+      *wired = true;
+      connect_name_entries(*widget, [sync]() { (*sync)(); });
+      (*sync)();
+    });
+  }
+  (*sync)();
 }
 
 bool complete_save_choice(const std::string& chosen_path, ImageFormat filter,

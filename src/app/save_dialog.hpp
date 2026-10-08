@@ -31,6 +31,10 @@ ImageFormat format_of_save_filter(const Glib::RefPtr<Gtk::FileFilter>& filter, c
 // (the selected filter, when the name was filled in to match it).
 void watch_save_filter(Gtk::FileChooser& chooser, const SaveFilters& filters, ImageFormat initial);
 
+// Show `row` only while the name and filter resolve to JPEG. Call after the
+// initial name and filter are set. Listens to the filter and to the name entry.
+void watch_jpeg_quality(Gtk::FileChooser& chooser, const SaveFilters& filters, Gtk::Widget& row);
+
 // Shared accept path for Save As and any export that uses the same chooser.
 // PromptAppend asks `accept_append`; cancel leaves path unset and returns false.
 bool complete_save_choice(const std::string& chosen_path, ImageFormat filter,

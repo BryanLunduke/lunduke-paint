@@ -46,7 +46,11 @@ PreferencesDialog::PreferencesDialog(Gtk::Window& parent, const Preferences& pre
   undo_limit_.set_digits(0);
   undo_limit_.set_value(prefs.undo_limit);
   undo_limit_.set_tooltip_text(
-      "How many steps to keep (1–200). Oldest steps are also dropped when undo memory exceeds 256 MB.");
+      "How many steps to keep (1–200). Oldest steps are also dropped when undo memory exceeds the memory budget (at least 256 MB).");
+  width_.set_activates_default(true);
+  height_.set_activates_default(true);
+  undo_limit_.set_activates_default(true);
+  grid_threshold_.set_activates_default(true);
 
   checker_light_.set_rgba(color_to_rgba(prefs.checker_light));
   checker_light_.set_use_alpha(false);

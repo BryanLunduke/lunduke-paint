@@ -94,7 +94,7 @@ LayersPanel::LayersPanel() : Gtk::Box(Gtk::ORIENTATION_VERTICAL, 2) {
   list_.set_activate_on_single_click(true);
   list_.signal_row_selected().connect(sigc::mem_fun(*this, &LayersPanel::on_row_selected));
   scroll_.set_policy(Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
-  scroll_.set_min_content_height(160);
+  scroll_.set_min_content_height(80);
   scroll_.set_vexpand(true);
   scroll_.add(list_);
 
@@ -455,11 +455,13 @@ void LayersPanel::show_properties() {
   box.set_border_width(8);
   Gtk::Entry name;
   name.set_text(layer.name());
+  name.set_activates_default(true);
   Gtk::SpinButton opacity;
   opacity.set_range(0, 100);
   opacity.set_increments(1, 10);
   opacity.set_digits(0);
   opacity.set_value(static_cast<int>(layer.opacity() * 100.0f + 0.5f));
+  opacity.set_activates_default(true);
   Gtk::ComboBoxText blend;
   for (int i = 0; i < kBlendModeCount; ++i) {
     blend.append(blend_mode_label(blend_mode_from_index(i)));
@@ -474,11 +476,13 @@ void LayersPanel::show_properties() {
   offx.set_increments(1, 16);
   offx.set_digits(0);
   offx.set_value(layer.offset_x());
+  offx.set_activates_default(true);
   Gtk::SpinButton offy;
   offy.set_range(-16384, 16384);
   offy.set_increments(1, 16);
   offy.set_digits(0);
   offy.set_value(layer.offset_y());
+  offy.set_activates_default(true);
   box.pack_start(*Gtk::manage(new Gtk::Label("Blend", 0.0, 0.5)), Gtk::PACK_SHRINK);
   box.pack_start(blend, Gtk::PACK_SHRINK);
   box.pack_start(*Gtk::manage(new Gtk::Label("Offset X", 0.0, 0.5)), Gtk::PACK_SHRINK);

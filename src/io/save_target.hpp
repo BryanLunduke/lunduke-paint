@@ -258,6 +258,117 @@ inline std::string name_for_filter_change(const std::string& current_name, Image
   return dir + append_filter_extension(base, next);
 }
 
+// The layered copy that sits beside a flat Save As. Uses the same suffix
+// rules as Save As: a known image extension is replaced, a long title such
+// as "my.drawing" is kept, and a short unknown suffix is kept and ".ora"
+// is added ("archive.tar.png" -> "archive.tar.ora").
+inline std::string companion_ora_path(const std::string& flat_path) {
+  using namespace save_target_detail;
+  std::string dir;
+  std::string base;
+  split_name(flat_path, dir, base);
+  if (base.empty()) {
+    return dir + "untitled.ora";
+  }
+  const Suffix suffix = classify(base);
+  std::string stem = base;
+  if (suffix.kind == SuffixKind::Known && suffix.format != ImageFormat::Ora) {
+    const auto dot = base.find_last_of('.');
+    if (dot != std::string::npos) {
+      stem = base.substr(0, dot);
+    }
+  }
+  const SaveTarget target = resolve_save_target(dir + stem, ImageFormat::Ora);
+  if (target.kind == SaveResolveKind::Ready && !target.path.empty()) {
+    return target.path;
+  }
+  if (target.kind == SaveResolveKind::PromptAppend && !target.offered_path.empty()) {
+    return target.offered_path;
+  }
+  if (!stem.empty() && stem.back() == '.') {
+    stem.pop_back();
+  }
+  if (stem.empty()) {
+    stem = "untitled";
+  }
+  return dir + stem + ".ora";
+}
+
+// True when an existing companion is some other file, not this document's
+// own project or the companion it already updates.
+inline bool ora_companion_needs_confirm(bool exists, bool is_own_file) {
+  return exists && !is_own_file;
+}
+
+inline bool flat_save_needs_warning(ImageFormat format, bool multi, bool transparent) {
+  if (format == ImageFormat::Ora || format == ImageFormat::Gif || format == ImageFormat::Unknown) {
+    return false;
+  }
+  if (multi) {
+    return true;
+  }
+  return transparent && (format == ImageFormat::Jpeg || format == ImageFormat::Bmp);
+}
+
+// One sentence for the single flatten warning. PNG, JPEG, and BMP each say
+// what that format actually does to layers and alpha.
+inline std::string flat_save_message(ImageFormat format, bool multi, bool transparent) {
+  std::string message;
+  if (multi) {
+    message = "This document has multiple layers. Saving a flat file will flatten visible layers.";
+  }
+  if (format == ImageFormat::Png && multi) {
+    message += " PNG keeps the alpha of the flattened image.";
+  } else if (format == ImageFormat::Jpeg && (multi || transparent)) {
+    if (!message.empty()) {
+      message += " ";
+    }
+    message += "JPEG cannot store transparency or layers. The image will be flattened onto white.";
+  } else if (format == ImageFormat::Bmp && (multi || transparent)) {
+    if (!message.empty()) {
+      message += " ";
+    }
+    message += "BMP cannot store transparency or layers. The image will be flattened onto white.";
+  }
+  return message;
+}
+
+// Save As asks once. A later save of the same document to the same target
+// (same path, format, and whether layers or transparency are involved) does not.
+inline std::string flat_save_ack_key(const std::string& path, ImageFormat format, bool multi,
+                                    bool transparent) {
+  std::string key = path;
+  key.push_back('\n');
+  key += format_extension(format);
+  key.push_back(multi ? 'M' : 's');
+  key.push_back(transparent ? 'T' : 'o');
+  return key;
+}
+
+inline bool should_warn_flat_save(ImageFormat format, bool multi, bool transparent,
+                                 bool already_confirmed, bool acked) {
+  if (already_confirmed || acked) {
+    return false;
+  }
+  return flat_save_needs_warning(format, multi, transparent);
+}
+
+// JPEG quality is shown only for the format that will actually be written.
+// A typed extension wins over the file-type filter, matching Save As.
+inline bool save_shows_jpeg_quality(const std::string& typed_name, ImageFormat filter) {
+  if (typed_name.empty()) {
+    return filter == ImageFormat::Jpeg;
+  }
+  const SaveTarget target = resolve_save_target(typed_name, filter);
+  if (target.kind == SaveResolveKind::Ready) {
+    return target.format == ImageFormat::Jpeg;
+  }
+  if (target.kind == SaveResolveKind::PromptAppend) {
+    return target.offered_format == ImageFormat::Jpeg;
+  }
+  return filter == ImageFormat::Jpeg;
+}
+
 }  // namespace lundukepaint
 
 #endif

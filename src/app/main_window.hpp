@@ -32,6 +32,7 @@
 #include <gtkmm/box.h>
 #include <gtkmm/frame.h>
 #include <gtkmm/notebook.h>
+#include <gtkmm/scrolledwindow.h>
 #include <gtkmm/menu.h>
 #include <gtkmm/menuitem.h>
 #include <gtkmm/selectiondata.h>
@@ -165,7 +166,9 @@ private:
   bool focus_is_editable() const;
   void update_title();
   bool confirm_lose_changes();
-  bool save_to_path(const std::string& path, ImageFormat format);
+  bool save_to_path(const std::string& path, ImageFormat format, bool flatten_confirmed = false);
+  bool flat_export_transparent() const;
+  bool save_companion_ora();
   // Stamps an open text box or polygon, then a floating selection. False
   // leaves both the dirty flag and any crash-recovery file alone.
   bool commit_live_edits();
@@ -206,6 +209,7 @@ private:
   CanvasView canvas_;
   Gtk::Box center_column_{Gtk::ORIENTATION_VERTICAL};
   PatternStrip pattern_strip_;
+  Gtk::ScrolledWindow right_scroll_;
   Gtk::Box right_sidebar_{Gtk::ORIENTATION_VERTICAL};
   Gtk::Frame layers_frame_{"Layers"};
   Gtk::Frame history_frame_{"History"};

@@ -57,6 +57,17 @@ void Document::set_dirty(bool dirty) {
   notify_changed();
 }
 
+bool Document::flat_save_acked(const std::string& key) const {
+  return std::find(flat_save_acks_.begin(), flat_save_acks_.end(), key) != flat_save_acks_.end();
+}
+
+void Document::ack_flat_save(const std::string& key) {
+  if (key.empty() || flat_save_acked(key)) {
+    return;
+  }
+  flat_save_acks_.push_back(key);
+}
+
 void Document::mark_clean() {
   if (unsaved_overlay_ || selection_.floating()) {
     return;

@@ -21,10 +21,12 @@ CanvasSizeDialog::CanvasSizeDialog(Gtk::Window& parent, int width, int height)
   width_.set_increments(1, 50);
   width_.set_digits(0);
   width_.set_value(width);
+  width_.set_activates_default(true);
   height_.set_range(1, kHardMaxSide);
   height_.set_increments(1, 50);
   height_.set_digits(0);
   height_.set_value(height);
+  height_.set_activates_default(true);
 
   Gtk::RadioButton::Group group = bg_.get_group();
   transparent_.set_group(group);
@@ -76,10 +78,12 @@ ScaleImageDialog::ScaleImageDialog(Gtk::Window& parent, int width, int height)
   width_.set_increments(1, 50);
   width_.set_digits(0);
   width_.set_value(width);
+  width_.set_activates_default(true);
   height_.set_range(1, kHardMaxSide);
   height_.set_increments(1, 50);
   height_.set_digits(0);
   height_.set_value(height);
+  height_.set_activates_default(true);
   keep_aspect_.set_active(true);
 
   Gtk::RadioButton::Group group = nearest_.get_group();
@@ -107,8 +111,12 @@ ScaleImageDialog::ScaleImageDialog(Gtk::Window& parent, int width, int height)
   show_all();
 }
 
+ScaleImageDialog::~ScaleImageDialog() {
+  closing_ = true;
+}
+
 void ScaleImageDialog::on_width_changed() {
-  if (updating_ || !keep_aspect_.get_active() || orig_w_ < 1) {
+  if (closing_ || updating_ || !keep_aspect_.get_active() || orig_w_ < 1) {
     return;
   }
   updating_ = true;
@@ -119,7 +127,7 @@ void ScaleImageDialog::on_width_changed() {
 }
 
 void ScaleImageDialog::on_height_changed() {
-  if (updating_ || !keep_aspect_.get_active() || orig_h_ < 1) {
+  if (closing_ || updating_ || !keep_aspect_.get_active() || orig_h_ < 1) {
     return;
   }
   updating_ = true;

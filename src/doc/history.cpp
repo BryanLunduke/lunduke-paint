@@ -2,7 +2,28 @@
 
 #include "doc/history.hpp"
 
+#include <unistd.h>
+
 namespace lundukepaint {
+
+std::size_t suggested_undo_bytes() {
+  const long pages = sysconf(_SC_PHYS_PAGES);
+  const long page = sysconf(_SC_PAGE_SIZE);
+  constexpr std::size_t kCeiling = 512ull * 1024ull * 1024ull;
+  if (pages <= 0 || page <= 0) {
+    return kDefaultUndoBytes;
+  }
+  const unsigned long long ram =
+      static_cast<unsigned long long>(pages) * static_cast<unsigned long long>(page);
+  unsigned long long budget = ram / 8ull;
+  if (budget < kDefaultUndoBytes) {
+    return kDefaultUndoBytes;
+  }
+  if (budget > kCeiling) {
+    return kCeiling;
+  }
+  return static_cast<std::size_t>(budget);
+}
 
 History::History(int depth) {
   set_depth(depth);
@@ -109,6 +130,18 @@ void History::clear() {
   index_ = -1;
   saved_valid_ = true;
   saved_index_ = -1;
+  base_dropped_ = false;
+  drop_notice_ = false;
+}
+
+const char* History::base_label() const {
+  return base_dropped_ ? "Start of history" : "New document";
+}
+
+bool History::consume_drop_notice() {
+  const bool notice = drop_notice_;
+  drop_notice_ = false;
+  return notice;
 }
 
 bool History::matches_saved() const {
@@ -155,13 +188,22 @@ void History::drop_oldest() {
 }
 
 void History::trim() {
-  while (!commands_.empty()) {
+  // Always keep the newest step. A single full-canvas edit on a large
+  // picture can be bigger than the budget; dropping it would make Undo a
+  // no-op and bake that edit into a fake "New document".
+  bool dropped = false;
+  while (commands_.size() > 1) {
     const bool over_depth = static_cast<int>(commands_.size()) > depth_;
     const bool over_bytes = byte_cap_ > 0 && memory_bytes() > byte_cap_;
     if (!over_depth && !over_bytes) {
       break;
     }
     drop_oldest();
+    dropped = true;
+  }
+  if (dropped) {
+    base_dropped_ = true;
+    drop_notice_ = true;
   }
 }
 
