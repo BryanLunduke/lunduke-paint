@@ -1,3 +1,9 @@
+lunduke-paint (0.9.1-1) unstable; urgency=medium
+
+  * Version bump for LCOS 0.9.1 (testing and bug-fix release). No functional changes.
+
+ -- Phil <phil@brushpad.local>  Fri, 09 Oct 2026 10:55:00 -0500
+
 lunduke-paint (0.9-10) unstable; urgency=medium
 
   * The main window fits a 1280x768 screen with a panel. The Layers,
