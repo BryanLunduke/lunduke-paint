@@ -1,0 +1,72 @@
+#!/bin/sh
+#
+# Portable launcher for Lunduke Paint AppImage.
+# cd's to the AppDir root so the kernel can resolve the relative
+# interpreter path for the bundled musl dynamic linker.
+#
+
+set -eu
+
+SELF="$0"
+while [ -L "$SELF" ]; do
+    LINK="$(readlink "$SELF")"
+    case "$LINK" in
+        /*) SELF="$LINK" ;;
+        *)  SELF="$(dirname "$SELF")/$LINK" ;;
+    esac
+done
+
+HERE="$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd -P)"
+PREFIX="$HERE/usr"
+
+###############################################################################
+# GdkPixbuf loaders
+###############################################################################
+
+GDK_PIXBUF_BASE="$PREFIX/lib/gdk-pixbuf-2.0"
+GDK_PIXBUF_LOADERS=""
+GDK_PIXBUF_CACHE=""
+
+if [ -d "$GDK_PIXBUF_BASE" ]; then
+    for d in "$GDK_PIXBUF_BASE"/*; do
+        if [ -d "$d" ]; then
+            GDK_PIXBUF_LOADERS="$d/loaders"
+            GDK_PIXBUF_CACHE="$d/loaders.cache"
+            break
+        fi
+    done
+fi
+
+LOADERS_PATH=""
+[ -n "$GDK_PIXBUF_LOADERS" ] && [ -d "$GDK_PIXBUF_LOADERS" ] && LOADERS_PATH="$GDK_PIXBUF_LOADERS"
+
+###############################################################################
+# Environment
+###############################################################################
+
+export LD_LIBRARY_PATH="$PREFIX/lib${LOADERS_PATH:+:$LOADERS_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+[ -n "$GDK_PIXBUF_LOADERS" ] && [ -d "$GDK_PIXBUF_LOADERS" ] \
+    && export GDK_PIXBUF_MODULEDIR="$GDK_PIXBUF_LOADERS"
+[ -n "$GDK_PIXBUF_CACHE" ] && [ -f "$GDK_PIXBUF_CACHE" ] \
+    && export GDK_PIXBUF_MODULE_FILE="$GDK_PIXBUF_CACHE"
+
+export XDG_DATA_DIRS="$PREFIX/share:/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+export GTK_DATA_PREFIX="$PREFIX"
+export GTK_EXE_PREFIX="$PREFIX"
+
+# Point GTK's module search at the bundle. A host GTK_PATH would offer
+# glibc-linked modules, which this musl-linked GTK cannot load; the bundled
+# appmenu-gtk-module lives here instead. GTK_MODULES is deliberately left
+# alone, so only a session that asks for the global menu gets it.
+export GTK_PATH="$PREFIX/lib/gtk-3.0"
+
+[ -d "$PREFIX/share/glib-2.0/schemas" ] \
+    && export GSETTINGS_SCHEMA_DIR="$PREFIX/share/glib-2.0/schemas"
+
+###############################################################################
+# Execute - cd to AppDir root so relative interpreter path resolves
+###############################################################################
+
+cd "$HERE"
+exec "$PREFIX/bin/lunduke-paint" "$@"
