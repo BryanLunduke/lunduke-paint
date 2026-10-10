@@ -1,3 +1,9 @@
+lunduke-paint (0.9.2-1) unstable; urgency=medium
+
+  * Version bump for LCOS 0.9.2. No functional changes.
+
+ -- Phil <phil@brushpad.local>  Fri, 09 Oct 2026 19:34:00 -0500
+
 lunduke-paint (0.9.1-1) unstable; urgency=medium
 
   * Version bump for LCOS 0.9.1 (testing and bug-fix release). No functional changes.
