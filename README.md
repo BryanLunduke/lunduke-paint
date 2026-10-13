@@ -14,8 +14,12 @@ user layers.
   decorations, no HeaderBar as main chrome)
 - Theme: follows the active GTK3 theme; the app is not skinned
 - Native project file: OpenRaster `.ora` (libarchive + pugixml)
-- Version: 0.9.3
+- Version: 0.9.4
 - Config: `$XDG_CONFIG_HOME/lunduke-paint/lunduke-paint.ini` via GKeyFile
+
+## 0.9.4
+
+LCOS 0.9.4. Package 0.9.4-1. About dialog and meson version read 0.9.4. No functional changes.
 
 ## 0.9.3
 
