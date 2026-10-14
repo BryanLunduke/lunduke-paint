@@ -152,6 +152,8 @@ private:
   bool preserve_live_edits_for_tab_switch();
   bool disrupt_allowed(const char* action);
   void report_blocked(const char* message);
+  // Encoded clipboard image: size check before decode (round 10, P-1).
+  bool read_clipboard_image(int& w, int& h, std::vector<std::uint8_t>& rgba);
   void clear_document_recovery(const Document& document);
   bool other_documents_dirty(const Document* except) const;
   void attach_active_document();

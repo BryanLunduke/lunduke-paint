@@ -82,6 +82,20 @@ bool encode_png_memory(const std::uint8_t* rgba, int width, int height, int stri
 bool png_header_size_ok(const std::uint8_t* data, std::size_t size);
 bool decode_png_memory(const std::uint8_t* data, std::size_t size, LoadedImage& out);
 
+// Clipboard images (round 10, P-1). Read only the encoded header to learn the
+// size, so an oversized clipboard image is refused before any pixels are
+// decoded. `mime_type` names the clipboard target ("image/png"); an empty or
+// unknown type lets the loader sniff the data. Returns false when the data is
+// not a readable image header.
+bool encoded_image_size(const std::uint8_t* data, std::size_t size, const std::string& mime_type,
+                        int& width, int& height);
+
+// Full decode of an encoded image held in memory. `out_of_memory` is set when
+// the failure was an allocation failure, so the caller can say so instead of
+// "no image".
+bool decode_encoded_image(const std::uint8_t* data, std::size_t size, const std::string& mime_type,
+                          LoadedImage& out, bool& out_of_memory);
+
 }  // namespace lundukepaint
 
 #endif
