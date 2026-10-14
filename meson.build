@@ -424,6 +424,18 @@ test_review_r10 = executable(
 )
 test('review_r10', test_review_r10)
 
+# Round 11: recovery prompt keeps work unless Discard is confirmed; it shows
+# document names and times from the sidecar instead of internal file names.
+test_review_r11 = executable(
+  'test_review_r11',
+  files('tests/test_review_r11.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  install: false,
+)
+test('review_r11', test_review_r11)
+
 # Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
 # history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
 test_review_r7_ui = executable(

@@ -29,6 +29,30 @@ void clear();
 // Unlinks one recovery file. Ignores anything that is not a recovery path.
 void clear_file(const std::string& path);
 
+// P-2 (round 11): a small sidecar "<recovery file>.name" holds the document's
+// user-visible name so the recovery prompt can show it instead of the
+// internal file name. Empty title means "Untitled".
+std::string name_path_for(const std::string& recovery_path);
+bool write_name(const std::string& recovery_path, const std::string& title);
+std::string read_name(const std::string& recovery_path);
+// "<name> — last saved <date time>" for one recovery file.
+std::string describe(const std::string& recovery_path);
+
+// P-1 (round 11): what the recovery prompt's answer means. Only an explicit
+// Discard that the user then confirms deletes files; Escape, the close
+// button or "Not Now" keep everything for the next launch.
+enum class RecoveryChoice { Recover, Discard, Keep };
+inline RecoveryChoice recovery_choice(bool pressed_recover, bool pressed_discard,
+                                      bool discard_confirmed) {
+  if (pressed_recover) {
+    return RecoveryChoice::Recover;
+  }
+  if (pressed_discard && discard_confirmed) {
+    return RecoveryChoice::Discard;
+  }
+  return RecoveryChoice::Keep;
+}
+
 // Cheap fingerprint of what a recovery write would contain: canvas size and
 // each layer's (identity, revision) plus its properties. Equal fingerprints
 // mean the last recovery file is still current, so the tick can be skipped.

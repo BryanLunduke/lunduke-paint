@@ -2695,32 +2695,67 @@ void MainWindow::offer_recovery() {
   if (files.empty()) {
     return;
   }
-  Glib::ustring secondary = "Each file is one document from a previous session:\n";
-  for (const std::string& path : files) {
-    secondary += Glib::path_get_basename(path);
+  // P-2 (round 11): show the document's name and when it was last
+  // autosaved, not the internal recovery file name. Long lists are cut so
+  // the dialog stays on screen at GDK_SCALE=2.
+  Glib::ustring secondary = files.size() == 1 ? "Unsaved work from a previous session:\n"
+                                              : "Unsaved documents from a previous session:\n";
+  const std::size_t shown_max = 5;
+  for (std::size_t i = 0; i < files.size() && i < shown_max; ++i) {
+    secondary += "\u2022 ";
+    secondary += crash_recovery::describe(files[i]);
     secondary += "\n";
   }
+  if (files.size() > shown_max) {
+    secondary += Glib::ustring::compose("\u2026and %1 more\n", files.size() - shown_max);
+  }
+  secondary += "\n\"Not Now\" keeps them for the next time Paint starts.";
   Gtk::MessageDialog dialog(*this, "Recover unsaved documents?", false, Gtk::MESSAGE_QUESTION,
                             Gtk::BUTTONS_NONE, true);
   dialog.set_secondary_text(secondary);
-  dialog.add_button("_Discard", Gtk::RESPONSE_NO);
+  dialog.set_position(Gtk::WIN_POS_CENTER);
+  dialog.add_button("_Discard\u2026", Gtk::RESPONSE_NO);
+  dialog.add_button("_Not Now", Gtk::RESPONSE_CANCEL);
   dialog.add_button("_Recover", Gtk::RESPONSE_YES);
+  dialog.set_default_response(Gtk::RESPONSE_YES);
   const int response = dialog.run();
-  if (response == Gtk::RESPONSE_YES) {
-    for (const std::string& path : files) {
-      if (open_path(path) && document_ptr() != nullptr && recovery_file_consumed(true)) {
-        document().set_path(std::string());
-        document().set_dirty(true);
-        crash_recovery::clear_file(path);
-      } else {
-        show_status("Recovery was not applied. The file was kept.");
+  dialog.hide();
+  bool confirmed = false;
+  if (response == Gtk::RESPONSE_NO) {
+    // P-1 (round 11): deleting recovered work needs a second, explicit yes.
+    Gtk::MessageDialog confirm(*this, "Delete unsaved work?", false, Gtk::MESSAGE_WARNING,
+                               Gtk::BUTTONS_NONE, true);
+    confirm.set_secondary_text(files.size() == 1
+                                   ? "The recovered document will be deleted permanently."
+                                   : "All recovered documents will be deleted permanently.");
+    confirm.set_position(Gtk::WIN_POS_CENTER);
+    confirm.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+    confirm.add_button("_Delete", Gtk::RESPONSE_ACCEPT);
+    confirm.set_default_response(Gtk::RESPONSE_CANCEL);
+    confirmed = confirm.run() == Gtk::RESPONSE_ACCEPT;
+  }
+  switch (crash_recovery::recovery_choice(response == Gtk::RESPONSE_YES,
+                                          response == Gtk::RESPONSE_NO, confirmed)) {
+    case crash_recovery::RecoveryChoice::Recover:
+      for (const std::string& path : files) {
+        if (open_path(path) && document_ptr() != nullptr && recovery_file_consumed(true)) {
+          document().set_path(std::string());
+          document().set_dirty(true);
+          crash_recovery::clear_file(path);
+        } else {
+          show_status("Recovery was not applied. The file was kept.");
+        }
       }
-    }
-  } else {
-    for (const std::string& path : files) {
-      crash_recovery::clear_file(path);
-    }
-    crash_recovery::clear();
+      break;
+    case crash_recovery::RecoveryChoice::Discard:
+      for (const std::string& path : files) {
+        crash_recovery::clear_file(path);
+      }
+      crash_recovery::clear();
+      break;
+    case crash_recovery::RecoveryChoice::Keep:
+      show_status("Unsaved work was kept. Paint will offer it again next time.");
+      break;
   }
 }
 
@@ -2752,6 +2787,9 @@ void MainWindow::report_out_of_memory() {
       const OraSnapshot snap = capture_ora_snapshot(doc, false);
       if (crash_recovery::prepare_state_dir(error) &&
           save_ora_snapshot(crash_recovery::autosave_path_for(doc.recovery_id()), snap, error)) {
+        crash_recovery::write_name(crash_recovery::autosave_path_for(doc.recovery_id()),
+                                   doc.path().empty() ? std::string()
+                                                      : std::string(Glib::path_get_basename(doc.path())));
         ++saved;
       }
     } catch (...) {
@@ -2787,6 +2825,7 @@ void MainWindow::start_recovery_save() {
     std::string dest;
     std::uint64_t id = 0;
     std::string sig;  // empty for synthetic content: never marked current
+    std::string title;  // P-2 (round 11): shown by the recovery prompt
   };
   std::vector<Job> jobs;
   const gint64 now = g_get_monotonic_time();
@@ -2864,7 +2903,8 @@ void MainWindow::start_recovery_save() {
           }
         }
       }
-      jobs.push_back(Job{std::move(snapshot), dest, doc.recovery_id(), synthetic ? std::string() : sig});
+      jobs.push_back(Job{std::move(snapshot), dest, doc.recovery_id(), synthetic ? std::string() : sig,
+                         doc.path().empty() ? std::string() : std::string(Glib::path_get_basename(doc.path()))});
     }, "crash-recovery snapshot");
     if (!ok) {
       recovery_sig_.forget(doc.recovery_id());
@@ -2895,6 +2935,9 @@ void MainWindow::start_recovery_save() {
           // On failure any previous recovery file stays in place.
           ok = crash_recovery::prepare_state_dir(error) &&
                save_ora_snapshot(job.dest, job.snapshot, error);
+          if (ok) {
+            crash_recovery::write_name(job.dest, job.title);
+          }
           if (!ok) {
             g_warning("lunduke-paint: recovery write failed (%s); will retry", error.c_str());
           }

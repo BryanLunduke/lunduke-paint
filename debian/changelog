@@ -1,3 +1,11 @@
+lunduke-paint (0.9.4-5) unstable; urgency=medium
+
+  * Fix round 11 review findings (P-1, P-2): Escape/close on the recovery
+    prompt keeps recovered work; Discard asks for confirmation. The prompt
+    shows document names and autosave times and stays on screen at scale 2.
+
+ -- Phil <phil@brushpad.local>  Wed, 14 Oct 2026 18:20:00 +0000
+
 lunduke-paint (0.9.4-4) unstable; urgency=medium
 
   * Fix round 10 review findings.

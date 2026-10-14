@@ -199,6 +199,68 @@ void clear_file(const std::string& path) {
     return;
   }
   unlink(path.c_str());
+  unlink(name_path_for(path).c_str());
+}
+
+std::string name_path_for(const std::string& recovery_path) {
+  return recovery_path + ".name";
+}
+
+bool write_name(const std::string& recovery_path, const std::string& title) {
+  if (!path_is_recovery(recovery_path)) {
+    return false;
+  }
+  std::string text = title.substr(0, 512);
+  for (char& c : text) {
+    if (c == '\n' || c == '\r') {
+      c = ' ';
+    }
+  }
+  return g_file_set_contents(name_path_for(recovery_path).c_str(), text.c_str(),
+                             static_cast<gssize>(text.size()), nullptr) != FALSE;
+}
+
+std::string read_name(const std::string& recovery_path) {
+  gchar* data = nullptr;
+  gsize len = 0;
+  struct stat st;
+  const std::string side = name_path_for(recovery_path);
+  if (lstat(side.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size > 4096) {
+    return std::string();
+  }
+  if (!g_file_get_contents(side.c_str(), &data, &len, nullptr)) {
+    return std::string();
+  }
+  std::string out(data, len);
+  g_free(data);
+  if (!g_utf8_validate(out.c_str(), static_cast<gssize>(out.size()), nullptr)) {
+    return std::string();
+  }
+  return out;
+}
+
+std::string describe(const std::string& recovery_path) {
+  std::string name = read_name(recovery_path);
+  if (name.empty()) {
+    name = "Untitled";
+  }
+  struct stat st;
+  if (stat(recovery_path.c_str(), &st) != 0) {
+    return name;
+  }
+  GDateTime* when = g_date_time_new_from_unix_local(static_cast<gint64>(st.st_mtime));
+  if (when == nullptr) {
+    return name;
+  }
+  gchar* stamp = g_date_time_format(when, "%b %e, %Y at %H:%M");
+  g_date_time_unref(when);
+  std::string out = name;
+  if (stamp != nullptr) {
+    out += " \u2014 last autosaved ";
+    out += stamp;
+    g_free(stamp);
+  }
+  return out;
 }
 
 bool clear_after_discard(bool other_documents_dirty) {
