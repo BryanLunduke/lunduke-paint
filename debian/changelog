@@ -1,3 +1,9 @@
+lunduke-paint (0.9.4-3) unstable; urgency=medium
+
+  * Fix round 9 review findings.
+
+ -- Phil <phil@brushpad.local>  Wed, 14 Oct 2026 05:20:45 +0000
+
 lunduke-paint (0.9.4-2) unstable; urgency=medium
 
   * Fix round 8 review findings.

@@ -85,6 +85,14 @@ struct MainWindow::RecoverySlot {
   MainWindow* window = nullptr;
   bool busy = false;
   bool pending = false;
+  // P-1 (round 9): per-job outcome of the last background write, applied to
+  // recovery_sig_ on the GTK thread.
+  struct Result {
+    std::uint64_t id = 0;
+    std::string sig;
+    bool ok = false;
+  };
+  std::vector<Result> results;
 };
 
 struct RecoveryIdle {
@@ -244,13 +252,22 @@ gboolean MainWindow::recovery_idle_cb(gpointer data) {
   std::unique_ptr<RecoveryIdle> args(static_cast<RecoveryIdle*>(data));
   MainWindow* window = nullptr;
   bool again = false;
+  std::vector<RecoverySlot::Result> results;
   {
     std::lock_guard<std::mutex> lock(args->slot->mu);
     window = args->slot->window;
     args->slot->busy = false;
+    results.swap(args->slot->results);
     again = window != nullptr && args->slot->pending;
     if (again) {
       args->slot->pending = false;
+    }
+  }
+  if (window != nullptr) {
+    // Mark a recovery file current only once it is really on disk. A failed
+    // write leaves no fingerprint, so the next tick retries it.
+    for (const auto& r : results) {
+      window->recovery_sig_.record_result(r.id, r.sig, r.ok);
     }
   }
   if (again && window != nullptr) {
@@ -1754,7 +1771,17 @@ bool MainWindow::paste_from_clipboard() {
   int w = 0;
   int h = 0;
   std::vector<std::uint8_t> rgba;
-  if (!pixbuf_to_tight_rgba(Gtk::Clipboard::get()->wait_for_image(), w, h, rgba)) {
+  const Glib::RefPtr<Gdk::Pixbuf> clip = Gtk::Clipboard::get()->wait_for_image();
+  if (!clip) {
+    report_blocked("Clipboard has no image");
+    return false;
+  }
+  // P-3 (round 9): plain Paste gets the same 16384 limit and large-canvas
+  // warning as Paste into New, New, Canvas Size and Scale.
+  if (!warn_size(clip->get_width(), clip->get_height())) {
+    return false;
+  }
+  if (!pixbuf_to_tight_rgba(clip, w, h, rgba)) {
     report_blocked("Clipboard has no image");
     return false;
   }
@@ -2731,6 +2758,8 @@ void MainWindow::start_recovery_save() {
   struct Job {
     OraSnapshot snapshot;
     std::string dest;
+    std::uint64_t id = 0;
+    std::string sig;  // empty for synthetic content: never marked current
   };
   std::vector<Job> jobs;
   const gint64 now = g_get_monotonic_time();
@@ -2748,64 +2777,71 @@ void MainWindow::start_recovery_save() {
         doc.selection().floating() ||
         (i == active && (stroke || text || (effect_preview_ != nullptr && effect_preview_->previewing())));
     const std::string sig = crash_recovery::recovery_signature(doc);
+    const std::string dest = crash_recovery::autosave_path_for(doc.recovery_id());
     if (!synthetic) {
-      const auto seen = recovery_sig_.find(doc.recovery_id());
-      if (seen != recovery_sig_.end() && seen->second == sig) {
+      if (recovery_sig_.is_current(doc.recovery_id(), sig, dest)) {
         continue;
       }
-      recovery_sig_[doc.recovery_id()] = sig;
     } else {
-      recovery_sig_.erase(doc.recovery_id());
+      recovery_sig_.forget(doc.recovery_id());
     }
-    const bool large = doc.width() > 2048 || doc.height() > 2048;
-    OraSnapshot snapshot = capture_ora_snapshot(doc, !large || idle_long);
-    if (i == active && effect_preview_ != nullptr && effect_preview_->previewing()) {
-      const Layer* pristine = effect_preview_->pristine();
-      const int layer_index = effect_preview_->layer_index();
-      if (pristine != nullptr && layer_index >= 0 &&
-          layer_index < static_cast<int>(snapshot.layers.size())) {
-        OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(layer_index)];
-        const std::size_t bytes = static_cast<std::size_t>(pristine->stride()) *
-                                  static_cast<std::size_t>(pristine->height());
-        item.cached_png.clear();
-        item.pixels.assign(pristine->pixels(), pristine->pixels() + bytes);
-        item.width = pristine->width();
-        item.height = pristine->height();
-        item.stride = pristine->stride();
-        item.identity = 0;  // synthetic content: never use the layer PNG cache
-      }
-    }
-    if (i == active && active_tool_ != nullptr) {
-      int overlay_index = active_tool_->preview_layer();
-      if (overlay_index < 0) {
-        overlay_index = doc.layers().active_index();
-      }
-      if (overlay_index >= 0 && overlay_index < static_cast<int>(snapshot.layers.size())) {
-        OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(overlay_index)];
-        ensure_snapshot_pixels(item, doc.layers().at(overlay_index));
-        if (active_tool_->paint_recovery_overlay(overlay_index, item.pixels.data(), item.width,
-                                                item.height, item.stride)) {
+    // P-2 (round 9): this runs from the autosave timer. An allocation failure
+    // here must not reach the global handler and its "Not enough memory"
+    // dialog; log it and let the next tick retry.
+    const bool ok = crash_recovery::run_background_step([&]() {
+      const bool large = doc.width() > 2048 || doc.height() > 2048;
+      OraSnapshot snapshot = capture_ora_snapshot(doc, !large || idle_long);
+      if (i == active && effect_preview_ != nullptr && effect_preview_->previewing()) {
+        const Layer* pristine = effect_preview_->pristine();
+        const int layer_index = effect_preview_->layer_index();
+        if (pristine != nullptr && layer_index >= 0 &&
+            layer_index < static_cast<int>(snapshot.layers.size())) {
+          OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(layer_index)];
+          const std::size_t bytes = static_cast<std::size_t>(pristine->stride()) *
+                                    static_cast<std::size_t>(pristine->height());
+          item.cached_png.clear();
+          item.pixels.assign(pristine->pixels(), pristine->pixels() + bytes);
+          item.width = pristine->width();
+          item.height = pristine->height();
+          item.stride = pristine->stride();
           item.identity = 0;  // synthetic content: never use the layer PNG cache
         }
       }
-    }
-    if (doc.selection().floating()) {
-      int float_index = doc.selection().source_layer();
-      if (float_index < 0 || float_index >= static_cast<int>(snapshot.layers.size())) {
-        float_index = doc.layers().active_index();
-      }
-      if (float_index >= 0 && float_index < static_cast<int>(snapshot.layers.size())) {
-        OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(float_index)];
-        const Layer& layer = doc.layers().at(float_index);
-        ensure_snapshot_pixels(item, layer);
-        if (composite_floating_into_buffer(doc.selection(), item.pixels.data(), item.width,
-                                          item.height, item.stride, layer.offset_x(),
-                                          layer.offset_y())) {
-          item.identity = 0;  // synthetic content: never use the layer PNG cache
+      if (i == active && active_tool_ != nullptr) {
+        int overlay_index = active_tool_->preview_layer();
+        if (overlay_index < 0) {
+          overlay_index = doc.layers().active_index();
+        }
+        if (overlay_index >= 0 && overlay_index < static_cast<int>(snapshot.layers.size())) {
+          OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(overlay_index)];
+          ensure_snapshot_pixels(item, doc.layers().at(overlay_index));
+          if (active_tool_->paint_recovery_overlay(overlay_index, item.pixels.data(), item.width,
+                                                  item.height, item.stride)) {
+            item.identity = 0;  // synthetic content: never use the layer PNG cache
+          }
         }
       }
+      if (doc.selection().floating()) {
+        int float_index = doc.selection().source_layer();
+        if (float_index < 0 || float_index >= static_cast<int>(snapshot.layers.size())) {
+          float_index = doc.layers().active_index();
+        }
+        if (float_index >= 0 && float_index < static_cast<int>(snapshot.layers.size())) {
+          OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(float_index)];
+          const Layer& layer = doc.layers().at(float_index);
+          ensure_snapshot_pixels(item, layer);
+          if (composite_floating_into_buffer(doc.selection(), item.pixels.data(), item.width,
+                                            item.height, item.stride, layer.offset_x(),
+                                            layer.offset_y())) {
+            item.identity = 0;  // synthetic content: never use the layer PNG cache
+          }
+        }
+      }
+      jobs.push_back(Job{std::move(snapshot), dest, doc.recovery_id(), synthetic ? std::string() : sig});
+    }, "crash-recovery snapshot");
+    if (!ok) {
+      recovery_sig_.forget(doc.recovery_id());
     }
-    jobs.push_back(Job{std::move(snapshot), crash_recovery::autosave_path_for(doc.recovery_id())});
   }
   if (jobs.empty()) {
     return;
@@ -2824,15 +2860,27 @@ void MainWindow::start_recovery_save() {
   auto slot = recovery_slot_;
   try {
     std::thread([slot, jobs = std::move(jobs)]() mutable {
-      try {
-        for (Job& job : jobs) {
+      std::vector<RecoverySlot::Result> results;
+      for (Job& job : jobs) {
+        bool ok = false;
+        try {
           std::string error;
-          if (!crash_recovery::prepare_state_dir(error) ||
-              !save_ora_snapshot(job.dest, job.snapshot, error)) {
-            // Leave any previous recovery file in place.
+          // On failure any previous recovery file stays in place.
+          ok = crash_recovery::prepare_state_dir(error) &&
+               save_ora_snapshot(job.dest, job.snapshot, error);
+          if (!ok) {
+            g_warning("lunduke-paint: recovery write failed (%s); will retry", error.c_str());
           }
+        } catch (...) {
+          ok = false;
         }
-      } catch (...) {
+        results.push_back(RecoverySlot::Result{job.id, std::move(job.sig), ok});
+      }
+      {
+        std::lock_guard<std::mutex> lock(slot->mu);
+        for (auto& r : results) {
+          slot->results.push_back(std::move(r));
+        }
       }
       g_idle_add(&MainWindow::recovery_idle_cb, new RecoveryIdle{slot});
     }).detach();

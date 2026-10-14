@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
+#include <new>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -222,6 +224,39 @@ std::string recovery_signature(const Document& document) {
     sig += layer.name();
   }
   return sig;
+}
+
+bool RecoveryTracker::is_current(std::uint64_t id, const std::string& sig,
+                                 const std::string& path) const {
+  const auto it = written_.find(id);
+  if (it == written_.end() || it->second != sig) {
+    return false;
+  }
+  return g_file_test(path.c_str(), G_FILE_TEST_IS_REGULAR) != FALSE;
+}
+
+void RecoveryTracker::record_result(std::uint64_t id, const std::string& sig, bool ok) {
+  if (ok && !sig.empty()) {
+    written_[id] = sig;
+  } else {
+    written_.erase(id);
+  }
+}
+
+void RecoveryTracker::forget(std::uint64_t id) {
+  written_.erase(id);
+}
+
+bool run_background_step(const std::function<void()>& step, const char* what) {
+  try {
+    step();
+    return true;
+  } catch (const std::bad_alloc&) {
+    g_warning("lunduke-paint: %s skipped: not enough memory; will retry", what);
+  } catch (const std::exception& e) {
+    g_warning("lunduke-paint: %s skipped: %s; will retry", what, e.what());
+  }
+  return false;
 }
 
 }  // namespace crash_recovery

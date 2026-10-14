@@ -401,6 +401,18 @@ test_review_r8 = executable(
 )
 test('review_r8', test_review_r8)
 
+# Round-9 review: recovery marker only after a successful write, background
+# autosave never raises the out-of-memory dialog.
+test_review_r9 = executable(
+  'test_review_r9',
+  files('tests/test_review_r9.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, zlib_dep],
+  install: false,
+)
+test('review_r9', test_review_r9)
+
 # Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
 # history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
 test_review_r7_ui = executable(

@@ -3,6 +3,8 @@
 #define LUNDUKEPAINT_IO_CRASH_RECOVERY_HPP
 
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -31,6 +33,26 @@ void clear_file(const std::string& path);
 // each layer's (identity, revision) plus its properties. Equal fingerprints
 // mean the last recovery file is still current, so the tick can be skipped.
 std::string recovery_signature(const Document& document);
+
+// P-1 (round 9): remembers which fingerprint is on disk per document. A
+// fingerprint is recorded only after the background write succeeded; a
+// failed write forgets it so the next tick retries. A recovery file that
+// vanished (cleanup tools, user) is rewritten even if the fingerprint matches.
+class RecoveryTracker {
+ public:
+  bool is_current(std::uint64_t id, const std::string& sig, const std::string& path) const;
+  void record_result(std::uint64_t id, const std::string& sig, bool ok);
+  void forget(std::uint64_t id);
+
+ private:
+  std::map<std::uint64_t, std::string> written_;
+};
+
+// P-2 (round 9): runs a background-autosave step and swallows allocation
+// failure (logged with g_warning) so the autosave timer never shows the
+// out-of-memory dialog. Returns false when the step failed; the next tick
+// retries.
+bool run_background_step(const std::function<void()>& step, const char* what);
 
 // Unlinks the recovery file when this discard leaves no other dirty document.
 // Returns true when the file was removed.
