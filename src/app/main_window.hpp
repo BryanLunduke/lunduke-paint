@@ -8,6 +8,7 @@
 #include "doc/document.hpp"
 #include "doc/effect_preview.hpp"
 #include "doc/workspace.hpp"
+#include "io/crash_recovery.hpp"
 #include "io/image_io.hpp"
 #include "tools/tool.hpp"
 #include "ui/canvas_view.hpp"
@@ -239,7 +240,7 @@ private:
   std::shared_ptr<RecoverySlot> recovery_slot_;
   gint64 last_edit_us_{0};
   // recovery_id -> recovery_signature() of the last recovery file written.
-  std::map<std::uint64_t, std::string> recovery_sig_;
+  crash_recovery::RecoveryTracker recovery_sig_;
   void on_unhandled_exception();
   void report_out_of_memory();
   bool live_effect_preview_{false};
