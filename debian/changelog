@@ -1,3 +1,9 @@
+lunduke-paint (0.9.4-2) unstable; urgency=medium
+
+  * Fix round 8 review findings.
+
+ -- Phil <phil@brushpad.local>  Wed, 14 Oct 2026 04:06:14 +0000
+
 lunduke-paint (0.9.4-1) unstable; urgency=medium
 
   * Version bump for LCOS 0.9.4. No functional changes.

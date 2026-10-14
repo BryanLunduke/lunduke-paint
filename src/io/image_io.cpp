@@ -165,7 +165,43 @@ std::string replace_path_extension(const std::string& path, const std::string& e
   return dir + name + ext;
 }
 
+bool png_header_size_ok(const std::uint8_t* data, std::size_t size) {
+  // Refuse decode bombs before decoding: width/height live in IHDR (bytes 16-23).
+  static const std::uint8_t kSig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+  if (data == nullptr || size < 24 || std::memcmp(data, kSig, 8) != 0 ||
+      std::memcmp(data + 12, "IHDR", 4) != 0) {
+    return true;  // not a recognisable PNG header; the decoder reports the error
+  }
+  auto be32 = [&](std::size_t o) {
+    return (static_cast<std::uint32_t>(data[o]) << 24) | (static_cast<std::uint32_t>(data[o + 1]) << 16) |
+           (static_cast<std::uint32_t>(data[o + 2]) << 8) | static_cast<std::uint32_t>(data[o + 3]);
+  };
+  const std::uint32_t w = be32(16);
+  const std::uint32_t h = be32(20);
+  return w <= static_cast<std::uint32_t>(kHardMaxSide) && h <= static_cast<std::uint32_t>(kHardMaxSide);
+}
+
+bool file_header_size_ok(const std::string& path) {
+  std::uint8_t head[24] = {};
+  FILE* f = std::fopen(path.c_str(), "rb");
+  if (f == nullptr) {
+    return true;
+  }
+  const std::size_t n = std::fread(head, 1, sizeof(head), f);
+  std::fclose(f);
+  return png_header_size_ok(head, n);
+}
+
 bool image_has_multiple_frames(const std::string& path) {
+  {
+    int info_w = 0;
+    int info_h = 0;
+    if (!file_header_size_ok(path) ||
+        (gdk_pixbuf_get_file_info(path.c_str(), &info_w, &info_h) != nullptr &&
+         (info_w > kHardMaxSide || info_h > kHardMaxSide))) {
+      return false;  // too large to open; never decode a bomb just to count frames
+    }
+  }
   GError* error = nullptr;
   GdkPixbufAnimation* anim = gdk_pixbuf_animation_new_from_file(path.c_str(), &error);
   if (anim == nullptr) {
@@ -321,6 +357,17 @@ std::string format_extension(ImageFormat format) {
 
 LoadedImage load_flat_image(const std::string& path) {
   LoadedImage out;
+  {
+    // Refuse decode bombs from the header before allocating the pixels.
+    int info_w = 0;
+    int info_h = 0;
+    if (!file_header_size_ok(path) ||
+        (gdk_pixbuf_get_file_info(path.c_str(), &info_w, &info_h) != nullptr &&
+         (info_w > kHardMaxSide || info_h > kHardMaxSide))) {
+      out.error = "Image is larger than 16384 on a side";
+      return out;
+    }
+  }
   GError* error = nullptr;
   GdkPixbufAnimation* anim = gdk_pixbuf_animation_new_from_file(path.c_str(), &error);
   if (anim == nullptr) {
@@ -469,6 +516,10 @@ bool decode_png_memory(const std::uint8_t* data, std::size_t size, LoadedImage& 
   out = {};
   if (data == nullptr || size == 0) {
     out.error = "Empty PNG";
+    return false;
+  }
+  if (!png_header_size_ok(data, size)) {
+    out.error = "Image is larger than 16384 on a side";
     return false;
   }
   GError* error = nullptr;

@@ -27,6 +27,10 @@ struct LayerSnapshot {
   std::vector<std::uint8_t> pixels;
 };
 
+inline std::size_t snapshot_bytes(const LayerSnapshot& snap) {
+  return sizeof(LayerSnapshot) + snap.name.size() + snap.pixels.size();
+}
+
 LayerSnapshot snapshot_layer(const Layer& layer);
 LayerSnapshot snapshot_layer_props(const Layer& layer);
 std::unique_ptr<Layer> layer_from_snapshot(const LayerSnapshot& snap);

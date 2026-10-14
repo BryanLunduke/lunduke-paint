@@ -65,7 +65,16 @@ struct OraSnapshotLayer {
   int height = 0;
   int stride = 0;
   std::vector<std::uint8_t> pixels;
+  // Recovery snapshots of unchanged layers carry the cached PNG instead of a
+  // pixel copy (pixels stays empty). See capture_ora_snapshot().
+  std::vector<std::uint8_t> cached_png;
 };
+
+struct OraSnapshot;
+class Layer;
+// Fills item.pixels from the live layer when the snapshot skipped the copy,
+// and drops the cached PNG so synthetic content can be painted into it.
+void ensure_snapshot_pixels(OraSnapshotLayer& item, const Layer& layer);
 
 struct OraSnapshot {
   int width = 0;

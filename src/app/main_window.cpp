@@ -94,6 +94,7 @@ struct RecoveryIdle {
 MainWindow::MainWindow() {
   recovery_slot_ = std::make_shared<RecoverySlot>();
   recovery_slot_->window = this;
+  Glib::add_exception_handler(sigc::mem_fun(*this, &MainWindow::on_unhandled_exception));
   last_edit_us_ = g_get_monotonic_time();
   prefs_.load();
   auto startup = Document::create(prefs_.default_width, prefs_.default_height, Color::white());
@@ -1776,7 +1777,16 @@ void MainWindow::action_paste_into_new() {
   int w = 0;
   int h = 0;
   std::vector<std::uint8_t> rgba;
-  if (!pixbuf_to_tight_rgba(Gtk::Clipboard::get()->wait_for_image(), w, h, rgba)) {
+  const Glib::RefPtr<Gdk::Pixbuf> clip = Gtk::Clipboard::get()->wait_for_image();
+  if (!clip) {
+    report_blocked("Clipboard has no image");
+    return;
+  }
+  // Same 16384 limit and large-canvas warning as New, Canvas Size and Scale.
+  if (!warn_size(clip->get_width(), clip->get_height())) {
+    return;
+  }
+  if (!pixbuf_to_tight_rgba(clip, w, h, rgba)) {
     report_blocked("Clipboard has no image");
     return;
   }
@@ -2660,6 +2670,56 @@ void MainWindow::offer_recovery() {
   }
 }
 
+void MainWindow::on_unhandled_exception() {
+  try {
+    throw;
+  } catch (const std::bad_alloc&) {
+    report_out_of_memory();
+  }
+}
+
+void MainWindow::report_out_of_memory() {
+  static bool busy = false;
+  if (busy) {
+    return;
+  }
+  busy = true;
+  // The failed step threw before it was committed, so the document is
+  // unchanged. Try to write a recovery copy now in case memory stays short.
+  int saved = 0;
+  for (int i = 0; i < workspace_.count(); ++i) {
+    Document& doc = workspace_.at(i);
+    if (!doc.dirty()) {
+      continue;
+    }
+    try {
+      std::string error;
+      // No merged image: cached layer PNGs are reused, so this copies little.
+      const OraSnapshot snap = capture_ora_snapshot(doc, false);
+      if (crash_recovery::prepare_state_dir(error) &&
+          save_ora_snapshot(crash_recovery::autosave_path_for(doc.recovery_id()), snap, error)) {
+        ++saved;
+      }
+    } catch (...) {
+    }
+  }
+  try {
+    Gtk::MessageDialog dialog(*this, "Not enough memory", false, Gtk::MESSAGE_ERROR,
+                              Gtk::BUTTONS_OK, true);
+    std::string detail =
+        "The last action was cancelled because there was not enough memory. Your picture was kept.";
+    if (saved > 0) {
+      detail += " A recovery copy was saved.";
+    }
+    detail += " Save your work, then close other pictures or programs before trying again.";
+    dialog.set_secondary_text(detail);
+    dialog.run();
+  } catch (...) {
+  }
+  show_status("Not enough memory");
+  busy = false;
+}
+
 void MainWindow::start_recovery_save() {
   if (!recovery_slot_ || workspace_.count() < 1) {
     return;
@@ -2681,6 +2741,22 @@ void MainWindow::start_recovery_save() {
                                                  floating)) {
       continue;
     }
+    // P-6: skip documents whose recovery file is already current. Anything
+    // that may paint synthetic content (preview, stroke, text, float) is
+    // never skipped and resets the fingerprint.
+    const bool synthetic =
+        doc.selection().floating() ||
+        (i == active && (stroke || text || (effect_preview_ != nullptr && effect_preview_->previewing())));
+    const std::string sig = crash_recovery::recovery_signature(doc);
+    if (!synthetic) {
+      const auto seen = recovery_sig_.find(doc.recovery_id());
+      if (seen != recovery_sig_.end() && seen->second == sig) {
+        continue;
+      }
+      recovery_sig_[doc.recovery_id()] = sig;
+    } else {
+      recovery_sig_.erase(doc.recovery_id());
+    }
     const bool large = doc.width() > 2048 || doc.height() > 2048;
     OraSnapshot snapshot = capture_ora_snapshot(doc, !large || idle_long);
     if (i == active && effect_preview_ != nullptr && effect_preview_->previewing()) {
@@ -2691,11 +2767,12 @@ void MainWindow::start_recovery_save() {
         OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(layer_index)];
         const std::size_t bytes = static_cast<std::size_t>(pristine->stride()) *
                                   static_cast<std::size_t>(pristine->height());
+        item.cached_png.clear();
         item.pixels.assign(pristine->pixels(), pristine->pixels() + bytes);
         item.width = pristine->width();
         item.height = pristine->height();
         item.stride = pristine->stride();
-        item.revision += 1;
+        item.identity = 0;  // synthetic content: never use the layer PNG cache
       }
     }
     if (i == active && active_tool_ != nullptr) {
@@ -2705,9 +2782,10 @@ void MainWindow::start_recovery_save() {
       }
       if (overlay_index >= 0 && overlay_index < static_cast<int>(snapshot.layers.size())) {
         OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(overlay_index)];
+        ensure_snapshot_pixels(item, doc.layers().at(overlay_index));
         if (active_tool_->paint_recovery_overlay(overlay_index, item.pixels.data(), item.width,
                                                 item.height, item.stride)) {
-          item.revision += 1;
+          item.identity = 0;  // synthetic content: never use the layer PNG cache
         }
       }
     }
@@ -2719,10 +2797,11 @@ void MainWindow::start_recovery_save() {
       if (float_index >= 0 && float_index < static_cast<int>(snapshot.layers.size())) {
         OraSnapshotLayer& item = snapshot.layers[static_cast<std::size_t>(float_index)];
         const Layer& layer = doc.layers().at(float_index);
+        ensure_snapshot_pixels(item, layer);
         if (composite_floating_into_buffer(doc.selection(), item.pixels.data(), item.width,
                                           item.height, item.stride, layer.offset_x(),
                                           layer.offset_y())) {
-          item.revision += 1;
+          item.identity = 0;  // synthetic content: never use the layer PNG cache
         }
       }
     }

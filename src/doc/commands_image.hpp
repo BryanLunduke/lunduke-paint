@@ -26,6 +26,7 @@ public:
   void apply(Document& document) override;
   void undo(Document& document) override;
   Rect dirty_rect() const override;
+  std::size_t memory_bytes() const override { return 128 + old_px_.size() + new_px_.size(); }
 
 private:
   std::string name_;

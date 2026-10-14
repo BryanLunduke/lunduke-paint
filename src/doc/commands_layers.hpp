@@ -12,6 +12,14 @@
 
 namespace lundukepaint {
 
+inline std::size_t snaps_bytes(const std::vector<LayerSnapshot>& snaps) {
+  std::size_t total = 64;
+  for (const LayerSnapshot& snap : snaps) {
+    total += snapshot_bytes(snap);
+  }
+  return total;
+}
+
 class AddLayerCommand : public Command {
 public:
   AddLayerCommand(int index, LayerSnapshot layer, std::string name = "Add layer");
@@ -19,6 +27,7 @@ public:
   void apply(Document& document) override;
   void undo(Document& document) override;
   Rect dirty_rect() const override { return dirty_; }
+  std::size_t memory_bytes() const override { return snapshot_bytes(layer_); }
 
 private:
   int index_ = 0;
@@ -34,6 +43,7 @@ public:
   void apply(Document& document) override;
   void undo(Document& document) override;
   Rect dirty_rect() const override { return dirty_; }
+  std::size_t memory_bytes() const override { return snapshot_bytes(layer_); }
 
 private:
   int index_ = 0;
@@ -77,6 +87,7 @@ public:
   void apply(Document& document) override;
   void undo(Document& document) override;
   Rect dirty_rect() const override { return dirty_; }
+  std::size_t memory_bytes() const override { return snapshot_bytes(lower_) + snapshot_bytes(upper_layer_); }
 
 private:
   int upper_ = 0;
@@ -92,6 +103,7 @@ public:
   void apply(Document& document) override;
   void undo(Document& document) override;
   Rect dirty_rect() const override { return dirty_; }
+  std::size_t memory_bytes() const override { return snaps_bytes(layers_); }
 
 private:
   std::vector<LayerSnapshot> layers_;
@@ -106,6 +118,7 @@ public:
   void apply(Document& document) override;
   void undo(Document& document) override;
   Rect dirty_rect() const override { return dirty_; }
+  std::size_t memory_bytes() const override { return snapshot_bytes(before_) + snapshot_bytes(after_); }
 
 private:
   int index_ = 0;
@@ -149,6 +162,7 @@ public:
   void apply(Document& document) override;
   void undo(Document& document) override;
   Rect dirty_rect() const override;
+  std::size_t memory_bytes() const override { return snaps_bytes(old_layers_) + xform_.crop_mask.size() + 128; }
 
 private:
   std::string name_;
