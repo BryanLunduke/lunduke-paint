@@ -19,7 +19,7 @@ user layers.
 
 ## 0.9.4
 
-LCOS 0.9.4. Package 0.9.4-4 (round 8, 9 and 10 review fixes). About dialog and meson version read 0.9.4.
+LCOS 0.9.4. Package 0.9.4-5 (round 8, 9, 10 and 11 review fixes). About dialog and meson version read 0.9.4.
 
 ## 0.9.3
 
