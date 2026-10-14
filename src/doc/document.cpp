@@ -668,7 +668,8 @@ bool Document::add_layer() {
   snap.blend = BlendMode::Normal;
   snap.width = width_;
   snap.height = height_;
-  snap.pixels.assign(static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_) * 4, 0);
+  // Pixels stay empty: layer_from_snapshot() builds a transparent WxH layer,
+  // so the undo step does not keep a full-size zero buffer.
   commit(std::make_unique<AddLayerCommand>(layers_.active_index() + 1, std::move(snap)));
   return true;
 }

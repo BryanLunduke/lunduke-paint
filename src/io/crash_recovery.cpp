@@ -3,6 +3,7 @@
 #include "io/crash_recovery.hpp"
 
 #include "io/ora.hpp"
+#include "doc/document.hpp"
 
 #include <glib.h>
 
@@ -204,6 +205,23 @@ bool clear_after_discard(bool other_documents_dirty) {
   }
   clear();
   return true;
+}
+
+std::string recovery_signature(const Document& document) {
+  std::string sig = std::to_string(document.width()) + "x" + std::to_string(document.height()) +
+                    "/" + std::to_string(document.layers().active_index());
+  for (int i = 0; i < document.layers().count(); ++i) {
+    const Layer& layer = document.layers().at(i);
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "|%llu:%llu:%d%d:%.4f:%d:%d,%d:",
+                  static_cast<unsigned long long>(layer.identity()),
+                  static_cast<unsigned long long>(layer.revision()), layer.visible() ? 1 : 0,
+                  layer.locked() ? 1 : 0, static_cast<double>(layer.opacity()),
+                  static_cast<int>(layer.blend()), layer.offset_x(), layer.offset_y());
+    sig += buf;
+    sig += layer.name();
+  }
+  return sig;
 }
 
 }  // namespace crash_recovery

@@ -390,6 +390,17 @@ test_review_r7 = executable(
 )
 test('review_r7', test_review_r7)
 
+# Round-8 review: recovery cache, decode bombs, undo byte cap, idle recovery.
+test_review_r8 = executable(
+  'test_review_r8',
+  files('tests/test_review_r8.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, zlib_dep],
+  install: false,
+)
+test('review_r8', test_review_r8)
+
 # Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
 # history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
 test_review_r7_ui = executable(

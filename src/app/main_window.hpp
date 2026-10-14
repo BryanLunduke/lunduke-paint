@@ -21,6 +21,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -237,6 +238,10 @@ private:
   struct RecoverySlot;
   std::shared_ptr<RecoverySlot> recovery_slot_;
   gint64 last_edit_us_{0};
+  // recovery_id -> recovery_signature() of the last recovery file written.
+  std::map<std::uint64_t, std::string> recovery_sig_;
+  void on_unhandled_exception();
+  void report_out_of_memory();
   bool live_effect_preview_{false};
   EffectPreview* effect_preview_{nullptr};
   Glib::RefPtr<Gio::SimpleAction> undo_action_;

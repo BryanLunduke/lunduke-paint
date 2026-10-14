@@ -79,6 +79,7 @@ bool save_flat_image(const std::string& path, ImageFormat format, const std::uin
 
 bool encode_png_memory(const std::uint8_t* rgba, int width, int height, int stride,
                        std::vector<std::uint8_t>& out, std::string& error);
+bool png_header_size_ok(const std::uint8_t* data, std::size_t size);
 bool decode_png_memory(const std::uint8_t* data, std::size_t size, LoadedImage& out);
 
 }  // namespace lundukepaint

@@ -27,6 +27,11 @@ void clear();
 // Unlinks one recovery file. Ignores anything that is not a recovery path.
 void clear_file(const std::string& path);
 
+// Cheap fingerprint of what a recovery write would contain: canvas size and
+// each layer's (identity, revision) plus its properties. Equal fingerprints
+// mean the last recovery file is still current, so the tick can be skipped.
+std::string recovery_signature(const Document& document);
+
 // Unlinks the recovery file when this discard leaves no other dirty document.
 // Returns true when the file was removed.
 bool clear_after_discard(bool other_documents_dirty);

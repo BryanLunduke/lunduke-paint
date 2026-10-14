@@ -547,7 +547,32 @@ void encode_merged(const OraSnapshot& snapshot, std::vector<std::uint8_t>& merge
   encode_png_memory(thumb.data(), tw, th, tw * 4, thumb_png, error);
 }
 
+bool png_cache_lookup(std::uint64_t identity, std::uint64_t revision,
+                      std::vector<std::uint8_t>& png) {
+  if (identity == 0) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(g_png_cache_mu);
+  const auto it = g_png_cache.find(std::make_pair(identity, revision));
+  if (it == g_png_cache.end()) {
+    return false;
+  }
+  g_png_lru.splice(g_png_lru.end(), g_png_lru, it->second.lru);
+  png = it->second.png;
+  return true;
+}
+
 }  // namespace
+
+void ensure_snapshot_pixels(OraSnapshotLayer& item, const Layer& layer) {
+  item.cached_png.clear();
+  item.cached_png.shrink_to_fit();
+  if (item.pixels.empty()) {
+    item.pixels.assign(layer.pixels(),
+                       layer.pixels() + static_cast<std::size_t>(layer.stride()) *
+                                            static_cast<std::size_t>(layer.height()));
+  }
+}
 
 bool save_ora(const std::string& path, const Document& document, std::string& error) {
   if (document.width() < 1 || document.height() < 1 || document.layers().count() < 1) {
@@ -580,6 +605,12 @@ OraSnapshot capture_ora_snapshot(const Document& document, bool write_merged) {
     item.width = layer.width();
     item.height = layer.height();
     item.stride = layer.stride();
+    // Without a merged image nothing needs the pixels of a layer whose PNG is
+    // already cached, so skip the (possibly 256 MB) copy on the GTK thread.
+    if (!write_merged && png_cache_lookup(item.identity, item.revision, item.cached_png)) {
+      snapshot.layers.push_back(std::move(item));
+      continue;
+    }
     item.pixels.assign(layer.pixels(),
                        layer.pixels() + static_cast<std::size_t>(layer.stride()) *
                                             static_cast<std::size_t>(layer.height()));
@@ -597,6 +628,10 @@ bool save_ora_snapshot(const std::string& path, const OraSnapshot& snapshot, std
   parts.stack_xml = snapshot.stack_xml;
   parts.layer_pngs.reserve(snapshot.layers.size());
   for (const OraSnapshotLayer& layer : snapshot.layers) {
+    if (!layer.cached_png.empty()) {
+      parts.layer_pngs.push_back(layer.cached_png);
+      continue;
+    }
     std::vector<std::uint8_t> png =
         png_for_pixels(layer.identity, layer.revision, layer.pixels.data(), layer.width, layer.height,
                        layer.stride, error);

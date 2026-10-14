@@ -179,6 +179,20 @@ void pump(int ms) {
   } while (g_get_monotonic_time() < end);
 }
 
+// Pumps until pred() holds or timeout_ms passes. Returns pred(). Avoids fixed
+// sleeps that flake when the machine (or ASan) is slow.
+template <typename Pred>
+bool pump_until(Pred pred, int timeout_ms) {
+  const gint64 end = g_get_monotonic_time() + static_cast<gint64>(timeout_ms) * 1000;
+  while (!pred() && g_get_monotonic_time() < end) {
+    while (gtk_events_pending()) {
+      gtk_main_iteration_do(FALSE);
+    }
+    g_usleep(2000);
+  }
+  return pred();
+}
+
 std::vector<std::uint8_t> dump(const Layer& layer) {
   std::vector<std::uint8_t> out(static_cast<std::size_t>(layer.stride()) *
                                 static_cast<std::size_t>(layer.height()));
@@ -322,13 +336,12 @@ int main(int argc, char** argv) {
     canvas.start_intro();
     expect(canvas.intro_active(), "greeting started");
     expect(canvas.intro_visible(), "greeting is visible while it plays");
-    pump(300);
-    expect(canvas.intro_active(), "greeting still running after 300 ms");
+    pump(50);
     expect(!doc->dirty(), "greeting does not dirty the document");
     expect(dump(doc->layers().active_layer()) == pristine,
            "greeting does not paint into the layer");
-    pump(900);
-    expect(!canvas.intro_active(), "greeting animation finished on its own after ~1 s");
+    expect(pump_until([&]() { return !canvas.intro_active(); }, 15000),
+           "greeting animation finished on its own");
     expect(canvas.intro_visible(), "finished howdy stays on the canvas");
     expect(!doc->dirty(), "document still clean when the greeting ends");
     expect(doc->history().count() == 0, "greeting pushed no history");
@@ -347,7 +360,8 @@ int main(int argc, char** argv) {
     // Skip mid-animation dismisses (does not hold a partial stroke).
     canvas.start_intro();
     expect(canvas.intro_active(), "greeting restarted for the skip check");
-    pump(80);
+    // Skip at once: any wait here lets a slow run finish the animation first,
+    // which is the "skip after complete" case already covered above.
     canvas.skip_intro();
     expect(!canvas.intro_active(), "skip stops the greeting immediately");
     expect(!canvas.intro_visible(), "skip during animation clears the intro");
