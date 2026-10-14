@@ -30,6 +30,8 @@
 
 #include <unistd.h>
 
+#include <new>
+#include <gtkmm/selectiondata.h>
 #include <mutex>
 #include <thread>
 
@@ -1676,42 +1678,6 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
 }
 
 
-namespace {
-
-bool pixbuf_to_tight_rgba(const Glib::RefPtr<Gdk::Pixbuf>& pixbuf, int& w, int& h,
-                          std::vector<std::uint8_t>& rgba) {
-  w = 0;
-  h = 0;
-  rgba.clear();
-  if (!pixbuf) {
-    return false;
-  }
-  w = pixbuf->get_width();
-  h = pixbuf->get_height();
-  if (w < 1 || h < 1) {
-    return false;
-  }
-  auto rgba_buf = pixbuf->add_alpha(false, 0, 0, 0);
-  rgba.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4, 0);
-  const int src_stride = rgba_buf->get_rowstride();
-  const std::uint8_t* src = rgba_buf->get_pixels();
-  const int nch = rgba_buf->get_n_channels();
-  for (int y = 0; y < h; ++y) {
-    const std::uint8_t* srow = src + static_cast<std::size_t>(y) * src_stride;
-    std::uint8_t* drow = rgba.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(w) * 4;
-    for (int x = 0; x < w; ++x) {
-      const std::uint8_t* p = srow + static_cast<std::size_t>(x) * nch;
-      drow[x * 4 + 0] = p[0];
-      drow[x * 4 + 1] = p[1];
-      drow[x * 4 + 2] = p[2];
-      drow[x * 4 + 3] = nch >= 4 ? p[3] : 255;
-    }
-  }
-  return true;
-}
-
-}  // namespace
-
 void MainWindow::copy_selection_to_clipboard() {
   if (document().selection().empty()) {
     return;
@@ -1767,22 +1733,91 @@ void MainWindow::copy_merged_to_clipboard() {
   show_status("Copied merged");
 }
 
+bool MainWindow::read_clipboard_image(int& w, int& h, std::vector<std::uint8_t>& rgba) {
+  w = 0;
+  h = 0;
+  rgba.clear();
+  auto clipboard = Gtk::Clipboard::get();
+  // Pick an encoded image target the pixbuf loaders understand. PNG first.
+  std::vector<std::string> readable;
+  for (const auto& format : Gdk::Pixbuf::get_formats()) {
+    for (const auto& mime : format.get_mime_types()) {
+      readable.push_back(mime);
+    }
+  }
+  std::string target;
+  for (const auto& t : clipboard->wait_for_targets()) {
+    const std::string name = t;
+    if (std::find(readable.begin(), readable.end(), name) == readable.end()) {
+      continue;
+    }
+    if (name == "image/png") {
+      target = name;
+      break;
+    }
+    if (target.empty()) {
+      target = name;
+    }
+  }
+  if (target.empty()) {
+    report_blocked("Clipboard has no image");
+    return false;
+  }
+  const Gtk::SelectionData selection = clipboard->wait_for_contents(target);
+  const int length = selection.get_length();
+  const guint8* bytes = selection.get_data();
+  if (bytes == nullptr || length <= 0) {
+    report_blocked("Clipboard has no image");
+    return false;
+  }
+  // P-1 (round 10): read the size from the header and apply the 16384 limit
+  // and the large-canvas warning before any pixels are decoded.
+  int cw = 0;
+  int ch = 0;
+  if (!encoded_image_size(bytes, static_cast<std::size_t>(length), target, cw, ch)) {
+    report_blocked("Clipboard has no image");
+    return false;
+  }
+  if (!warn_size(cw, ch)) {
+    return false;
+  }
+  LoadedImage decoded;
+  bool out_of_memory = false;
+  bool ok = false;
+  try {
+    ok = decode_encoded_image(bytes, static_cast<std::size_t>(length), target, decoded,
+                              out_of_memory);
+  } catch (const std::bad_alloc&) {
+    out_of_memory = true;
+  }
+  if (!ok) {
+    if (out_of_memory) {
+      Gtk::MessageDialog dialog(*this, "Not enough memory to paste this image", false,
+                                Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
+      dialog.set_secondary_text("The clipboard image is " + std::to_string(cw) + " \u00d7 " +
+                                std::to_string(ch) +
+                                " pixels and there was not enough memory to load it. Your "
+                                "picture was not changed.");
+      dialog.run();
+      show_status("Not enough memory to paste");
+    } else {
+      report_blocked("Clipboard image could not be read");
+    }
+    return false;
+  }
+  w = decoded.width;
+  h = decoded.height;
+  rgba = std::move(decoded.rgba);
+  return true;
+}
+
 bool MainWindow::paste_from_clipboard() {
   int w = 0;
   int h = 0;
   std::vector<std::uint8_t> rgba;
-  const Glib::RefPtr<Gdk::Pixbuf> clip = Gtk::Clipboard::get()->wait_for_image();
-  if (!clip) {
-    report_blocked("Clipboard has no image");
-    return false;
-  }
-  // P-3 (round 9): plain Paste gets the same 16384 limit and large-canvas
-  // warning as Paste into New, New, Canvas Size and Scale.
-  if (!warn_size(clip->get_width(), clip->get_height())) {
-    return false;
-  }
-  if (!pixbuf_to_tight_rgba(clip, w, h, rgba)) {
-    report_blocked("Clipboard has no image");
+  // P-3 (round 9) / P-1 (round 10): plain Paste gets the same 16384 limit and
+  // large-canvas warning as Paste into New, checked before decoding.
+  if (!read_clipboard_image(w, h, rgba)) {
     return false;
   }
   int px = 0;
@@ -1804,17 +1839,9 @@ void MainWindow::action_paste_into_new() {
   int w = 0;
   int h = 0;
   std::vector<std::uint8_t> rgba;
-  const Glib::RefPtr<Gdk::Pixbuf> clip = Gtk::Clipboard::get()->wait_for_image();
-  if (!clip) {
-    report_blocked("Clipboard has no image");
-    return;
-  }
-  // Same 16384 limit and large-canvas warning as New, Canvas Size and Scale.
-  if (!warn_size(clip->get_width(), clip->get_height())) {
-    return;
-  }
-  if (!pixbuf_to_tight_rgba(clip, w, h, rgba)) {
-    report_blocked("Clipboard has no image");
+  // Same 16384 limit and large-canvas warning as New, Canvas Size and Scale,
+  // checked from the image header before any pixels are decoded.
+  if (!read_clipboard_image(w, h, rgba)) {
     return;
   }
   const std::uint8_t* coverage = nullptr;

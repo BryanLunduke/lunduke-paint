@@ -413,6 +413,17 @@ test_review_r9 = executable(
 )
 test('review_r9', test_review_r9)
 
+# Round 10: clipboard image size is read from the header before decoding.
+test_review_r10 = executable(
+  'test_review_r10',
+  files('tests/test_review_r10.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep, zlib_dep],
+  install: false,
+)
+test('review_r10', test_review_r10)
+
 # Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
 # history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
 test_review_r7_ui = executable(

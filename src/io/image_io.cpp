@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cctype>
 #include <cstring>
+#include <new>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -564,6 +565,113 @@ bool decode_png_memory(const std::uint8_t* data, std::size_t size, LoadedImage& 
     return false;
   }
   copy_pixbuf_to_rgba(pixbuf, out.rgba, out.width, out.height);
+  g_object_unref(pixbuf);
+  return out.ok();
+}
+
+namespace {
+
+GdkPixbufLoader* new_loader_for(const std::string& mime_type) {
+  GdkPixbufLoader* loader = nullptr;
+  if (!mime_type.empty()) {
+    loader = gdk_pixbuf_loader_new_with_mime_type(mime_type.c_str(), nullptr);
+  }
+  return loader != nullptr ? loader : gdk_pixbuf_loader_new();
+}
+
+void on_size_prepared(GdkPixbufLoader* loader, int width, int height, gpointer user) {
+  int* dims = static_cast<int*>(user);
+  dims[0] = width;
+  dims[1] = height;
+  // Same trick as gdk_pixbuf_get_file_info: a zero target size makes the
+  // loader stop before it allocates the pixel buffer.
+  gdk_pixbuf_loader_set_size(loader, 0, 0);
+}
+
+}  // namespace
+
+bool encoded_image_size(const std::uint8_t* data, std::size_t size, const std::string& mime_type,
+                        int& width, int& height) {
+  width = 0;
+  height = 0;
+  if (data == nullptr || size == 0) {
+    return false;
+  }
+  GdkPixbufLoader* loader = new_loader_for(mime_type);
+  int dims[2] = {0, 0};
+  g_signal_connect(loader, "size-prepared", G_CALLBACK(on_size_prepared), dims);
+  // Feed small pieces and stop as soon as the header has given the size.
+  constexpr std::size_t kChunk = 512;
+  for (std::size_t off = 0; off < size && dims[0] == 0; off += kChunk) {
+    const std::size_t n = std::min(kChunk, size - off);
+    if (!gdk_pixbuf_loader_write(loader, data + off, n, nullptr)) {
+      break;
+    }
+  }
+  gdk_pixbuf_loader_close(loader, nullptr);
+  g_object_unref(loader);
+  if (dims[0] < 1 || dims[1] < 1) {
+    return false;
+  }
+  width = dims[0];
+  height = dims[1];
+  return true;
+}
+
+bool decode_encoded_image(const std::uint8_t* data, std::size_t size, const std::string& mime_type,
+                          LoadedImage& out, bool& out_of_memory) {
+  out = {};
+  out_of_memory = false;
+  if (data == nullptr || size == 0) {
+    out.error = "Clipboard has no image";
+    return false;
+  }
+  GdkPixbufLoader* loader = new_loader_for(mime_type);
+  GError* error = nullptr;
+  bool ok = gdk_pixbuf_loader_write(loader, data, size, &error) != FALSE;
+  if (!ok) {
+    gdk_pixbuf_loader_close(loader, nullptr);
+  } else {
+    ok = gdk_pixbuf_loader_close(loader, &error) != FALSE;
+  }
+  if (!ok) {
+    if (error != nullptr && error->domain == GDK_PIXBUF_ERROR &&
+        error->code == GDK_PIXBUF_ERROR_INSUFFICIENT_MEMORY) {
+      out_of_memory = true;
+    }
+    out.error = error != nullptr ? error->message : "Clipboard image could not be read";
+    if (error != nullptr) {
+      g_error_free(error);
+    }
+    g_object_unref(loader);
+    return false;
+  }
+  GdkPixbuf* pixbuf = gdk_pixbuf_loader_get_pixbuf(loader);
+  if (pixbuf == nullptr) {
+    // A loader that saw a size but produced no buffer could not allocate it.
+    out_of_memory = true;
+    out.error = "Not enough memory";
+    g_object_unref(loader);
+    return false;
+  }
+  g_object_ref(pixbuf);
+  g_object_unref(loader);
+  out.width = gdk_pixbuf_get_width(pixbuf);
+  out.height = gdk_pixbuf_get_height(pixbuf);
+  if (out.width > kHardMaxSide || out.height > kHardMaxSide) {
+    out.error = "Image is larger than 16384 on a side";
+    g_object_unref(pixbuf);
+    return false;
+  }
+  try {
+    copy_pixbuf_to_rgba(pixbuf, out.rgba, out.width, out.height);
+  } catch (const std::bad_alloc&) {
+    g_object_unref(pixbuf);
+    out = {};
+    out_of_memory = true;
+    out.error = "Not enough memory";
+    return false;
+  }
   g_object_unref(pixbuf);
   return out.ok();
 }
