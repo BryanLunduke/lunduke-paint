@@ -282,6 +282,16 @@ bool read_sidecar(const std::string& recovery_path, std::string& name, std::stri
 
 }  // namespace
 
+std::string sidecar_title(const std::string& document_path, const std::string& recovery_label) {
+  if (!document_path.empty()) {
+    gchar* base = g_path_get_basename(document_path.c_str());
+    std::string out = base != nullptr ? base : "";
+    g_free(base);
+    return out;
+  }
+  return recovery_label;
+}
+
 bool write_name(const std::string& recovery_path, const std::string& title,
                 const std::string& original_path) {
   if (!path_is_recovery(recovery_path)) {

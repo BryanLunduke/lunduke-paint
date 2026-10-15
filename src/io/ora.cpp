@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "io/ora.hpp"
+#include <cstdio>
+#include <unistd.h>
 
 #include "doc/document.hpp"
 #include "io/image_io.hpp"
@@ -679,7 +681,96 @@ bool load_ora_preview_png(const std::string& path, std::vector<std::uint8_t>& pn
   return load_ora_preview_png_limited(path, png, kMaxOraEntryBytes);
 }
 
+std::uint64_t ora_decode_budget_bytes() {
+  constexpr std::uint64_t kFloor = 1ull << 30;
+  constexpr std::uint64_t kCeiling = 4ull << 30;
+  const long pages = sysconf(_SC_PHYS_PAGES);
+  const long page = sysconf(_SC_PAGE_SIZE);
+  if (pages <= 0 || page <= 0) {
+    return kFloor;
+  }
+  const std::uint64_t quarter =
+      static_cast<std::uint64_t>(pages) * static_cast<std::uint64_t>(page) / 4ull;
+  return std::min(std::max(quarter, kFloor), kCeiling);
+}
+
+namespace {
+
+// Width and height from a PNG's IHDR, without decoding. False when the bytes
+// are not a PNG with an IHDR first.
+bool ora_png_dimensions(const std::vector<std::uint8_t>& data, std::uint32_t& w, std::uint32_t& h) {
+  static const std::uint8_t kSig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+  if (data.size() < 24 || std::memcmp(data.data(), kSig, 8) != 0 ||
+      std::memcmp(data.data() + 12, "IHDR", 4) != 0) {
+    return false;
+  }
+  auto be32 = [&](std::size_t o) {
+    return (static_cast<std::uint32_t>(data[o]) << 24) | (static_cast<std::uint32_t>(data[o + 1]) << 16) |
+           (static_cast<std::uint32_t>(data[o + 2]) << 8) | static_cast<std::uint32_t>(data[o + 3]);
+  };
+  w = be32(16);
+  h = be32(20);
+  return w >= 1 && h >= 1;
+}
+
+std::string gib_text(std::uint64_t bytes) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.1f GB", static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0));
+  return buf;
+}
+
+// Sums the decoded size of every layer under `node` before anything is decoded.
+bool ora_check_decode_budget(const pugi::xml_node& node,
+                             const std::map<std::string, std::vector<std::uint8_t>>& files,
+                             std::uint64_t canvas_bytes, std::uint64_t budget, std::uint64_t& total,
+                             std::string& error) {
+  for (auto child : node.children()) {
+    if (child.type() != pugi::node_element) {
+      continue;
+    }
+    if (std::strcmp(child.name(), "stack") == 0) {
+      if (!ora_check_decode_budget(child, files, canvas_bytes, budget, total, error)) {
+        return false;
+      }
+      continue;
+    }
+    if (std::strcmp(child.name(), "layer") != 0) {
+      continue;
+    }
+    const char* src = child.attribute("src").as_string("");
+    auto pit = files.find(src);
+    if (pit == files.end()) {
+      error = std::string("OpenRaster is missing layer image ") + src;
+      return false;
+    }
+    std::uint32_t w = 0;
+    std::uint32_t h = 0;
+    if (!ora_png_dimensions(pit->second, w, h)) {
+      error = "Corrupt layer PNG";
+      return false;
+    }
+    if (w > static_cast<std::uint32_t>(kHardMaxSide) || h > static_cast<std::uint32_t>(kHardMaxSide)) {
+      error = "Image is larger than 16384 on a side";
+      return false;
+    }
+    const std::uint64_t layer_bytes = static_cast<std::uint64_t>(w) * h * 4ull;
+    total += std::max(layer_bytes, canvas_bytes);
+    if (total > budget) {
+      error = "This OpenRaster file needs more memory to open than Paint allows (more than " +
+              gib_text(budget) + " of image data). It was not opened.";
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 LoadedOra load_ora(const std::string& path) {
+  return load_ora(path, ora_decode_budget_bytes());
+}
+
+LoadedOra load_ora(const std::string& path, std::uint64_t decode_budget_bytes) {
   LoadedOra out;
   std::map<std::string, std::vector<std::uint8_t>> files;
   if (!read_zip_capped(path, files, out.error, kMaxOraEntryBytes, kMaxOraTotalBytes)) {
@@ -744,6 +835,16 @@ LoadedOra load_ora(const std::string& path) {
   if (layer_nodes > kHardMaxLayers) {
     out.error = "OpenRaster file has too many layers";
     return out;
+  }
+  {
+    // P-1 (round 14): the zip limits cap compressed bytes only. Check the
+    // decoded size of all layers together before decoding any of them.
+    std::uint64_t total = 0;
+    const std::uint64_t canvas_bytes =
+        static_cast<std::uint64_t>(out.width) * static_cast<std::uint64_t>(out.height) * 4ull;
+    if (!ora_check_decode_budget(stack, files, canvas_bytes, decode_budget_bytes, total, out.error)) {
+      return out;
+    }
   }
   std::vector<LayerSnapshot> top_to_bottom;
   OraNode root;

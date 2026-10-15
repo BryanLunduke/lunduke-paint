@@ -1,3 +1,14 @@
+lunduke-paint (0.9.4-8) unstable; urgency=medium
+
+  * Fix round 14 review findings: opening an OpenRaster file checks the
+    decoded size of every layer, and of all layers together, from the PNG
+    headers before decoding anything, and refuses files over the memory
+    budget (a quarter of RAM, 1 to 4 GB) (P-1); a recovered old-style
+    autosave keeps its "Drawing from ..." label in later autosaves, so a
+    second crash does not show it as Untitled (P-2).
+
+ -- Phil <phil@brushpad.local>  Thu, 15 Oct 2026 04:03:25 +0000
+
 lunduke-paint (0.9.4-7) unstable; urgency=medium
 
   * Fix round 13 review findings: after Recover the autosave is kept as
