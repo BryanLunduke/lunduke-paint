@@ -206,43 +206,138 @@ std::string name_path_for(const std::string& recovery_path) {
   return recovery_path + ".name";
 }
 
-bool write_name(const std::string& recovery_path, const std::string& title) {
-  if (!path_is_recovery(recovery_path)) {
-    return false;
+std::string truncate_utf8(const std::string& text, std::size_t max_bytes) {
+  // P-3 (round 12): cut on a code-point boundary so a long Unicode title
+  // stays valid UTF-8 (read_name rejects invalid UTF-8).
+  if (text.size() <= max_bytes) {
+    return text;
   }
-  std::string text = title.substr(0, 512);
+  std::size_t cut = max_bytes;
+  while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
+    --cut;
+  }
+  std::string out = text.substr(0, cut);
+  const gchar* end = nullptr;
+  if (!g_utf8_validate(out.c_str(), static_cast<gssize>(out.size()), &end)) {
+    out.resize(static_cast<std::size_t>(end - out.c_str()));
+  }
+  return out;
+}
+
+namespace {
+
+std::string single_line(std::string text) {
   for (char& c : text) {
     if (c == '\n' || c == '\r') {
       c = ' ';
     }
+  }
+  return text;
+}
+
+// Sidecar layout (round 12): line 1 is the display name, optional line 2 is
+// the document's original absolute path. Round-11 sidecars have only line 1.
+bool read_sidecar(const std::string& recovery_path, std::string& name, std::string& orig) {
+  gchar* data = nullptr;
+  gsize len = 0;
+  struct stat st;
+  const std::string side = name_path_for(recovery_path);
+  if (lstat(side.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size > 8192) {
+    return false;
+  }
+  if (!g_file_get_contents(side.c_str(), &data, &len, nullptr)) {
+    return false;
+  }
+  std::string all(data, len);
+  g_free(data);
+  const std::size_t nl = all.find('\n');
+  name = all.substr(0, nl);
+  orig = nl == std::string::npos ? std::string() : all.substr(nl + 1);
+  if (!g_utf8_validate(name.c_str(), static_cast<gssize>(name.size()), nullptr)) {
+    name.clear();
+  }
+  if (orig.empty() || orig[0] != '/' || orig.find('\n') != std::string::npos ||
+      orig.find('\0') != std::string::npos) {
+    orig.clear();
+  }
+  return true;
+}
+
+}  // namespace
+
+bool write_name(const std::string& recovery_path, const std::string& title,
+                const std::string& original_path) {
+  if (!path_is_recovery(recovery_path)) {
+    return false;
+  }
+  std::string text = single_line(truncate_utf8(title, 512));
+  if (!original_path.empty() && original_path[0] == '/' && original_path.size() < 4096 &&
+      original_path.find('\n') == std::string::npos &&
+      original_path.find('\r') == std::string::npos && !path_is_recovery(original_path)) {
+    text += "\n";
+    text += original_path;
   }
   return g_file_set_contents(name_path_for(recovery_path).c_str(), text.c_str(),
                              static_cast<gssize>(text.size()), nullptr) != FALSE;
 }
 
 std::string read_name(const std::string& recovery_path) {
-  gchar* data = nullptr;
-  gsize len = 0;
-  struct stat st;
-  const std::string side = name_path_for(recovery_path);
-  if (lstat(side.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size > 4096) {
-    return std::string();
+  std::string name, orig;
+  read_sidecar(recovery_path, name, orig);
+  return name;
+}
+
+std::string read_original_path(const std::string& recovery_path) {
+  std::string name, orig;
+  read_sidecar(recovery_path, name, orig);
+  return orig;
+}
+
+bool has_sidecar(const std::string& recovery_path) {
+  std::string name, orig;
+  return read_sidecar(recovery_path, name, orig);
+}
+
+std::string recovered_name(const std::string& recovery_path) {
+  std::string name = read_name(recovery_path);
+  if (!name.empty()) {
+    return name;
   }
-  if (!g_file_get_contents(side.c_str(), &data, &len, nullptr)) {
-    return std::string();
+  const std::string orig = read_original_path(recovery_path);
+  if (!orig.empty()) {
+    gchar* base = g_path_get_basename(orig.c_str());
+    gchar* utf8 = g_filename_display_name(base);
+    std::string out = utf8 != nullptr ? utf8 : "";
+    g_free(utf8);
+    g_free(base);
+    if (!out.empty()) {
+      return out;
+    }
   }
-  std::string out(data, len);
-  g_free(data);
-  if (!g_utf8_validate(out.c_str(), static_cast<gssize>(out.size()), nullptr)) {
-    return std::string();
+  if (!has_sidecar(recovery_path)) {
+    // P-2 (round 12): pre-0.9.4-5 autosaves never wrote a sidecar.
+    struct stat st;
+    if (stat(recovery_path.c_str(), &st) == 0) {
+      GDateTime* when = g_date_time_new_from_unix_local(static_cast<gint64>(st.st_mtime));
+      if (when != nullptr) {
+        gchar* stamp = g_date_time_format(when, "%b %e, %Y at %H:%M");
+        g_date_time_unref(when);
+        if (stamp != nullptr) {
+          std::string out = std::string("Drawing from ") + stamp;
+          g_free(stamp);
+          return out;
+        }
+      }
+    }
+    return "Drawing from an earlier version";
   }
-  return out;
+  return "Untitled";
 }
 
 std::string describe(const std::string& recovery_path) {
-  std::string name = read_name(recovery_path);
-  if (name.empty()) {
-    name = "Untitled";
+  const std::string name = recovered_name(recovery_path);
+  if (!has_sidecar(recovery_path)) {
+    return name;  // the legacy label already carries the date
   }
   struct stat st;
   if (stat(recovery_path.c_str(), &st) != 0) {
