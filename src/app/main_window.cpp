@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "io/save_error.hpp"
 #include "app/main_window.hpp"
 
 #include "app/actions.hpp"
@@ -1452,9 +1453,9 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool 
   if (format == ImageFormat::Ora) {
     std::string error;
     if (!save_ora(path, document(), error)) {
-      Gtk::MessageDialog err(*this, "Could not save OpenRaster file.", false, Gtk::MESSAGE_ERROR,
+      Gtk::MessageDialog err(*this, save_error_title(path), false, Gtk::MESSAGE_ERROR,
                              Gtk::BUTTONS_OK, true);
-      err.set_secondary_text(error);
+      err.set_secondary_text(save_error_detail(path, error));
       err.run();
       return false;
     }
@@ -1466,9 +1467,9 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool 
   std::string error;
   if (!save_flat_image(path, format, flat.data(), document().width(), document().height(),
                        document().width() * 4, jpeg_quality_, error)) {
-    Gtk::MessageDialog err(*this, "Could not save image.", false, Gtk::MESSAGE_ERROR,
+    Gtk::MessageDialog err(*this, save_error_title(path), false, Gtk::MESSAGE_ERROR,
                            Gtk::BUTTONS_OK, true);
-    err.set_secondary_text(error);
+    err.set_secondary_text(save_error_detail(path, error));
     err.run();
     return false;
   }
@@ -2718,9 +2719,13 @@ void MainWindow::offer_recovery() {
   dialog.add_button("_Not Now", Gtk::RESPONSE_CANCEL);
   dialog.add_button("_Recover", Gtk::RESPONSE_YES);
   dialog.set_default_response(Gtk::RESPONSE_YES);
-  const int response = dialog.run();
-  dialog.hide();
+  int response = Gtk::RESPONSE_CANCEL;
   bool confirmed = false;
+  // P-2 (round 13): cancelling "Delete unsaved work?" goes back to this prompt.
+  for (;;) {
+  response = dialog.run();
+  dialog.hide();
+  confirmed = false;
   if (response == Gtk::RESPONSE_NO) {
     // P-1 (round 11): deleting recovered work needs a second, explicit yes.
     Gtk::MessageDialog confirm(*this, "Delete unsaved work?", false, Gtk::MESSAGE_WARNING,
@@ -2733,6 +2738,11 @@ void MainWindow::offer_recovery() {
     confirm.add_button("_Delete", Gtk::RESPONSE_ACCEPT);
     confirm.set_default_response(Gtk::RESPONSE_CANCEL);
     confirmed = confirm.run() == Gtk::RESPONSE_ACCEPT;
+    confirm.hide();
+  }
+  if (!crash_recovery::discard_cancel_returns_to_prompt(response == Gtk::RESPONSE_NO, confirmed)) {
+    break;
+  }
   }
   switch (crash_recovery::recovery_choice(response == Gtk::RESPONSE_YES,
                                           response == Gtk::RESPONSE_NO, confirmed)) {
@@ -2751,7 +2761,17 @@ void MainWindow::offer_recovery() {
                       (original.empty() ? std::string(" (not saved yet)")
                                         : std::string(" from ") +
                                               original));
-          crash_recovery::clear_file(path);
+          // P-1 (round 13): the recovered work lives only in memory until
+          // the next autosave tick. Keep the file as this document's
+          // autosave instead of deleting it; the next autosave replaces it
+          // and saving the document removes it.
+          const std::string dest = crash_recovery::autosave_path_for(document().recovery_id());
+          if (crash_recovery::adopt_file(path, dest)) {
+            crash_recovery::write_name(
+                dest,
+                original.empty() ? std::string() : std::string(Glib::path_get_basename(original)),
+                original);
+          }
         } else {
           show_status("Recovery was not applied. The file was kept.");
         }

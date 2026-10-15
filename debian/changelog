@@ -1,3 +1,13 @@
+lunduke-paint (0.9.4-7) unstable; urgency=medium
+
+  * Fix round 13 review findings: after Recover the autosave is kept as
+    the recovered document's own autosave until a fresh autosave or a
+    save, so a second crash does not lose the work (P-1); cancelling
+    "Delete unsaved work?" returns to the recovery prompt (P-2); save
+    errors name the file and its folder (P-3).
+
+ -- Phil <phil@brushpad.local>  Thu, 15 Oct 2026 03:08:02 +0000
+
 lunduke-paint (0.9.4-6) unstable; urgency=medium
 
   * Fix round 12 review findings: a recovered drawing keeps its real name

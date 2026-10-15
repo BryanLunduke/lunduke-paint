@@ -202,6 +202,23 @@ void clear_file(const std::string& path) {
   unlink(name_path_for(path).c_str());
 }
 
+bool adopt_file(const std::string& from, const std::string& to) {
+  if (!path_is_recovery(from) || !path_is_recovery(to)) {
+    return false;
+  }
+  if (from == to) {
+    return true;
+  }
+  if (std::rename(from.c_str(), to.c_str()) != 0) {
+    return false;
+  }
+  const std::string from_name = name_path_for(from);
+  if (std::rename(from_name.c_str(), name_path_for(to).c_str()) != 0) {
+    unlink(name_path_for(to).c_str());
+  }
+  return true;
+}
+
 std::string name_path_for(const std::string& recovery_path) {
   return recovery_path + ".name";
 }

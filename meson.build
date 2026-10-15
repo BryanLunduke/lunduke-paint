@@ -448,6 +448,18 @@ test_review_r12 = executable(
 )
 test('review_r12', test_review_r12)
 
+# Round 13: Recover keeps the autosave until a fresh one or a save; Discard
+# then Cancel returns to the prompt; save errors name the file.
+test_review_r13 = executable(
+  'test_review_r13',
+  files('tests/test_review_r13.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  install: false,
+)
+test('review_r13', test_review_r13)
+
 # Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
 # history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
 test_review_r7_ui = executable(
