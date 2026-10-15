@@ -64,6 +64,18 @@ inline RecoveryChoice recovery_choice(bool pressed_recover, bool pressed_discard
   return RecoveryChoice::Keep;
 }
 
+// P-2 (round 13): Discard... then Cancel on "Delete unsaved work?" shows the
+// recovery prompt again instead of closing it.
+inline bool discard_cancel_returns_to_prompt(bool pressed_discard, bool discard_confirmed) {
+  return pressed_discard && !discard_confirmed;
+}
+
+// P-1 (round 13): after Recover, rename the recovery file (and its sidecar)
+// to the recovered document's own autosave path, so a crash before the next
+// autosave tick still finds it. Returns false and keeps the file when the
+// rename fails or either path is not a recovery path.
+bool adopt_file(const std::string& from, const std::string& to);
+
 // Cheap fingerprint of what a recovery write would contain: canvas size and
 // each layer's (identity, revision) plus its properties. Equal fingerprints
 // mean the last recovery file is still current, so the tick can be skipped.
