@@ -46,7 +46,13 @@ struct LoadedOra {
   bool ok() const { return error.empty() && width > 0 && height > 0 && !layers.empty(); }
 };
 
+// P-1 (round 14): decoded-pixel budget for one .ora open. Every layer's PNG
+// header is read first and the RGBA bytes all layers need (each counted at
+// least at canvas size) must fit, or the file is refused before any decode.
+// The budget is a quarter of RAM, kept between 1 GiB and 4 GiB.
+std::uint64_t ora_decode_budget_bytes();
 LoadedOra load_ora(const std::string& path);
+LoadedOra load_ora(const std::string& path, std::uint64_t decode_budget_bytes);
 bool save_ora(const std::string& path, const Document& document, std::string& error);
 
 // Pixel copy plus stack.xml, safe to encode on a worker. `write_merged` skips

@@ -34,6 +34,11 @@ void clear_file(const std::string& path);
 // user-visible name so the recovery prompt can show it instead of the
 // internal file name. Empty title means "Untitled".
 std::string name_path_for(const std::string& recovery_path);
+// P-2 (round 14): the title written to a sidecar. A saved document uses its
+// file name; an unsaved recovered one keeps its recovery label so a second
+// crash does not turn it into "Untitled".
+std::string sidecar_title(const std::string& document_path, const std::string& recovery_label);
+
 bool write_name(const std::string& recovery_path, const std::string& title,
                 const std::string& original_path = std::string());
 std::string read_name(const std::string& recovery_path);

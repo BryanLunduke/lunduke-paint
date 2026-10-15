@@ -2766,11 +2766,14 @@ void MainWindow::offer_recovery() {
           // autosave instead of deleting it; the next autosave replaces it
           // and saving the document removes it.
           const std::string dest = crash_recovery::autosave_path_for(document().recovery_id());
+          // P-2 (round 14): an unsaved (legacy) drawing keeps the label
+          // it was offered under, here and in every later autosave.
+          if (original.empty()) {
+            document().set_recovery_label(shown);
+          }
           if (crash_recovery::adopt_file(path, dest)) {
             crash_recovery::write_name(
-                dest,
-                original.empty() ? std::string() : std::string(Glib::path_get_basename(original)),
-                original);
+                dest, crash_recovery::sidecar_title(original, document().recovery_label()), original);
           }
         } else {
           show_status("Recovery was not applied. The file was kept.");
@@ -2818,8 +2821,7 @@ void MainWindow::report_out_of_memory() {
       if (crash_recovery::prepare_state_dir(error) &&
           save_ora_snapshot(crash_recovery::autosave_path_for(doc.recovery_id()), snap, error)) {
         crash_recovery::write_name(crash_recovery::autosave_path_for(doc.recovery_id()),
-                                   doc.path().empty() ? std::string()
-                                                      : std::string(Glib::path_get_basename(doc.path())),
+                                   crash_recovery::sidecar_title(doc.path(), doc.recovery_label()),
                                    doc.path());
         ++saved;
       }
@@ -2936,7 +2938,7 @@ void MainWindow::start_recovery_save() {
         }
       }
       jobs.push_back(Job{std::move(snapshot), dest, doc.recovery_id(), synthetic ? std::string() : sig,
-                         doc.path().empty() ? std::string() : std::string(Glib::path_get_basename(doc.path())),
+                         crash_recovery::sidecar_title(doc.path(), doc.recovery_label()),
                          doc.path()});
     }, "crash-recovery snapshot");
     if (!ok) {

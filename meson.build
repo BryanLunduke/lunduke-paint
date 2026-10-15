@@ -460,6 +460,18 @@ test_review_r13 = executable(
 )
 test('review_r13', test_review_r13)
 
+# Round 14: .ora decoded-pixel budget (P-1); legacy recovery label (P-2).
+test_review_r14 = executable(
+  'test_review_r14',
+  files('tests/test_review_r14.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  cpp_args: ['-DREVIEW_R14_SOURCE="@0@"'.format(meson.project_source_root())],
+  install: false,
+)
+test('review_r14', test_review_r14)
+
 # Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
 # history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
 test_review_r7_ui = executable(

@@ -54,6 +54,11 @@ public:
   // Stable for this document in this session. Crash recovery writes
   // recovery-<id>.ora so one tab cannot erase another's autosave.
   std::uint64_t recovery_id() const { return recovery_id_; }
+  // P-2 (round 14): label of a recovered, never-saved drawing (for example
+  // "Drawing from Oct 14, 2026 at 22:46"), written to the autosave sidecar
+  // so the label survives another crash.
+  const std::string& recovery_label() const { return recovery_label_; }
+  void set_recovery_label(std::string label) { recovery_label_ = std::move(label); }
 
   // Nested OpenRaster stacks. Null when the file has no layer groups.
   // Cleared when layers are added, removed, or reordered.
@@ -164,6 +169,7 @@ private:
   bool dirty_ = false;
   bool unsaved_overlay_ = false;
   std::uint64_t recovery_id_ = 0;
+  std::string recovery_label_;
   bool has_ora_stack_ = false;
   OraNode ora_stack_{};
   Color fg_ = Color::black();
