@@ -61,7 +61,8 @@ int main() {
 
   const std::string untitled = crash_recovery::autosave_path_for(0x1ULL);
   check(crash_recovery::write_document_file(*doc, untitled, error), "write second recovery file");
-  check(crash_recovery::describe(untitled).find("Untitled") == 0, "no sidecar -> Untitled");
+  check(crash_recovery::describe(untitled).find("Drawing from ") == 0,
+        "no sidecar -> dated label (changed in round 12, P-2)");
 
   crash_recovery::clear_file(path);
   crash_recovery::clear_file(untitled);

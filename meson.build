@@ -436,6 +436,18 @@ test_review_r11 = executable(
 )
 test('review_r11', test_review_r11)
 
+# Round 12: recovered documents keep their name and original path; legacy
+# autosaves get a dated label; long titles are cut on UTF-8 boundaries.
+test_review_r12 = executable(
+  'test_review_r12',
+  files('tests/test_review_r12.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  install: false,
+)
+test('review_r12', test_review_r12)
+
 # Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
 # history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
 test_review_r7_ui = executable(

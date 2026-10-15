@@ -1,3 +1,13 @@
+lunduke-paint (0.9.4-6) unstable; urgency=medium
+
+  * Fix round 12 review findings: a recovered drawing keeps its real name
+    and original path in the title, status bar and Save target (P-1);
+    autosaves from before 0.9.4-5 are labelled "Drawing from <date>"
+    instead of "Untitled" (P-2); long Unicode titles are cut on a UTF-8
+    boundary so they are not lost (P-3).
+
+ -- Phil <phil@brushpad.local>  Wed, 14 Oct 2026 01:43:39 +0000
+
 lunduke-paint (0.9.4-5) unstable; urgency=medium
 
   * Fix round 11 review findings (P-1, P-2): Escape/close on the recovery

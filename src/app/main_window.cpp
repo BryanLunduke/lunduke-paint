@@ -2738,9 +2738,19 @@ void MainWindow::offer_recovery() {
                                           response == Gtk::RESPONSE_NO, confirmed)) {
     case crash_recovery::RecoveryChoice::Recover:
       for (const std::string& path : files) {
+        // P-1 (round 12): read the name and original path before the open
+        // and before the sidecar is cleared.
+        const std::string shown = crash_recovery::recovered_name(path);
+        const std::string original = crash_recovery::read_original_path(path);
         if (open_path(path) && document_ptr() != nullptr && recovery_file_consumed(true)) {
-          document().set_path(std::string());
+          document().set_path(original);
           document().set_dirty(true);
+          update_title();
+          update_tab_labels();
+          show_status("Recovered \u201c" + shown + "\u201d" +
+                      (original.empty() ? std::string(" (not saved yet)")
+                                        : std::string(" from ") +
+                                              original));
           crash_recovery::clear_file(path);
         } else {
           show_status("Recovery was not applied. The file was kept.");
@@ -2789,7 +2799,8 @@ void MainWindow::report_out_of_memory() {
           save_ora_snapshot(crash_recovery::autosave_path_for(doc.recovery_id()), snap, error)) {
         crash_recovery::write_name(crash_recovery::autosave_path_for(doc.recovery_id()),
                                    doc.path().empty() ? std::string()
-                                                      : std::string(Glib::path_get_basename(doc.path())));
+                                                      : std::string(Glib::path_get_basename(doc.path())),
+                                   doc.path());
         ++saved;
       }
     } catch (...) {
@@ -2826,6 +2837,7 @@ void MainWindow::start_recovery_save() {
     std::uint64_t id = 0;
     std::string sig;  // empty for synthetic content: never marked current
     std::string title;  // P-2 (round 11): shown by the recovery prompt
+    std::string original_path;  // P-1 (round 12): restored on Recover
   };
   std::vector<Job> jobs;
   const gint64 now = g_get_monotonic_time();
@@ -2904,7 +2916,8 @@ void MainWindow::start_recovery_save() {
         }
       }
       jobs.push_back(Job{std::move(snapshot), dest, doc.recovery_id(), synthetic ? std::string() : sig,
-                         doc.path().empty() ? std::string() : std::string(Glib::path_get_basename(doc.path()))});
+                         doc.path().empty() ? std::string() : std::string(Glib::path_get_basename(doc.path())),
+                         doc.path()});
     }, "crash-recovery snapshot");
     if (!ok) {
       recovery_sig_.forget(doc.recovery_id());
@@ -2936,7 +2949,7 @@ void MainWindow::start_recovery_save() {
           ok = crash_recovery::prepare_state_dir(error) &&
                save_ora_snapshot(job.dest, job.snapshot, error);
           if (ok) {
-            crash_recovery::write_name(job.dest, job.title);
+            crash_recovery::write_name(job.dest, job.title, job.original_path);
           }
           if (!ok) {
             g_warning("lunduke-paint: recovery write failed (%s); will retry", error.c_str());

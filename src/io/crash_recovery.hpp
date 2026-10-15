@@ -2,6 +2,7 @@
 #ifndef LUNDUKEPAINT_IO_CRASH_RECOVERY_HPP
 #define LUNDUKEPAINT_IO_CRASH_RECOVERY_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -33,8 +34,18 @@ void clear_file(const std::string& path);
 // user-visible name so the recovery prompt can show it instead of the
 // internal file name. Empty title means "Untitled".
 std::string name_path_for(const std::string& recovery_path);
-bool write_name(const std::string& recovery_path, const std::string& title);
+bool write_name(const std::string& recovery_path, const std::string& title,
+                const std::string& original_path = std::string());
 std::string read_name(const std::string& recovery_path);
+// Round 12: original absolute path from the sidecar ("" when unknown).
+std::string read_original_path(const std::string& recovery_path);
+bool has_sidecar(const std::string& recovery_path);
+// Name to show for a recovery file: sidecar name, else original file name,
+// else "Drawing from <date>" for legacy autosaves without a sidecar (P-2),
+// else "Untitled".
+std::string recovered_name(const std::string& recovery_path);
+// P-3: truncate to at most max_bytes on a UTF-8 code-point boundary.
+std::string truncate_utf8(const std::string& text, std::size_t max_bytes);
 // "<name> — last saved <date time>" for one recovery file.
 std::string describe(const std::string& recovery_path);
 
