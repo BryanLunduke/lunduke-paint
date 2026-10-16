@@ -1,3 +1,12 @@
+lunduke-paint (0.9.4-9) unstable; urgency=medium
+
+  * LCOS#136: lower the main window's minimum height from 324 to 264 px
+    (canvas minimum 180 -> 120 px; it scrolls) so the window fits a
+    1366x768 screen with the panel showing with plenty of room to spare.
+    New min_height test checks every tool.
+
+ -- Phil <phil@brushpad.local>  Fri, 16 Oct 2026 05:31:08 +0000
+
 lunduke-paint (0.9.4-8) unstable; urgency=medium
 
   * Fix round 14 review findings: opening an OpenRaster file checks the

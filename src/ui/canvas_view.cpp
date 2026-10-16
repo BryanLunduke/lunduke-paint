@@ -33,7 +33,9 @@ namespace {
 // image size is: scrollbars take care of the overflow, so opening a 4000-pixel
 // photo cannot inflate the toplevel window.
 constexpr int kMinContentWidth = 240;
-constexpr int kMinContentHeight = 180;
+// LCOS#136: small enough that the whole window shrinks far below a
+// 1366x768 screen with a panel; the canvas scrolls.
+constexpr int kMinContentHeight = 120;
 
 void write_argb32(std::uint8_t* dst, Color c) {
   const int a = c.a;
