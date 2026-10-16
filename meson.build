@@ -521,3 +521,16 @@ install_data(
   'data/mime/org.lunduke.LundukePaint.xml',
   install_dir: join_paths(get_option('datadir'), 'mime/packages'),
 )
+
+# LCOS#136: minimum window height fits 1366x768 with a panel, every tool.
+test_min_height = executable(
+  'test_min_height',
+  files('tests/test_min_height.cpp'),
+  lunduke_paint_app_sources,
+  lunduke_paint_resources,
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
+test('min_height', test_min_height)
