@@ -14,8 +14,12 @@ user layers.
   decorations, no HeaderBar as main chrome)
 - Theme: follows the active GTK3 theme; the app is not skinned
 - Native project file: OpenRaster `.ora` (libarchive + pugixml)
-- Version: 0.9.4
+- Version: 0.9.5
 - Config: `$XDG_CONFIG_HOME/lunduke-paint/lunduke-paint.ini` via GKeyFile
+
+## 0.9.5
+
+LCOS 0.9.5. Package 0.9.5-1 (round 15 review fixes). Saving to a symlinked image replaces the real file and keeps the link; leftover temp files from a crashed save are cleaned up; opened and saved images appear in the desktop's recent-files list (file chooser "Recent"); the release-binary test skips in non-release builds. About dialog and meson version read 0.9.5.
 
 ## 0.9.4
 

@@ -29,6 +29,14 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "test_release_binary: pass the lunduke-paint binary path\n");
     return 1;
   }
+  if (argc >= 3 && argv[2] != nullptr) {
+    const std::string buildtype = argv[2];
+    if (buildtype != "release" && buildtype != "plain") {
+      std::printf("test_release_binary: SKIP (buildtype '%s' is not a release build)\n",
+                  buildtype.c_str());
+      return 77;
+    }
+  }
   std::ifstream in(argv[1], std::ios::binary);
   expect(static_cast<bool>(in), "could not open the production binary");
   if (!in) {

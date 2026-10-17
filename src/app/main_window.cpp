@@ -5,6 +5,7 @@
 
 #include "app/actions.hpp"
 #include "app/live_edit.hpp"
+#include "app/recent_files.hpp"
 #include "raster/brush_tip.hpp"
 #include "app/shortcut_dispatch.hpp"
 #include "app/shortcut_help.hpp"
@@ -2656,6 +2657,8 @@ void MainWindow::remember_recent(const std::string& path) {
   }
   prefs_.add_recent(path);
   rebuild_recent_menu();
+  // Round 15 P-4: also the desktop-wide list (file chooser "Recent").
+  register_recent_file(path);
 }
 
 void MainWindow::rebuild_recent_menu() {

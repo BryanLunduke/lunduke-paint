@@ -16,6 +16,11 @@
 #include <cctype>
 #include <cstring>
 #include <new>
+#include <climits>
+#include <csignal>
+#include <cstdlib>
+#include <ctime>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -216,26 +221,128 @@ bool image_has_multiple_frames(const std::string& path) {
   return multi;
 }
 
-bool atomic_create(const std::string& path, AtomicFile& out, std::string& error) {
+bool is_stale_save_temp_name(const std::string& name, const std::string& base, pid_t* pid_out) {
+  // ".<base>.tmp.<pid>.<16 hex>" exactly, as atomic_create names them.
+  const std::string prefix = "." + base + ".tmp.";
+  if (name.size() <= prefix.size() || name.compare(0, prefix.size(), prefix) != 0) {
+    return false;
+  }
+  std::size_t i = prefix.size();
+  std::size_t digits = 0;
+  long long pid = 0;
+  while (i < name.size() && name[i] >= '0' && name[i] <= '9') {
+    pid = pid * 10 + (name[i] - '0');
+    if (pid > INT_MAX) {
+      return false;
+    }
+    ++i;
+    ++digits;
+  }
+  if (digits == 0 || pid <= 0 || i >= name.size() || name[i] != '.') {
+    return false;
+  }
+  ++i;
+  if (name.size() - i != 16) {
+    return false;
+  }
+  for (; i < name.size(); ++i) {
+    if (!std::isxdigit(static_cast<unsigned char>(name[i])) ||
+        std::isupper(static_cast<unsigned char>(name[i]))) {
+      return false;
+    }
+  }
+  if (pid_out != nullptr) {
+    *pid_out = static_cast<pid_t>(pid);
+  }
+  return true;
+}
+
+int remove_stale_save_temps(const std::string& dir, const std::string& base, int min_age_seconds) {
+  // A crash between create and rename leaves the temp behind. Remove this
+  // base name's temps whose writer is gone: our own regular files, not this
+  // process, the PID no longer running, and untouched for min_age_seconds
+  // (so a save in progress on another host sharing the folder is left alone).
+  const int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (dfd < 0) {
+    return 0;
+  }
+  DIR* d = ::fdopendir(dfd);
+  if (d == nullptr) {
+    ::close(dfd);
+    return 0;
+  }
+  int removed = 0;
+  const time_t now = std::time(nullptr);
+  while (dirent* ent = ::readdir(d)) {
+    const std::string name = ent->d_name;
+    pid_t pid = 0;
+    if (!is_stale_save_temp_name(name, base, &pid) || pid == ::getpid()) {
+      continue;
+    }
+    if (::kill(pid, 0) == 0 || errno != ESRCH) {
+      continue;  // still running (or not ours to judge)
+    }
+    struct stat st;
+    if (::fstatat(dfd, name.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(st.st_mode) ||
+        st.st_uid != ::geteuid()) {
+      continue;
+    }
+    if (now - st.st_mtime < min_age_seconds) {
+      continue;
+    }
+    if (::unlinkat(dfd, name.c_str(), 0) == 0) {
+      ++removed;
+    }
+  }
+  ::closedir(d);
+  return removed;
+}
+
+bool resolve_save_target(const std::string& path, std::string& target, std::string& error) {
+  target = path;
+  struct stat st;
+  if (lstat(path.c_str(), &st) != 0) {
+    return true;  // new file
+  }
+  if (S_ISLNK(st.st_mode)) {
+    // Round 15 P-1: save through the link. The atomic replace happens next
+    // to the real file, so the link itself stays a link.
+    char* real = ::realpath(path.c_str(), nullptr);
+    if (real == nullptr) {
+      const int err = errno;
+      error = "The link \u201c" + path + "\u201d points to a file that cannot be reached (" +
+              g_strerror(err) + "). Use Save As to choose another location.";
+      return false;
+    }
+    target = real;
+    std::free(real);
+    if (lstat(target.c_str(), &st) != 0) {
+      error = with_errno("Could not check the linked file");
+      return false;
+    }
+  }
+  if (!S_ISREG(st.st_mode)) {
+    error = "Destination is not a regular file";
+    return false;
+  }
+  return true;
+}
+
+bool atomic_create(const std::string& requested_path, AtomicFile& out, std::string& error) {
   out = {};
-  if (path.empty()) {
+  if (requested_path.empty()) {
     error = "No path";
     return false;
   }
-  struct stat st;
-  if (lstat(path.c_str(), &st) == 0) {
-    if (S_ISLNK(st.st_mode)) {
-      error = "Refusing to follow a symbolic link";
-      return false;
-    }
-    if (!S_ISREG(st.st_mode)) {
-      error = "Destination is not a regular file";
-      return false;
-    }
+  std::string path;
+  if (!resolve_save_target(requested_path, path, error)) {
+    return false;
   }
+  struct stat st;
   const auto slash = path.find_last_of('/');
   const std::string dir = slash == std::string::npos ? std::string(".") : path.substr(0, slash);
   const std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
+  remove_stale_save_temps(dir, base, kStaleSaveTempSeconds);
   unsigned char rnd[8] = {};
   const int urandom = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
   if (urandom >= 0) {
