@@ -1,7 +1,7 @@
 project(
   'lunduke-paint',
   'cpp',
-  version: '0.9.4',
+  version: '0.9.5',
   license: 'GPL-3.0-or-later',
   meson_version: '>=0.56.0',
   default_options: [
@@ -71,6 +71,7 @@ lunduke_paint_app_sources = files(
   'src/app/save_dialog.cpp',
   'src/app/actions.cpp',
   'src/app/preferences.cpp',
+  'src/app/recent_files.cpp',
   'src/ui/canvas_view.cpp',
   'src/ui/intro_howdy.cpp',
   'src/ui/toolbox.cpp',
@@ -472,6 +473,31 @@ test_review_r14 = executable(
 )
 test('review_r14', test_review_r14)
 
+# Round 15: save through a symlink keeps the link (P-1); stale save temps
+# from a crashed save are removed (P-3).
+test_review_r15 = executable(
+  'test_review_r15',
+  files('tests/test_review_r15.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  install: false,
+)
+test('review_r15', test_review_r15)
+
+# Round 15 P-4, on a display: opened files reach Gtk::RecentManager.
+test_review_r15_ui = executable(
+  'test_review_r15_ui',
+  files('tests/test_review_r15_ui.cpp'),
+  lunduke_paint_app_sources,
+  lunduke_paint_resources,
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
+test('review_r15_ui', test_review_r15_ui, timeout: 120)
+
 # Round-7 review, on a display: window minimum, dialog Enter, JPEG quality row,
 # history notice. Fails (does not skip) when LUNDUKEPAINT_REQUIRE_DISPLAY is set.
 test_review_r7_ui = executable(
@@ -492,10 +518,12 @@ test_release_binary = executable(
   files('tests/test_release_binary.cpp'),
   install: false,
 )
+# Round 15 P-2: only release-type builds strip the workspace path, so other
+# build types report SKIP (exit 77) instead of a red suite on a clean checkout.
 test(
   'release_binary',
   test_release_binary,
-  args: [join_paths(meson.current_build_dir(), 'lunduke-paint')],
+  args: [join_paths(meson.current_build_dir(), 'lunduke-paint'), get_option('buildtype')],
 )
 
 install_data(

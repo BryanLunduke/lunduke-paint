@@ -370,10 +370,16 @@ int main() {
     const std::string link = folder + "/linked.png";
     errors += expect(symlink(outside.c_str(), link.c_str()) == 0, "symlink destination");
     rgba[0] = 1;
-    errors += expect(!lundukepaint::save_flat_image(link, lundukepaint::ImageFormat::Png, rgba.data(),
-                                                    1, 1, 4, 90, save_error),
-                     "save refuses a symlink");
-    errors += expect(read_file(outside) == outside_bytes, "symlink target is unchanged");
+    // Round 15 P-1: a save through a symlink replaces the real file and
+    // keeps the link (round 14 refused it outright).
+    errors += expect(lundukepaint::save_flat_image(link, lundukepaint::ImageFormat::Png, rgba.data(),
+                                                   1, 1, 4, 90, save_error),
+                     "save through a symlink succeeds");
+    errors += expect(read_file(outside) != outside_bytes, "symlink target has the new image");
+    {
+      struct stat lst;
+      errors += expect(lstat(link.c_str(), &lst) == 0 && S_ISLNK(lst.st_mode), "link is still a link");
+    }
     unlink(link.c_str());
     unlink(dest.c_str());
     unlink(ora_dest.c_str());

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <sys/types.h>
 #include <vector>
 
 namespace lundukepaint {
@@ -54,8 +55,12 @@ inline KeepOraDecision decide_keep_ora(bool flat_ok, bool ora_requested, bool or
 // True when the loader reports more than one frame (animated GIF).
 bool image_has_multiple_frames(const std::string& path);
 
-// Exclusive temp file in the destination directory. Refuses a final symlink.
-// commit fsyncs and renames over `path`. abort unlinks the temp.
+// Exclusive temp file in the destination directory. A final symlink is
+// resolved (realpath) and the real file is replaced in its own directory, so
+// the link stays a link (round 15 P-1); a dangling link is refused with a
+// hint to use Save As. commit fsyncs and renames over the real file.
+// abort unlinks the temp. Stale temps of the same base name left by a crashed
+// Paint are removed first (round 15 P-3).
 struct AtomicFile {
   int fd = -1;
   std::string tmp_path;
@@ -63,6 +68,10 @@ struct AtomicFile {
 };
 
 bool atomic_create(const std::string& path, AtomicFile& out, std::string& error);
+// Exposed for tests. Temps younger than this are never removed.
+constexpr int kStaleSaveTempSeconds = 600;
+bool is_stale_save_temp_name(const std::string& name, const std::string& base, pid_t* pid_out);
+int remove_stale_save_temps(const std::string& dir, const std::string& base, int min_age_seconds);
 bool atomic_commit(AtomicFile& file, std::string& error);
 void atomic_abort(AtomicFile& file);
 

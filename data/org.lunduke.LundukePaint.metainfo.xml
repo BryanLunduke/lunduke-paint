@@ -21,15 +21,15 @@
   <launchable type="desktop-id">org.lunduke.LundukePaint.desktop</launchable>
   <provides>
     <binary>lunduke-paint</binary>
+    <mediatype>image/openraster</mediatype>
+    <mediatype>image/png</mediatype>
+    <mediatype>image/jpeg</mediatype>
+    <mediatype>image/bmp</mediatype>
+    <mediatype>image/gif</mediatype>
   </provides>
-  <mimetypes>
-    <mimetype>image/openraster</mimetype>
-    <mimetype>image/png</mimetype>
-    <mimetype>image/jpeg</mimetype>
-    <mimetype>image/bmp</mimetype>
-    <mimetype>image/gif</mimetype>
-  </mimetypes>
-  <developer_name>The Lunduke Journal</developer_name>
+  <developer id="com.lunduke">
+    <name>The Lunduke Journal</name>
+  </developer>
   <content_rating type="oars-1.1"/>
   <categories>
     <category>Graphics</category>
@@ -37,6 +37,11 @@
     <category>RasterGraphics</category>
   </categories>
   <releases>
+    <release version="0.9.5" date="2026-10-16">
+      <description>
+        <p>Save through a symbolic link keeps the link and replaces the real file, temp files left by a crashed save are cleaned up, and opened and saved images are added to the desktop's recent files.</p>
+      </description>
+    </release>
     <release version="0.9.4" date="2026-10-13">
       <description>
         <p>Version bump for LCOS 0.9.4. No functional changes.</p>

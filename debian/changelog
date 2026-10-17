@@ -1,3 +1,22 @@
+lunduke-paint (0.9.5-1) unstable; urgency=medium
+
+  * Version 0.9.5 for the LCOS 0.9.5 track.
+  * Round 15 P-1: saving to a symlinked image resolves the link and
+    atomically replaces the real file in its own folder, so the link stays
+    a link. A dangling link is refused with a hint to use Save As.
+  * Round 15 P-2: the release_binary test reports SKIP in non-release
+    builds instead of failing a clean debug checkout.
+  * Round 15 P-3: a save removes stale ".<name>.tmp.<pid>.<hex>" files left
+    by a crashed save of the same image (writer PID gone, older than ten
+    minutes, regular file owned by the user).
+  * Round 15 P-4: opened and saved images are also registered with the
+    desktop's recent-files list (Gtk::RecentManager), so the file chooser's
+    "Recent" place and desktop menus show them. File > Open Recent stays.
+  * AppStream metadata: 0.9.5 release entry; mediatype and developer tags
+    replace the deprecated mimetypes and developer_name.
+
+ -- Phil <phil@brushpad.local>  Sat, 17 Oct 2026 01:56:49 +0000
+
 lunduke-paint (0.9.4-9) unstable; urgency=medium
 
   * LCOS#136: lower the main window's minimum height from 324 to 264 px
