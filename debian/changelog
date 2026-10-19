@@ -1,3 +1,26 @@
+lunduke-paint (0.9.5-2) unstable; urgency=medium
+
+  * Pre-1.0 critical fixes (editor-approved code review of 5353e03).
+  * Tabs: the tab bar now appears when two or more images are open (from
+    the command line, the file manager, Open, Open Recent or New), so a
+    second image no longer hides the first. Switching and closing tabs
+    work; with one image left the tab bar hides again.
+  * Save As writes the picture it was opened for. An image opened from the
+    file manager or a second launch while Save As or any other Paint dialog
+    is up is held and opened after the dialog closes, and Save / Save As
+    stay bound to their document even if the active tab changes.
+  * GIF and other formats Paint only reads (TIFF, WebP, unknown or missing
+    extension) are no longer a dead end: Save (Ctrl+S) and Save in the
+    close prompt open Save As with the same name as PNG proposed. The
+    close prompt closes only after that save succeeds.
+  * Opening an image larger than 8192 pixels on a side shows the memory
+    warning from the file header, before the pixels are decoded; Cancel
+    decodes nothing.
+  * The status bar's message timer is disconnected when the window is
+    destroyed.
+
+ -- Phil <phil@brushpad.local>  Mon, 19 Oct 2026 02:34:27 +0000
+
 lunduke-paint (0.9.5-1) unstable; urgency=medium
 
   * Version 0.9.5 for the LCOS 0.9.5 track.

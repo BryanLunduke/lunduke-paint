@@ -21,6 +21,8 @@ user layers.
 
 LCOS 0.9.5. Package 0.9.5-1 (round 15 review fixes). Saving to a symlinked image replaces the real file and keeps the link; leftover temp files from a crashed save are cleaned up; opened and saved images appear in the desktop's recent-files list (file chooser "Recent"); the release-binary test skips in non-release builds. About dialog and meson version read 0.9.5.
 
+Package 0.9.5-2 (pre-1.0 fixes). The tab bar shows with two or more images open; an image opened from the file manager while a dialog is up waits for the dialog, and Save As always writes the picture it was opened for; Save and the close prompt send GIF and other read-only formats to Save As with PNG proposed; the large-image warning comes from the file header before decoding.
+
 ## 0.9.4
 
 LCOS 0.9.4. Package 0.9.4-9 (round 8 to 14 review fixes; LCOS#136 smaller minimum window height). About dialog and meson version read 0.9.4.

@@ -562,3 +562,29 @@ test_min_height = executable(
   install: false,
 )
 test('min_height', test_min_height)
+
+# 0.9.5-2 pre-1.0 fixes: GIF / read-only formats go to Save As, header-first
+# large-image size.
+test_review_095_2 = executable(
+  'test_review_095_2',
+  files('tests/test_review_095_2.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  install: false,
+)
+test('review_095_2', test_review_095_2)
+
+# 0.9.5-2, on a display: tab bar, held outside opens and Save As binding,
+# GIF Save / close prompt, large-image warning before decode.
+test_review_095_2_ui = executable(
+  'test_review_095_2_ui',
+  files('tests/test_review_095_2_ui.cpp'),
+  lunduke_paint_app_sources,
+  lunduke_paint_resources,
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
+test('review_095_2_ui', test_review_095_2_ui, timeout: 120)

@@ -27,7 +27,8 @@ namespace lundukepaint {
 //   "file.jpeg.BMP" is BMP. jpg and jpeg are the same format; a typed
 //   ".jpeg" or ".JPG" is not rewritten to ".jpg".
 // * GIF is recognized, so a typed ".gif" is not rewritten. Saving GIF is
-//   still refused later ("GIF save is not supported").
+//   still refused later ("GIF save is not supported"); Save and the close
+//   prompt send a GIF document to Save As with PNG proposed instead.
 // * There is no typed extension when the name has no '.', the only '.' is
 //   a leading dot and the name is not itself a known extension (".hidden"),
 //   the suffix is empty ("bft."), or the suffix is longer than 5 characters
@@ -367,6 +368,43 @@ inline bool save_shows_jpeg_quality(const std::string& typed_name, ImageFormat f
     return target.offered_format == ImageFormat::Jpeg;
   }
   return filter == ImageFormat::Jpeg;
+}
+
+// 0.9.5-2: Save (Ctrl+S) and the close prompt can write a document back only
+// when its own path is a format Paint saves (PNG, JPEG, BMP, OpenRaster).
+// No path, GIF, and anything opened read-only through gdk-pixbuf (TIFF,
+// WebP, an unknown or missing extension) goes to Save As instead.
+inline bool save_needs_chooser(const std::string& path) {
+  if (path.empty()) {
+    return true;
+  }
+  const SaveTarget target = resolve_save_target(path, ImageFormat::Unknown);
+  return target.kind != SaveResolveKind::Ready || !save_filter_writable(target.format);
+}
+
+// File name Save As proposes for a document whose own format cannot be
+// written: the same folder and title with ".png" ("anim.gif" -> "anim.png",
+// "scan.tiff" -> "scan.png", "my.drawing" -> "my.drawing.png").
+inline std::string save_as_png_name(const std::string& path) {
+  using namespace save_target_detail;
+  std::string dir;
+  std::string base;
+  split_name(path, dir, base);
+  const Suffix suffix = classify(base);
+  std::string stem = base;
+  if (suffix.kind != SuffixKind::None) {
+    const auto dot = base.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) {
+      stem = base.substr(0, dot);
+    }
+  }
+  while (!stem.empty() && stem.back() == '.') {
+    stem.pop_back();
+  }
+  if (stem.empty()) {
+    stem = "untitled";
+  }
+  return stem + ".png";
 }
 
 }  // namespace lundukepaint

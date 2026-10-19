@@ -59,6 +59,13 @@ public:
   void action_new();
   void action_open();
   bool open_path(const std::string& path, bool force_replace = false);
+  // Opens from outside the window (command line, file manager, a second
+  // launch). While a Paint dialog or a save is in progress the path is held
+  // and opened after it closes, so the document under that dialog never
+  // changes (0.9.5-2).
+  void request_open(const std::string& path);
+  bool opens_must_wait() const;
+  std::size_t deferred_open_count() const { return deferred_opens_.size(); }
   void action_save();
   void action_save_as();
   bool confirm_close();
@@ -142,6 +149,33 @@ public:
   void action_revert();
 
 private:
+  // Marks a save, a clipboard wait or another nested main loop in progress.
+  struct BusyScope {
+    explicit BusyScope(MainWindow& window) : window_(window) { ++window_.busy_depth_; }
+    ~BusyScope() { --window_.busy_depth_; }
+    BusyScope(const BusyScope&) = delete;
+    BusyScope& operator=(const BusyScope&) = delete;
+    MainWindow& window_;
+  };
+  // Binds Save / Save As to the document that was active when it started.
+  struct SaveBinding {
+    explicit SaveBinding(MainWindow& window)
+        : busy_(window), window_(window), previous_(window.save_bound_) {
+      if (window_.save_bound_ == nullptr) {
+        window_.save_bound_ = window_.document_ptr();
+      }
+    }
+    ~SaveBinding() { window_.save_bound_ = previous_; }
+    SaveBinding(const SaveBinding&) = delete;
+    SaveBinding& operator=(const SaveBinding&) = delete;
+    BusyScope busy_;
+    MainWindow& window_;
+    Document* previous_;
+  };
+  // Makes the bound document active again if anything switched away while a
+  // save dialog was up. False (with a message) when it was closed.
+  bool rebind_save_target();
+  bool drain_deferred_opens();
   void build_ui();
   void build_toolbar();
   Glib::RefPtr<Gio::MenuModel> load_menubar_model();
@@ -269,6 +303,11 @@ private:
   std::vector<std::uint8_t> clip_rgba_;
   std::vector<std::uint8_t> clip_coverage_;
   sigc::connection recovery_timer_;
+  int busy_depth_{0};
+  Document* save_bound_{nullptr};
+  std::vector<std::string> deferred_opens_;
+  sigc::connection deferred_open_timer_;
+  sigc::connection tab_switch_conn_;
 };
 
 }  // namespace lundukepaint
