@@ -13,6 +13,8 @@ namespace lundukepaint {
 class StatusBar : public Gtk::Box {
 public:
   StatusBar();
+  // The message timer captures this; it must not fire after the bar is gone.
+  ~StatusBar() override { message_timer_.disconnect(); }
 
   void set_hint(const Glib::ustring& hint);
   void show_coordinates(double x, double y);

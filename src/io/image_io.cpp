@@ -463,6 +463,27 @@ std::string format_extension(ImageFormat format) {
   }
 }
 
+namespace {
+int g_flat_decodes = 0;
+}  // namespace
+
+int flat_image_decode_count() {
+  return g_flat_decodes;
+}
+
+bool flat_image_header_size(const std::string& path, int& width, int& height) {
+  width = 0;
+  height = 0;
+  int w = 0;
+  int h = 0;
+  if (gdk_pixbuf_get_file_info(path.c_str(), &w, &h) == nullptr || w < 1 || h < 1) {
+    return false;
+  }
+  width = w;
+  height = h;
+  return true;
+}
+
 LoadedImage load_flat_image(const std::string& path) {
   LoadedImage out;
   {
@@ -476,6 +497,7 @@ LoadedImage load_flat_image(const std::string& path) {
       return out;
     }
   }
+  ++g_flat_decodes;
   GError* error = nullptr;
   GdkPixbufAnimation* anim = gdk_pixbuf_animation_new_from_file(path.c_str(), &error);
   if (anim == nullptr) {

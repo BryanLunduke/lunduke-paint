@@ -77,6 +77,14 @@ void atomic_abort(AtomicFile& file);
 
 LoadedImage load_flat_image(const std::string& path);
 
+// 0.9.5-2: the pixel size from the file header only (gdk_pixbuf_get_file_info),
+// with no full decode, so Open can show the large-image warning first and
+// skip the decode on Cancel. False when the header does not give a size.
+bool flat_image_header_size(const std::string& path, int& width, int& height);
+// Number of full decodes load_flat_image has started in this process.
+// Lets tests check that a cancelled large-image warning decoded nothing.
+int flat_image_decode_count();
+
 // One scaled preview of a PNG, JPEG, BMP, GIF, or OpenRaster file.
 // `max_edge` is the longer-side cap (no upscale). Returns false for anything
 // that is not a readable image of those types; `out.error` may be set and

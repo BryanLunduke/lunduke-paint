@@ -94,7 +94,8 @@ void Application::on_open(const Gio::Application::type_vec_files& files, const G
     }
     const std::string path = file->get_path();
     if (!path.empty()) {
-      window_->open_path(path);
+      // 0.9.5-2: held while a dialog or save is up, opened after it closes.
+      window_->request_open(path);
     }
   }
 }

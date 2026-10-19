@@ -246,6 +246,11 @@ MainWindow::MainWindow() {
 MainWindow::~MainWindow() {
   toolbox_.set_tool_options(nullptr);
   recovery_timer_.disconnect();
+  deferred_open_timer_.disconnect();
+  // The notebook outlives workspace_ during member destruction. Its pages
+  // are shown now, so removing them emits switch-page; that must not reach
+  // a workspace that is already gone.
+  tab_switch_conn_.disconnect();
   if (recovery_slot_) {
     std::lock_guard<std::mutex> lock(recovery_slot_->mu);
     recovery_slot_->window = nullptr;
@@ -399,7 +404,7 @@ void MainWindow::build_ui() {
   tab_bar_.set_scrollable(true);
   tab_bar_.set_show_border(false);
   tab_bar_.set_no_show_all(true);
-  tab_bar_.signal_switch_page().connect([this](Gtk::Widget*, guint page) {
+  tab_switch_conn_ = tab_bar_.signal_switch_page().connect([this](Gtk::Widget*, guint page) {
     if (switching_tabs_) {
       return;
     }
@@ -1108,6 +1113,24 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
     show_status("Opened " + Glib::path_get_basename(path));
     return true;
   }
+  // 0.9.5-2: warn about a large image from its header, before the pixels
+  // are decoded, and decode nothing on Cancel. Sizes over the hard limit are
+  // refused by load_flat_image itself, also from the header.
+  bool size_warned = false;
+  {
+    int header_w = 0;
+    int header_h = 0;
+    if (flat_image_header_size(path, header_w, header_h) && header_w <= kHardMaxSide &&
+        header_h <= kHardMaxSide && (header_w > kSoftMaxSide || header_h > kSoftMaxSide)) {
+      Gtk::MessageDialog warn(*this,
+                              "This image is larger than 8192 pixels on a side and may use a lot of memory.",
+                              false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
+      if (warn.run() != Gtk::RESPONSE_OK) {
+        return false;
+      }
+      size_warned = true;
+    }
+  }
   LoadedImage loaded = load_flat_image(path);
   if (!loaded.ok()) {
     Gtk::MessageDialog err(*this, "Could not open image.", false, Gtk::MESSAGE_ERROR,
@@ -1122,7 +1145,8 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
                             false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
     warn.run();
   }
-  if (loaded.width > kSoftMaxSide || loaded.height > kSoftMaxSide) {
+  if (!size_warned && (loaded.width > kSoftMaxSide || loaded.height > kSoftMaxSide)) {
+    // Only when the header gave no size: the decoded size is the fallback.
     Gtk::MessageDialog warn(*this,
                             "This image is larger than 8192 pixels on a side and may use a lot of memory.",
                             false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
@@ -1151,20 +1175,100 @@ bool MainWindow::open_path(const std::string& path, bool force_replace) {
   show_status("Opened " + Glib::path_get_basename(path));
   return true;
 }
+bool MainWindow::opens_must_wait() const {
+  if (busy_depth_ > 0) {
+    return true;
+  }
+  // gtk_dialog_run() makes every Paint dialog modal, including the file
+  // choosers and message boxes, so a visible modal toplevel means a dialog
+  // (and its nested main loop) is up.
+  bool modal = false;
+  GList* tops = gtk_window_list_toplevels();
+  for (GList* item = tops; item != nullptr; item = item->next) {
+    GtkWindow* top = GTK_WINDOW(item->data);
+    if (static_cast<const void*>(top) != static_cast<const void*>(gobj()) &&
+        gtk_widget_get_visible(GTK_WIDGET(top)) && gtk_window_get_modal(top)) {
+      modal = true;
+      break;
+    }
+  }
+  g_list_free(tops);
+  return modal;
+}
+
+void MainWindow::request_open(const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  if (deferred_opens_.empty() && !opens_must_wait()) {
+    open_path(path);
+    return;
+  }
+  deferred_opens_.push_back(path);
+  if (!deferred_open_timer_.connected()) {
+    deferred_open_timer_ = Glib::signal_timeout().connect(
+        sigc::mem_fun(*this, &MainWindow::drain_deferred_opens), 100);
+  }
+}
+
+bool MainWindow::drain_deferred_opens() {
+  // One path per tick, in arrival order. An open that shows its own dialog
+  // holds the rest until that dialog closes.
+  if (deferred_opens_.empty()) {
+    return false;
+  }
+  if (opens_must_wait()) {
+    return true;
+  }
+  const std::string path = deferred_opens_.front();
+  deferred_opens_.erase(deferred_opens_.begin());
+  open_path(path);
+  return !deferred_opens_.empty();
+}
+
+bool MainWindow::rebind_save_target() {
+  if (save_bound_ == nullptr || save_bound_ == document_ptr()) {
+    return true;
+  }
+  const int index = workspace_.index_of(save_bound_);
+  if (index < 0) {
+    Gtk::MessageDialog err(*this, "The picture being saved was closed.", false, Gtk::MESSAGE_ERROR,
+                           Gtk::BUTTONS_OK, true);
+    err.set_secondary_text("Nothing was written.");
+    err.run();
+    return false;
+  }
+  detach_document();
+  workspace_.set_active(index);
+  attach_active_document();
+  switching_tabs_ = true;
+  tab_bar_.set_current_page(index);
+  switching_tabs_ = false;
+  return true;
+}
+
 void MainWindow::action_save() {
-  // Same resolver as Save As. A known extension is written as itself. Anything
-  // else (no name, no extension, an unknown suffix) opens Save As.
-  const SaveTarget target = resolve_save_target(document().path(), ImageFormat::Unknown);
-  if (target.kind != SaveResolveKind::Ready) {
+  // Same resolver as Save As. A writable known extension is written as
+  // itself. Anything else (no name, no extension, an unknown suffix, or a
+  // format Paint only reads such as GIF) opens Save As, which proposes PNG.
+  if (save_needs_chooser(document().path())) {
     action_save_as();
     return;
   }
+  const SaveBinding binding(*this);
+  const SaveTarget target = resolve_save_target(document().path(), ImageFormat::Unknown);
   if (target.format == ImageFormat::Ora) {
     document().clear_companion_ora_path();
   }
   if (save_to_path(target.path, target.format)) {
+    if (!rebind_save_target()) {
+      return;
+    }
     if (!save_companion_ora()) {
       update_chrome();
+      return;
+    }
+    if (!rebind_save_target()) {
       return;
     }
     if (target.path != document().path()) {
@@ -1179,9 +1283,15 @@ void MainWindow::action_save() {
 }
 
 void MainWindow::action_save_as() {
+  // 0.9.5-2: everything below writes the document that was active when Save
+  // As started, even if something switched tabs while a dialog was up.
+  const SaveBinding binding(*this);
   std::string path;
   ImageFormat format = ImageFormat::Ora;
   if (!choose_save_path(path, format)) {
+    return;
+  }
+  if (!rebind_save_target()) {
     return;
   }
   bool also_ora = false;
@@ -1208,6 +1318,9 @@ void MainWindow::action_save_as() {
     if (response == Gtk::RESPONSE_CANCEL || response == Gtk::RESPONSE_DELETE_EVENT) {
       return;
     }
+    if (!rebind_save_target()) {
+      return;
+    }
     also_ora = response == Gtk::RESPONSE_YES;
     if (also_ora) {
       const bool exists = Glib::file_test(ora_path, Glib::FILE_TEST_EXISTS);
@@ -1225,6 +1338,9 @@ void MainWindow::action_save_as() {
         if (overwrite.run() != Gtk::RESPONSE_ACCEPT) {
           return;
         }
+        if (!rebind_save_target()) {
+          return;
+        }
       }
     }
   }
@@ -1232,6 +1348,9 @@ void MainWindow::action_save_as() {
     document().clear_companion_ora_path();
   }
   if (save_to_path(path, format, true)) {
+    if (!rebind_save_target()) {
+      return;
+    }
     bool ora_ok = true;
     if (also_ora) {
       document().set_companion_ora_path(ora_path);
@@ -1242,6 +1361,9 @@ void MainWindow::action_save_as() {
                                false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
         err.set_secondary_text(error);
         err.run();
+        if (!rebind_save_target()) {
+          return;
+        }
       }
     }
     const KeepOraDecision kept = decide_keep_ora(true, also_ora, ora_ok);
@@ -1334,8 +1456,9 @@ bool MainWindow::confirm_lose_document(Document& document) {
   }
   const int idx = workspace_.index_of(&document);
   const bool is_active = idx >= 0 && idx == workspace_.active_index();
-  const bool needs_chooser =
-      document.path().empty() || format_from_path(document.path()) == ImageFormat::Unknown;
+  // 0.9.5-2: GIF and other read-only formats need Save As too, so Save in
+  // this prompt never dead-ends on "GIF save is not supported".
+  const bool needs_chooser = save_needs_chooser(document.path());
   const CloseSavePlan plan = plan_close_save(answer, needs_chooser, false);
   if (plan.discard_edit) {
     if (is_active && active_tool_ != nullptr) {
@@ -1426,11 +1549,15 @@ bool MainWindow::commit_live_edits() {
 }
 
 bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool flatten_confirmed) {
+  if (!rebind_save_target()) {
+    return false;
+  }
   // Reject and warn before any stamp. Cancelling a chooser never reaches
   // here; cancelling one of these dialogs must leave the live edit up too.
   if (format == ImageFormat::Gif) {
     Gtk::MessageDialog err(*this, "GIF save is not supported.", false, Gtk::MESSAGE_ERROR,
                            Gtk::BUTTONS_OK, true);
+    err.set_secondary_text("Use Save As and choose PNG, JPEG, BMP or OpenRaster.");
     err.run();
     return false;
   }
@@ -1443,6 +1570,9 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool 
       Gtk::MessageDialog warn(*this, flat_save_message(format, multi, transparent), false,
                               Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK_CANCEL, true);
       if (warn.run() != Gtk::RESPONSE_OK) {
+        return false;
+      }
+      if (!rebind_save_target()) {
         return false;
       }
     }
@@ -1602,9 +1732,16 @@ bool MainWindow::choose_save_path(std::string& path, ImageFormat& format) {
     } else if (existing == ImageFormat::Bmp) {
       dialog.set_filter(filters.bmp);
       initial = ImageFormat::Bmp;
-    } else {
+    } else if (existing == ImageFormat::Ora) {
       dialog.set_filter(filters.ora);
       initial = ImageFormat::Ora;
+    } else {
+      // GIF, or a format opened read-only: propose the same title as PNG in
+      // the same folder (0.9.5-2).
+      dialog.set_current_folder(Glib::path_get_dirname(document().path()));
+      dialog.set_current_name(save_as_png_name(document().path()));
+      dialog.set_filter(filters.png);
+      initial = ImageFormat::Png;
     }
   } else {
     dialog.set_current_name("untitled.ora");
@@ -1736,6 +1873,8 @@ void MainWindow::copy_merged_to_clipboard() {
 }
 
 bool MainWindow::read_clipboard_image(int& w, int& h, std::vector<std::uint8_t>& rgba) {
+  // The clipboard waits iterate the main loop; hold outside opens meanwhile.
+  const BusyScope busy(*this);
   w = 0;
   h = 0;
   rgba.clear();
@@ -2251,6 +2390,10 @@ void MainWindow::rebuild_tabs() {
     box->pack_start(*label, Gtk::PACK_SHRINK);
     box->pack_start(*close, Gtk::PACK_SHRINK);
     box->show_all();
+    // The notebook is no_show_all, so show_all() on the window never reaches
+    // its pages. GtkNotebook draws no tab for a hidden page and will not make
+    // one current, so each page must be shown here (0.9.5-2).
+    page->show();
     tab_bar_.append_page(*page, *box);
   }
   if (workspace_.count() > 1) {
