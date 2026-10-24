@@ -37,6 +37,11 @@
     <category>RasterGraphics</category>
   </categories>
   <releases>
+    <release version="0.9.7" date="2026-10-24">
+      <description>
+        <p>Version bump for LCOS 0.9.7. No functional changes.</p>
+      </description>
+    </release>
     <release version="0.9.5" date="2026-10-16">
       <description>
         <p>Save through a symbolic link keeps the link and replaces the real file, temp files left by a crashed save are cleaned up, and opened and saved images are added to the desktop's recent files.</p>
