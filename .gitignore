@@ -1,5 +1,7 @@
 build/
 builddir/
+AppDir/
+*.AppImage
 *.o
 *.a
 *.so

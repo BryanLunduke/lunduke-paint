@@ -1,0 +1,110 @@
+name: Build AppImage
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            alpine_arch: x86_64
+          - arch: i686
+            runner: ubuntu-latest
+            platform: linux/386
+            alpine_arch: x86
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            alpine_arch: aarch64
+          - arch: armhf
+            runner: ubuntu-24.04-arm
+            platform: linux/arm/v7
+            alpine_arch: armv7
+    runs-on: ${{ matrix.runner }}
+    name: Build (${{ matrix.arch }})
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build in Alpine container
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.platform }} \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            alpine:3.20 sh -c '
+            set -e
+            apk add --no-cache \
+              build-base meson ninja pkgconf \
+              gtk+3.0-dev gtk+3.0 gtkmm3-dev cairomm-dev pangomm-dev libsigc++-dev \
+              gdk-pixbuf-dev gdk-pixbuf librsvg-dev librsvg \
+              libarchive-dev pugixml-dev \
+              hicolor-icon-theme adwaita-icon-theme \
+              glib-dev \
+              git wget xz squashfs-tools desktop-file-utils \
+              musl-utils patchelf shared-mime-info bash python3
+
+            meson setup build -Dprefix=/usr
+            meson compile -C build
+
+            rm -rf /tmp/lunduke-install
+            DESTDIR=/tmp/lunduke-install meson install -C build
+
+            chmod +x .github/build-appmenu-module.sh
+            ./.github/build-appmenu-module.sh
+
+            chmod +x .github/setup-appdir.sh
+            ./.github/setup-appdir.sh
+
+            chmod -R a+rwx AppDir
+            '
+
+      - name: Download appimagetool
+        run: |
+          wget -c "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.arch }}.AppImage" -O appimagetool
+          chmod +x appimagetool
+          ./appimagetool --appimage-extract
+
+      - name: Bundle AppImage
+        run: |
+          export PATH="${PWD}/squashfs-root/usr/bin:${PATH}"
+          ./squashfs-root/usr/bin/appimagetool \
+            --updateinformation "gh-releases-zsync|${{ github.repository_owner }}|${{ github.event.repository.name }}|continuous|${{ matrix.arch }}-${{ github.event.repository.name }}.AppImage.zsync" \
+            AppDir
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage-${{ matrix.arch }}
+          path: Lunduke_Paint-*.AppImage*
+
+  upload:
+    name: Create release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create release and upload
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep "version:" meson.build | head -1 | sed "s/.*version: *'\(.*\)'.*/\1/")
+          wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
+          chmod +x pyuploadtool-x86_64.AppImage
+          GITHUB_RELEASE_NAME="$VERSION" GITHUB_CONTINUOUS_RELEASE_TYPE=stable \
+            ./pyuploadtool-x86_64.AppImage **/Lunduke_Paint*.AppImage*
