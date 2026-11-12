@@ -37,6 +37,11 @@
     <category>RasterGraphics</category>
   </categories>
   <releases>
+    <release version="1.1.0" date="2026-11-12">
+      <description>
+        <p>Version bump for LCOS 1.1.0. No functional changes.</p>
+      </description>
+    </release>
     <release version="1.0.1" date="2026-11-02">
       <description>
         <p>Version bump for LCOS 1.0.1. No functional changes.</p>
