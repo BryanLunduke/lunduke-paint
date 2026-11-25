@@ -83,6 +83,12 @@ private:
   const Layer* display_layer(int index, const Layer* tool_override, int tool_index) const;
   void composite_node(const OraNode& node, std::uint8_t* dest, int dest_stride, Rect view,
                       const Layer* tool_override, int tool_index, int skip_index) const;
+  // Same group rules as composite_node, but each leaf is sampled once per
+  // output pixel. `dest` covers output rect (origin_x, origin_y, width, height).
+  void composite_node_scaled(const OraNode& node, std::uint8_t* dest, int dest_stride, int origin_x,
+                             int origin_y, int width, int height, Rect view, int out_w, int out_h,
+                             const Layer* tool_override, int tool_index, int skip_index,
+                             CompositeWork* work) const;
 
   std::vector<std::unique_ptr<Layer>> layers_;
   std::unique_ptr<Layer> tool_layer_;
