@@ -4,6 +4,7 @@
 
 #include "app/preferences.hpp"
 
+#include <gtkmm/checkbutton.h>
 #include <gtkmm/colorbutton.h>
 #include <gtkmm/dialog.h>
 #include <gtkmm/spinbutton.h>
@@ -24,6 +25,7 @@ private:
   Gtk::ColorButton checker_light_;
   Gtk::ColorButton checker_dark_;
   Gtk::SpinButton grid_threshold_;
+  Gtk::CheckButton howdy_;
 };
 
 }  // namespace lundukepaint

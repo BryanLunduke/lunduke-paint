@@ -42,6 +42,9 @@ lunduke_paint_core_sources = files(
   'src/doc/effect_preview.cpp',
   'src/doc/selection.cpp',
   'src/raster/fill.cpp',
+  'src/raster/gradient.cpp',
+  'src/raster/custom_brush.cpp',
+  'src/raster/palette.cpp',
   'src/raster/stroke.cpp',
   'src/raster/brush_tip.cpp',
   'src/raster/transform.cpp',
@@ -82,6 +85,7 @@ lunduke_paint_app_sources = files(
   'src/ui/history_panel.cpp',
   'src/ui/status_bar.cpp',
   'src/ui/dialogs_new.cpp',
+  'src/ui/open_thumbs.cpp',
   'src/tools/tool.cpp',
   'src/tools/tool_pencil.cpp',
   'src/tools/tool_brush.cpp',
@@ -171,6 +175,28 @@ test_blend = executable(
   install: false,
 )
 test('blend', test_blend)
+
+test_open_thumbs = executable(
+  'test_open_thumbs',
+  files('tests/test_open_thumbs.cpp', 'src/ui/open_thumbs.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, gdkpixbuf_dep, glib_dep],
+  install: false,
+)
+test('open_thumbs', test_open_thumbs, timeout: 30)
+
+# Not part of meson test: timings for the viewport expose, Normal blend, and
+# zoomed-out OpenRaster composite. Run build/bench_viewport by hand.
+bench_viewport = executable(
+  'bench_viewport',
+  files('tests/bench_viewport.cpp', 'src/ui/canvas_view.cpp', 'src/ui/intro_howdy.cpp',
+        'src/tools/selection_xform.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
 
 test_ora = executable(
   'test_ora',

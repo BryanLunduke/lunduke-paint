@@ -25,6 +25,7 @@ constexpr const char* kZoomOut = "zoom-out";
 constexpr const char* kZoom100 = "zoom-100";
 constexpr const char* kZoomFit = "zoom-fit";
 constexpr const char* kToggleGrid = "toggle-grid";
+constexpr const char* kSnapGrid = "snap-grid";
 
 constexpr const char* kCut = "cut";
 constexpr const char* kCopy = "copy";
@@ -47,6 +48,7 @@ constexpr const char* kRotateCcw = "rotate-ccw";
 constexpr const char* kFlipH = "flip-h";
 constexpr const char* kFlipV = "flip-v";
 constexpr const char* kClear = "clear";
+constexpr const char* kQuantize = "quantize";
 
 constexpr const char* kLayerNew = "layer-new";
 constexpr const char* kLayerDuplicate = "layer-duplicate";
@@ -66,6 +68,10 @@ constexpr const char* kAdjustPosterize = "adjust-posterize";
 constexpr const char* kEffectBlur = "effect-blur";
 constexpr const char* kEffectSharpen = "effect-sharpen";
 constexpr const char* kEffectEmboss = "effect-emboss";
+constexpr const char* kEffectTrace = "effect-trace";
+constexpr const char* kSelectionBrush = "selection-brush";
+constexpr const char* kClearBrush = "clear-brush";
+constexpr const char* kPatternFromSelection = "pattern-from-selection";
 
 constexpr const char* kPreferences = "preferences";
 constexpr const char* kShortcuts = "shortcuts";

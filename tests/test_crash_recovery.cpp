@@ -98,7 +98,12 @@ int main() {
   }
   g_setenv("XDG_CONFIG_HOME", config_dir, TRUE);
   lundukepaint::Preferences prefs;
+  errors += expect(!prefs.show_howdy, "howdy intro defaults off");
+  prefs.show_howdy = true;
   errors += expect(prefs.save(), "save preferences");
+  lundukepaint::Preferences loaded;
+  loaded.load();
+  errors += expect(loaded.show_howdy, "howdy preference round-trips");
   const std::string saved_dir = lundukepaint::Preferences::config_dir();
   errors += expect(stat(saved_dir.c_str(), &st) == 0, "config dir exists");
   errors += expect(S_ISDIR(st.st_mode) && (st.st_mode & 0777) == 0700, "config dir is mode 0700");

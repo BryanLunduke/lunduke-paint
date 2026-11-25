@@ -23,6 +23,9 @@ public:
   void set_colors(Color fg, Color bg);
   void set_pattern_index(int index);
   int pattern_index() const { return pattern_index_; }
+  // Adds swatches for patterns past the built-in 38. Extra swatches stay on
+  // the two existing rows and scroll sideways.
+  void ensure_count(int count);
 
   std::function<void(int index)> on_pattern_chosen;
 

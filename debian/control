@@ -6,6 +6,20 @@ Priority: optional
 Maintainer: LCOS <lcos@lunduke.com>
 Homepage: https://lunduke.com
 Standards-Version: 4.6.2
+Build-Depends: debhelper-compat (= 13),
+ meson,
+ ninja-build,
+ g++,
+ pkg-config,
+ libgtkmm-3.0-dev,
+ libcairomm-1.0-dev,
+ libgdk-pixbuf-2.0-dev,
+ libarchive-dev,
+ libpugixml-dev,
+ zlib1g-dev,
+ libpango1.0-dev,
+ xvfb,
+ xauth
 
 Package: lunduke-paint
 Architecture: amd64

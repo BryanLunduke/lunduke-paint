@@ -45,6 +45,7 @@ void Application::on_startup() {
   set_accels_for_action("win.zoom-100", {"<Primary>0"});
   set_accels_for_action("win.zoom-fit", {"<Primary>1"});
   set_accels_for_action("win.toggle-grid", {"<Primary>g"});
+  set_accels_for_action("win.snap-grid", {"<Primary><Shift>g"});
   set_accels_for_action("win.cut", {"<Primary>x"});
   set_accels_for_action("win.copy", {"<Primary>c"});
   set_accels_for_action("win.copy-merged", {"<Primary><Shift>c"});
@@ -78,8 +79,8 @@ void Application::on_activate() {
   const bool created = ensure_window();
   window_->present();
   if (created) {
-    // Fresh empty launch: play_intro() is a no-op unless LUNDUKEPAINT_HOWDY_INTRO
-    // is enabled. A second activation that only re-presents must not replay.
+    // Fresh empty launch: play_intro() is a no-op unless the Howdy preference
+    // is on (default off). A second activation must not replay it.
     window_->play_intro();
   }
 }

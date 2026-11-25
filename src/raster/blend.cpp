@@ -19,6 +19,40 @@ inline std::uint8_t clamp_u8(int v) {
   return static_cast<std::uint8_t>(v);
 }
 
+// Straight-alpha Normal over. `sa` is already scaled by layer opacity.
+// Identical to the historical blend_pixel Normal tail, including the
+// rounding, so a tight span loop can call it without drifting.
+inline void over_normal(std::uint8_t* dest, int sr, int sg, int sb, int sa) {
+  if (sa <= 0) {
+    return;
+  }
+  if (sa >= 255) {
+    dest[0] = static_cast<std::uint8_t>(sr);
+    dest[1] = static_cast<std::uint8_t>(sg);
+    dest[2] = static_cast<std::uint8_t>(sb);
+    dest[3] = 255;
+    return;
+  }
+  const int da = dest[3];
+  if (da <= 0) {
+    dest[0] = static_cast<std::uint8_t>(sr);
+    dest[1] = static_cast<std::uint8_t>(sg);
+    dest[2] = static_cast<std::uint8_t>(sb);
+    dest[3] = static_cast<std::uint8_t>(sa);
+    return;
+  }
+  const int inv = 255 - sa;
+  const int out_a = sa + (da * inv + 127) / 255;
+  if (out_a <= 0) {
+    dest[0] = dest[1] = dest[2] = dest[3] = 0;
+    return;
+  }
+  dest[0] = clamp_u8((sr * sa + dest[0] * da * inv / 255 + out_a / 2) / out_a);
+  dest[1] = clamp_u8((sg * sa + dest[1] * da * inv / 255 + out_a / 2) / out_a);
+  dest[2] = clamp_u8((sb * sa + dest[2] * da * inv / 255 + out_a / 2) / out_a);
+  dest[3] = clamp_u8(out_a);
+}
+
 inline int blend_channel(int src, int dst, BlendMode mode) {
   switch (mode) {
     case BlendMode::Multiply:
@@ -131,6 +165,10 @@ void blend_pixel(std::uint8_t* dest, const std::uint8_t* src, BlendMode mode, fl
     return;
   }
 
+  if (mode == BlendMode::Normal) {
+    over_normal(dest, src[0], src[1], src[2], sa);
+    return;
+  }
   const int br = blend_channel(src[0], dest[0], mode);
   const int bg = blend_channel(src[1], dest[1], mode);
   const int bb = blend_channel(src[2], dest[2], mode);
@@ -149,6 +187,94 @@ void blend_pixel(std::uint8_t* dest, const std::uint8_t* src, BlendMode mode, fl
   dest[3] = clamp_u8(out_a);
 }
 
+namespace {
+
+// Normal spans skip the per-pixel bounds checks and the blend-mode switch.
+// Opaque runs are copied; clear runs are skipped.
+void blend_normal_rect(std::uint8_t* dest, int dest_w, int dest_h, int dest_stride,
+                       const std::uint8_t* src, int src_w, int src_h, int src_stride, int offset_x,
+                       int offset_y, Rect view, float opacity) {
+  if (opacity <= 0.0f) {
+    return;
+  }
+  if (opacity > 1.0f) {
+    opacity = 1.0f;
+  }
+  const bool unit = opacity >= 0.999f;
+  int coverage[256];
+  if (!unit) {
+    for (int a = 0; a < 256; ++a) {
+      coverage[a] = static_cast<int>(static_cast<float>(a) * opacity + 0.5f);
+    }
+  }
+  const int vw = std::min(dest_w, view.w);
+  const int vh = std::min(dest_h, view.h);
+  for (int y = 0; y < vh; ++y) {
+    const int src_y = (view.y + y) - offset_y;
+    if (src_y < 0 || src_y >= src_h) {
+      continue;
+    }
+    const int x_begin = std::max(0, offset_x - view.x);
+    const int x_end = std::min(vw, offset_x + src_w - view.x);
+    if (x_begin >= x_end) {
+      continue;
+    }
+    const int src_x0 = (view.x + x_begin) - offset_x;
+    std::uint8_t* d = dest + static_cast<std::size_t>(y) * dest_stride +
+                      static_cast<std::size_t>(x_begin) * 4;
+    const std::uint8_t* s = src + static_cast<std::size_t>(src_y) * src_stride +
+                            static_cast<std::size_t>(src_x0) * 4;
+    const int n = x_end - x_begin;
+    if (unit) {
+      int i = 0;
+      while (i < n) {
+        const int sa = s[3];
+        if (sa == 255) {
+          int run = 1;
+          while (i + run < n && s[static_cast<std::size_t>(run) * 4 + 3] == 255) {
+            ++run;
+          }
+          std::memcpy(d, s, static_cast<std::size_t>(run) * 4);
+          i += run;
+          s += static_cast<std::size_t>(run) * 4;
+          d += static_cast<std::size_t>(run) * 4;
+          continue;
+        }
+        if (sa == 0) {
+          int run = 1;
+          while (i + run < n && s[static_cast<std::size_t>(run) * 4 + 3] == 0) {
+            ++run;
+          }
+          i += run;
+          s += static_cast<std::size_t>(run) * 4;
+          d += static_cast<std::size_t>(run) * 4;
+          continue;
+        }
+        over_normal(d, s[0], s[1], s[2], sa);
+        ++i;
+        s += 4;
+        d += 4;
+      }
+      continue;
+    }
+    for (int i = 0; i < n; ++i) {
+      const int sa = coverage[s[3]];
+      if (sa >= 255) {
+        d[0] = s[0];
+        d[1] = s[1];
+        d[2] = s[2];
+        d[3] = 255;
+      } else if (sa > 0) {
+        over_normal(d, s[0], s[1], s[2], sa);
+      }
+      s += 4;
+      d += 4;
+    }
+  }
+}
+
+}  // namespace
+
 void blend_layer_rect(std::uint8_t* dest, int dest_w, int dest_h, int dest_stride,
                       const std::uint8_t* src, int src_w, int src_h, int src_stride,
                       int offset_x, int offset_y, Rect view, BlendMode mode, float opacity) {
@@ -160,7 +286,11 @@ void blend_layer_rect(std::uint8_t* dest, int dest_w, int dest_h, int dest_strid
   if (vw < 1 || vh < 1) {
     return;
   }
-  const bool replace = mode == BlendMode::Normal && opacity >= 0.999f;
+  if (mode == BlendMode::Normal) {
+    blend_normal_rect(dest, dest_w, dest_h, dest_stride, src, src_w, src_h, src_stride, offset_x,
+                      offset_y, view, opacity);
+    return;
+  }
   for (int y = 0; y < vh; ++y) {
     const int src_y = (view.y + y) - offset_y;
     if (src_y < 0 || src_y >= src_h) {
@@ -176,22 +306,6 @@ void blend_layer_rect(std::uint8_t* dest, int dest_w, int dest_h, int dest_strid
         continue;
       }
       const std::uint8_t* s = srow + static_cast<std::size_t>(src_x) * 4;
-      if (replace && s[3] == 255) {
-        int run = 1;
-        while (x + run < vw) {
-          const int sx = (view.x + x + run) - offset_x;
-          if (sx < 0 || sx >= src_w) {
-            break;
-          }
-          if (srow[static_cast<std::size_t>(sx) * 4 + 3] != 255) {
-            break;
-          }
-          ++run;
-        }
-        std::memcpy(drow + static_cast<std::size_t>(x) * 4, s, static_cast<std::size_t>(run) * 4);
-        x += run;
-        continue;
-      }
       blend_pixel(drow + static_cast<std::size_t>(x) * 4, s, mode, opacity);
       ++x;
     }

@@ -218,6 +218,48 @@ bool group_affects_composite(const OraNode& node) {
   return false;
 }
 
+// Group opacity dissolve. Same rounding as the historical per-rect loop.
+void dissolve_group(std::uint8_t* dest, int dest_stride, const std::uint8_t* src, int src_stride,
+                    int width, int height, float opacity) {
+  const float inverse = 1.0f - opacity;
+  for (int y = 0; y < height; ++y) {
+    std::uint8_t* drow = dest + static_cast<std::size_t>(y) * dest_stride;
+    const std::uint8_t* srow = src + static_cast<std::size_t>(y) * src_stride;
+    for (int x = 0; x < width; ++x) {
+      std::uint8_t* d = drow + static_cast<std::size_t>(x) * 4;
+      const std::uint8_t* s = srow + static_cast<std::size_t>(x) * 4;
+      const float sa = static_cast<float>(s[3]) / 255.0f;
+      const float da = static_cast<float>(d[3]) / 255.0f;
+      const float ra = da * inverse + sa * opacity;
+      int out_a = static_cast<int>(ra * 255.0f + 0.5f);
+      if (out_a < 0) {
+        out_a = 0;
+      }
+      if (out_a > 255) {
+        out_a = 255;
+      }
+      if (out_a == 0) {
+        d[0] = d[1] = d[2] = d[3] = 0;
+        continue;
+      }
+      for (int c = 0; c < 3; ++c) {
+        const float sp = static_cast<float>(s[c]) * sa;
+        const float dp = static_cast<float>(d[c]) * da;
+        const float mixed = (dp * inverse + sp * opacity) / ra;
+        int rounded = static_cast<int>(mixed + 0.5f);
+        if (rounded < 0) {
+          rounded = 0;
+        }
+        if (rounded > 255) {
+          rounded = 255;
+        }
+        d[c] = static_cast<std::uint8_t>(rounded);
+      }
+      d[3] = static_cast<std::uint8_t>(out_a);
+    }
+  }
+}
+
 void copy_layer_into(std::uint8_t* dest, int dest_w, int dest_stride, Rect dest_canvas,
                      const Layer& layer) {
   const int ox = layer.offset_x();
@@ -287,46 +329,9 @@ void LayerStack::composite_node(const OraNode& node, std::uint8_t* dest, int des
       }
       return;
     }
-    const float opacity = node.opacity;
-    const float inverse = 1.0f - opacity;
     // Dissolve in premultiplied space so a half-opaque red stays red
     // (alpha 128), matching a group blended over the original backdrop.
-    for (int y = 0; y < view.h; ++y) {
-      std::uint8_t* drow = dest + static_cast<std::size_t>(y) * dest_stride;
-      const std::uint8_t* srow = child.data() + static_cast<std::size_t>(y) * child_stride;
-      for (int x = 0; x < view.w; ++x) {
-        std::uint8_t* d = drow + static_cast<std::size_t>(x) * 4;
-        const std::uint8_t* s = srow + static_cast<std::size_t>(x) * 4;
-        const float sa = static_cast<float>(s[3]) / 255.0f;
-        const float da = static_cast<float>(d[3]) / 255.0f;
-        const float ra = da * inverse + sa * opacity;
-        int out_a = static_cast<int>(ra * 255.0f + 0.5f);
-        if (out_a < 0) {
-          out_a = 0;
-        }
-        if (out_a > 255) {
-          out_a = 255;
-        }
-        if (out_a == 0) {
-          d[0] = d[1] = d[2] = d[3] = 0;
-          continue;
-        }
-        for (int c = 0; c < 3; ++c) {
-          const float sp = static_cast<float>(s[c]) * sa;
-          const float dp = static_cast<float>(d[c]) * da;
-          const float mixed = (dp * inverse + sp * opacity) / ra;
-          int rounded = static_cast<int>(mixed + 0.5f);
-          if (rounded < 0) {
-            rounded = 0;
-          }
-          if (rounded > 255) {
-            rounded = 255;
-          }
-          d[c] = static_cast<std::uint8_t>(rounded);
-        }
-        d[3] = static_cast<std::uint8_t>(out_a);
-      }
-    }
+    dissolve_group(dest, dest_stride, child.data(), child_stride, view.w, view.h, node.opacity);
     return;
   }
   blend_layer_rect(dest, view.w, view.h, dest_stride, child.data(), view.w, view.h, child_stride,
@@ -368,6 +373,94 @@ Color LayerStack::composite_pixel(int x, int y, const Layer* tool_override, int 
   return {dest[0], dest[1], dest[2], dest[3]};
 }
 
+void LayerStack::composite_node_scaled(const OraNode& node, std::uint8_t* dest, int dest_stride,
+                                      int origin_x, int origin_y, int width, int height, Rect view,
+                                      int out_w, int out_h, const Layer* tool_override, int tool_index,
+                                      int skip_index, CompositeWork* work) const {
+  if (dest == nullptr || width < 1 || height < 1 || view.empty() || out_w < 1 || out_h < 1) {
+    return;
+  }
+  if (!node.is_stack) {
+    if (node.layer_index < 0 || node.layer_index >= count() || node.layer_index == skip_index) {
+      return;
+    }
+    const Layer& meta = at(node.layer_index);
+    if (!meta.visible()) {
+      return;
+    }
+    const Layer* src = display_layer(node.layer_index, tool_override, tool_index);
+    const bool replace = meta.blend() == BlendMode::Normal && meta.opacity() >= 0.999f;
+    for (int ly = 0; ly < height; ++ly) {
+      const int oy = origin_y + ly;
+      std::uint8_t* row = dest + static_cast<std::size_t>(ly) * static_cast<std::size_t>(dest_stride);
+      for (int lx = 0; lx < width; ++lx) {
+        const int ox = origin_x + lx;
+        const int sx =
+            view.x + static_cast<int>((static_cast<long long>(ox) * view.w + view.w / 2) / out_w);
+        const int sy =
+            view.y + static_cast<int>((static_cast<long long>(oy) * view.h + view.h / 2) / out_h);
+        const int cx = std::clamp(sx, view.x, view.x2() - 1);
+        const int cy = std::clamp(sy, view.y, view.y2() - 1);
+        const int px = cx - meta.offset_x();
+        const int py = cy - meta.offset_y();
+        if (px < 0 || py < 0 || px >= src->width() || py >= src->height()) {
+          continue;
+        }
+        const std::uint8_t* s = src->pixels() + static_cast<std::size_t>(py) * src->stride() +
+                                static_cast<std::size_t>(px) * 4;
+        if (work != nullptr) {
+          ++work->samples;
+        }
+        std::uint8_t* pixel = row + static_cast<std::size_t>(lx) * 4;
+        if (replace && s[3] == 255) {
+          std::memcpy(pixel, s, 4);
+        } else {
+          blend_pixel(pixel, s, meta.blend(), meta.opacity());
+        }
+      }
+    }
+    return;
+  }
+  if (!node.visible || node.opacity <= 0.0f) {
+    return;
+  }
+  std::vector<std::uint8_t> child(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4,
+                                  0);
+  const int child_stride = width * 4;
+  if (!node.isolate) {
+    for (int y = 0; y < height; ++y) {
+      std::memcpy(child.data() + static_cast<std::size_t>(y) * child_stride,
+                  dest + static_cast<std::size_t>(y) * dest_stride,
+                  static_cast<std::size_t>(width) * 4);
+    }
+  }
+  for (int i = static_cast<int>(node.children.size()) - 1; i >= 0; --i) {
+    composite_node_scaled(node.children[static_cast<std::size_t>(i)], child.data(), child_stride,
+                          origin_x, origin_y, width, height, view, out_w, out_h, tool_override,
+                          tool_index, skip_index, work);
+  }
+  if (!node.isolate && node.blend == BlendMode::Normal) {
+    if (node.opacity >= 0.999f) {
+      for (int y = 0; y < height; ++y) {
+        std::memcpy(dest + static_cast<std::size_t>(y) * dest_stride,
+                    child.data() + static_cast<std::size_t>(y) * child_stride,
+                    static_cast<std::size_t>(width) * 4);
+      }
+      return;
+    }
+    dissolve_group(dest, dest_stride, child.data(), child_stride, width, height, node.opacity);
+    return;
+  }
+  for (int y = 0; y < height; ++y) {
+    std::uint8_t* drow = dest + static_cast<std::size_t>(y) * dest_stride;
+    const std::uint8_t* srow = child.data() + static_cast<std::size_t>(y) * child_stride;
+    for (int x = 0; x < width; ++x) {
+      blend_pixel(drow + static_cast<std::size_t>(x) * 4, srow + static_cast<std::size_t>(x) * 4,
+                  node.blend, node.opacity);
+    }
+  }
+}
+
 void LayerStack::composite_scaled(std::uint8_t* dest, int dest_stride, Rect view, int out_w, int out_h,
                                   const Layer* tool_override, int tool_index, int skip_index,
                                   Rect out_rect, CompositeWork* work) const {
@@ -384,7 +477,18 @@ void LayerStack::composite_scaled(std::uint8_t* dest, int dest_stride, Rect view
   if (out_rect.empty()) {
     return;
   }
-  const bool ora = has_ora_stack_ && group_affects_composite(ora_stack_);
+  if (has_ora_stack_ && group_affects_composite(ora_stack_)) {
+    for (int oy = out_rect.y; oy < out_rect.y2(); ++oy) {
+      std::memset(dest + static_cast<std::size_t>(oy) * static_cast<std::size_t>(dest_stride) +
+                      static_cast<std::size_t>(out_rect.x) * 4,
+                  0, static_cast<std::size_t>(out_rect.w) * 4);
+    }
+    std::uint8_t* sub = dest + static_cast<std::size_t>(out_rect.y) * static_cast<std::size_t>(dest_stride) +
+                        static_cast<std::size_t>(out_rect.x) * 4;
+    composite_node_scaled(ora_stack_, sub, dest_stride, out_rect.x, out_rect.y, out_rect.w, out_rect.h,
+                          view, out_w, out_h, tool_override, tool_index, skip_index, work);
+    return;
+  }
   for (int oy = out_rect.y; oy < out_rect.y2(); ++oy) {
     std::uint8_t* row = dest + static_cast<std::size_t>(oy) * static_cast<std::size_t>(dest_stride);
     for (int ox = out_rect.x; ox < out_rect.x2(); ++ox) {
@@ -393,13 +497,6 @@ void LayerStack::composite_scaled(std::uint8_t* dest, int dest_stride, Rect view
       const int cx = std::clamp(sx, view.x, view.x2() - 1);
       const int cy = std::clamp(sy, view.y, view.y2() - 1);
       std::uint8_t* pixel = row + static_cast<std::size_t>(ox) * 4;
-      if (ora) {
-        composite_rect(pixel, 4, Rect{cx, cy, 1, 1}, tool_override, tool_index, skip_index);
-        if (work != nullptr) {
-          work->samples += std::max(1, count());
-        }
-        continue;
-      }
       pixel[0] = pixel[1] = pixel[2] = pixel[3] = 0;
       for (int i = 0; i < count(); ++i) {
         if (i == skip_index) {

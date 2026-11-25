@@ -3,6 +3,7 @@
 #include "raster/pattern.hpp"
 
 #include <algorithm>
+#include <vector>
 
 namespace lundukepaint {
 namespace {
@@ -51,18 +52,79 @@ constexpr Pattern kPatterns[kPatternCount] = {
 
 }  // namespace
 
+std::vector<Pattern> g_custom;
+
+int pattern_count() {
+  return kBuiltinPatternCount + static_cast<int>(g_custom.size());
+}
+
+void set_custom_patterns(const std::vector<Pattern>& patterns) {
+  g_custom = patterns;
+}
+
+const std::vector<Pattern>& custom_patterns() {
+  return g_custom;
+}
+
+int add_custom_pattern(const Pattern& pattern) {
+  g_custom.push_back(pattern);
+  return pattern_count() - 1;
+}
+
 const Pattern& pattern_at(int index) {
-  return kPatterns[static_cast<std::size_t>(clamp_pattern_index(index))];
+  const int clamped = clamp_pattern_index(index);
+  if (clamped < kBuiltinPatternCount) {
+    return kPatterns[static_cast<std::size_t>(clamped)];
+  }
+  return g_custom[static_cast<std::size_t>(clamped - kBuiltinPatternCount)];
 }
 
 int clamp_pattern_index(int index) {
+  const int count = pattern_count();
   if (index < 0) {
     return 0;
   }
-  if (index >= kPatternCount) {
-    return kPatternCount - 1;
+  if (count < 1) {
+    return 0;
+  }
+  if (index >= count) {
+    return count - 1;
   }
   return index;
+}
+
+Pattern pattern_from_rgba(const std::uint8_t* rgba, int width, int height, int stride, Color paper) {
+  Pattern pattern{};
+  if (rgba == nullptr || width < 1 || height < 1) {
+    return pattern;
+  }
+  for (int cell_y = 0; cell_y < 8; ++cell_y) {
+    std::uint8_t row = 0;
+    const int y0 = (cell_y * height) / 8;
+    const int y1 = std::max(y0 + 1, ((cell_y + 1) * height) / 8);
+    for (int cell_x = 0; cell_x < 8; ++cell_x) {
+      const int x0 = (cell_x * width) / 8;
+      const int x1 = std::max(x0 + 1, ((cell_x + 1) * width) / 8);
+      int ink = 0;
+      int total = 0;
+      for (int y = y0; y < y1 && y < height; ++y) {
+        const std::uint8_t* src = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+        for (int x = x0; x < x1 && x < width; ++x) {
+          const std::uint8_t* p = src + static_cast<std::size_t>(x) * 4;
+          const Color c{p[0], p[1], p[2], p[3]};
+          ++total;
+          if (c.a > 16 && color_chebyshev(c, paper) > 24) {
+            ++ink;
+          }
+        }
+      }
+      if (total > 0 && ink * 2 >= total) {
+        row = static_cast<std::uint8_t>(row | (0x80u >> cell_x));
+      }
+    }
+    pattern.rows[cell_y] = row;
+  }
+  return pattern;
 }
 
 void apply_pattern_mask(std::uint8_t* rgba, int width, int height, int stride,

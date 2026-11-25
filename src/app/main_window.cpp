@@ -20,13 +20,16 @@
 #include "io/save_target.hpp"
 #include "io/crash_recovery.hpp"
 #include "raster/brush_tip.hpp"
+#include "raster/custom_brush.hpp"
 #include "raster/effects.hpp"
+#include "raster/palette.hpp"
 #include "raster/transform.hpp"
 #include "ui/dialogs_adjust.hpp"
 #include "ui/dialogs_image.hpp"
 #include "ui/dialogs_new.hpp"
 #include "ui/dialogs_prefs.hpp"
 #include "ui/intro_howdy.hpp"
+#include "ui/open_thumbs.hpp"
 #include "ui/toolbox_catalog.hpp"
 #include "tools/tools.hpp"
 
@@ -109,6 +112,7 @@ MainWindow::MainWindow() {
   Glib::add_exception_handler(sigc::mem_fun(*this, &MainWindow::on_unhandled_exception));
   last_edit_us_ = g_get_monotonic_time();
   prefs_.load();
+  set_custom_patterns(prefs_.custom_patterns);
   auto startup = Document::create(prefs_.default_width, prefs_.default_height, Color::white());
   startup->history().set_depth(prefs_.undo_limit);
   startup->history().set_byte_cap(suggested_undo_bytes());
@@ -129,6 +133,7 @@ MainWindow::MainWindow() {
   add_action(actions::kZoom100, [this]() { canvas_.set_zoom(1.0); });
   add_action(actions::kZoomFit, sigc::mem_fun(*this, &MainWindow::action_zoom_fit));
   add_action(actions::kToggleGrid, sigc::mem_fun(*this, &MainWindow::action_toggle_grid));
+  add_action(actions::kSnapGrid, sigc::mem_fun(*this, &MainWindow::action_snap_grid));
   cut_action_ = add_action(actions::kCut, sigc::mem_fun(*this, &MainWindow::action_cut));
   copy_action_ = add_action(actions::kCopy, sigc::mem_fun(*this, &MainWindow::action_copy));
   copy_merged_action_ = add_action(actions::kCopyMerged, sigc::mem_fun(*this, &MainWindow::action_copy_merged));
@@ -150,6 +155,7 @@ MainWindow::MainWindow() {
   add_action(actions::kFlipH, sigc::mem_fun(*this, &MainWindow::action_flip_h));
   add_action(actions::kFlipV, sigc::mem_fun(*this, &MainWindow::action_flip_v));
   add_action(actions::kClear, sigc::mem_fun(*this, &MainWindow::action_clear));
+  add_action(actions::kQuantize, sigc::mem_fun(*this, &MainWindow::action_quantize));
   add_action(actions::kPrint, sigc::mem_fun(*this, &MainWindow::action_print));
   add_action(actions::kLayerNew, sigc::mem_fun(*this, &MainWindow::action_layer_new));
   add_action(actions::kLayerDuplicate, sigc::mem_fun(*this, &MainWindow::action_layer_duplicate));
@@ -173,6 +179,11 @@ MainWindow::MainWindow() {
   add_action(actions::kEffectBlur, sigc::mem_fun(*this, &MainWindow::action_effect_blur));
   add_action(actions::kEffectSharpen, sigc::mem_fun(*this, &MainWindow::action_effect_sharpen));
   add_action(actions::kEffectEmboss, sigc::mem_fun(*this, &MainWindow::action_effect_emboss));
+  add_action(actions::kEffectTrace, sigc::mem_fun(*this, &MainWindow::action_effect_trace));
+  add_action(actions::kSelectionBrush, sigc::mem_fun(*this, &MainWindow::action_selection_brush));
+  add_action(actions::kClearBrush, sigc::mem_fun(*this, &MainWindow::action_clear_brush));
+  add_action(actions::kPatternFromSelection,
+             sigc::mem_fun(*this, &MainWindow::action_pattern_from_selection));
   add_action(actions::kPreferences, sigc::mem_fun(*this, &MainWindow::action_preferences));
   add_action(actions::kShortcuts, sigc::mem_fun(*this, &MainWindow::action_shortcuts));
   add_action(actions::kAbout, sigc::mem_fun(*this, &MainWindow::action_about));
@@ -331,6 +342,7 @@ void MainWindow::build_ui() {
   toolbox_.on_edit_color = [this](bool background) { choose_color(background); };
 
   pattern_strip_.on_pattern_chosen = [this](int index) { set_pattern_index(index); };
+  pattern_strip_.ensure_count(pattern_count());
   colors_panel_.on_swatch = [this](Color color, bool background) {
     if (background) {
       document().set_background(color);
@@ -548,24 +560,16 @@ bool MainWindow::adopt_document(std::unique_ptr<Document> document, bool prefer_
 }
 
 void MainWindow::play_intro() {
-#if LUNDUKEPAINT_HOWDY_INTRO
-  if (intro_played_) {
+  // Preference, default off. A fresh empty canvas stays blank until it is on.
+  if (!prefs_.show_howdy || intro_played_) {
+    return;
+  }
+  const Document* doc = workspace_.active_ptr();
+  if (doc == nullptr || doc->dirty() || !doc->path().empty() || doc->history().can_undo()) {
     return;
   }
   intro_played_ = true;
-  const Document* doc = workspace_.active_ptr();
-  if (doc == nullptr) {
-    return;
-  }
-  // Only a genuinely untouched, unsaved, empty canvas gets the greeting.
-  if (doc->dirty() || !doc->path().empty() || doc->history().can_undo()) {
-    return;
-  }
   canvas_.start_intro();
-#else
-  // Howdy intro shelved (LUNDUKEPAINT_HOWDY_INTRO=0): fresh launch stays blank.
-  (void)intro_played_;
-#endif
 }
 
 void MainWindow::show_status(const Glib::ustring& message) {
@@ -1653,6 +1657,9 @@ std::string MainWindow::choose_open_path() {
   dialog.set_preview_widget(preview);
   dialog.set_use_preview_label(false);
   dialog.set_preview_widget_active(false);
+  dialog.set_default_size(760, 560);
+  OpenThumbGrid thumbs(dialog);
+  dialog.set_extra_widget(thumbs);
   dialog.signal_update_preview().connect([&dialog, &preview]() {
     try {
       preview.clear();
@@ -2053,6 +2060,11 @@ void MainWindow::action_toggle_grid() {
   show_status(canvas_.grid_visible() ? "Grid on" : "Grid off");
 }
 
+void MainWindow::action_snap_grid() {
+  grid_snap_ = !grid_snap_;
+  show_status(grid_snap_ ? "Snap to 8-pixel grid on" : "Snap to grid off");
+}
+
 bool MainWindow::warn_size(int width, int height) {
   if (width < 1 || height < 1) {
     return false;
@@ -2255,6 +2267,22 @@ void MainWindow::action_flip_v() {
   xform.new_w = xform.old_w;
   xform.new_h = xform.old_h;
   commit_stack_transform("Flip vertical", xform);
+}
+
+void MainWindow::action_quantize() {
+  QuantizeDialog dialog(*this);
+  if (dialog.run() != Gtk::RESPONSE_OK) {
+    return;
+  }
+  const RetroPalette& palette = retro_palette_at(dialog.palette_index());
+  const int dither = dialog.dither_index();
+  const DitherKind kind = dither <= 0 ? DitherKind::None
+                                      : (dither == 2 ? DitherKind::FloydSteinberg : DitherKind::Ordered);
+  const Color* colors = palette.colors;
+  const int count = palette.count;
+  apply_layer_effect("Quantize", [colors, count, kind](std::uint8_t* px, int w, int h, int stride) {
+    quantize_palette(px, w, h, stride, colors, count, kind);
+  });
 }
 
 void MainWindow::action_clear() {
@@ -2621,6 +2649,150 @@ void MainWindow::action_effect_sharpen() {
   });
 }
 
+void MainWindow::action_pattern_from_selection() {
+  if (document_ptr() == nullptr) {
+    return;
+  }
+  const Selection& sel = document().selection();
+  if (sel.empty() || sel.inverted()) {
+    show_status("Select an area to turn into a pattern");
+    return;
+  }
+  int bw = 0;
+  int bh = 0;
+  std::vector<std::uint8_t> pixels;
+  if (sel.floating()) {
+    bw = sel.float_w();
+    bh = sel.float_h();
+    pixels.assign(static_cast<std::size_t>(bw) * bh * 4, 0);
+    for (int y = 0; y < bh; ++y) {
+      for (int x = 0; x < bw; ++x) {
+        const Color c = sel.float_covers(x, y) ? sel.float_pixel(x, y) : Color::transparent();
+        std::uint8_t* p = pixels.data() + (static_cast<std::size_t>(y) * bw + x) * 4;
+        p[0] = c.r;
+        p[1] = c.g;
+        p[2] = c.b;
+        p[3] = c.a;
+      }
+    }
+  } else {
+    const Rect bounds = rect_intersect(sel.bounds(), Rect{0, 0, document().width(), document().height()});
+    if (bounds.empty()) {
+      show_status("Select an area to turn into a pattern");
+      return;
+    }
+    bw = bounds.w;
+    bh = bounds.h;
+    pixels.assign(static_cast<std::size_t>(bw) * bh * 4, 0);
+    const Layer& layer = document().layers().active_layer();
+    for (int y = 0; y < bh; ++y) {
+      for (int x = 0; x < bw; ++x) {
+        const int cx = bounds.x + x;
+        const int cy = bounds.y + y;
+        Color c = Color::transparent();
+        if (sel.contains(cx, cy)) {
+          const int lx = cx - layer.offset_x();
+          const int ly = cy - layer.offset_y();
+          if (lx >= 0 && ly >= 0 && lx < layer.width() && ly < layer.height()) {
+            c = layer.pixel(lx, ly);
+          }
+        }
+        std::uint8_t* p = pixels.data() + (static_cast<std::size_t>(y) * bw + x) * 4;
+        p[0] = c.r;
+        p[1] = c.g;
+        p[2] = c.b;
+        p[3] = c.a;
+      }
+    }
+  }
+  const Pattern made = pattern_from_rgba(pixels.data(), bw, bh, bw * 4, document().background());
+  const int index = add_custom_pattern(made);
+  prefs_.custom_patterns = custom_patterns();
+  prefs_.save();
+  pattern_strip_.ensure_count(pattern_count());
+  set_pattern_index(index);
+  show_status("Added an 8×8 pattern");
+}
+
+void MainWindow::action_clear_brush() {
+  brush_image_ = {};
+  show_status("Custom brush cleared");
+}
+
+void MainWindow::action_selection_brush() {
+  if (document_ptr() == nullptr) {
+    return;
+  }
+  const Selection& sel = document().selection();
+  if (sel.empty()) {
+    show_status("Select an area to pick up as a brush");
+    return;
+  }
+  const Color background = document().background();
+  std::vector<std::uint8_t> pixels;
+  int bw = 0;
+  int bh = 0;
+  if (sel.floating()) {
+    bw = sel.float_w();
+    bh = sel.float_h();
+    pixels.assign(static_cast<std::size_t>(bw) * static_cast<std::size_t>(bh) * 4, 0);
+    for (int y = 0; y < bh; ++y) {
+      for (int x = 0; x < bw; ++x) {
+        Color c = sel.float_covers(x, y) ? sel.float_pixel(x, y) : Color::transparent();
+        std::uint8_t* p = pixels.data() + (static_cast<std::size_t>(y) * bw + x) * 4;
+        p[0] = c.r;
+        p[1] = c.g;
+        p[2] = c.b;
+        p[3] = c.a;
+      }
+    }
+  } else {
+    const Rect bounds = rect_intersect(sel.bounds(), Rect{0, 0, document().width(), document().height()});
+    if (bounds.empty()) {
+      show_status("Select an area to pick up as a brush");
+      return;
+    }
+    bw = bounds.w;
+    bh = bounds.h;
+    pixels.assign(static_cast<std::size_t>(bw) * static_cast<std::size_t>(bh) * 4, 0);
+    const Layer& layer = document().layers().active_layer();
+    for (int y = 0; y < bh; ++y) {
+      for (int x = 0; x < bw; ++x) {
+        const int cx = bounds.x + x;
+        const int cy = bounds.y + y;
+        Color c = Color::transparent();
+        if (sel.contains(cx, cy)) {
+          const int lx = cx - layer.offset_x();
+          const int ly = cy - layer.offset_y();
+          if (lx >= 0 && ly >= 0 && lx < layer.width() && ly < layer.height()) {
+            c = layer.pixel(lx, ly);
+          }
+        }
+        std::uint8_t* p = pixels.data() + (static_cast<std::size_t>(y) * bw + x) * 4;
+        p[0] = c.r;
+        p[1] = c.g;
+        p[2] = c.b;
+        p[3] = c.a;
+      }
+    }
+  }
+  brush_image_ = custom_brush_from_rgba(pixels.data(), bw, bh, bw * 4, background);
+  if (brush_image_.empty()) {
+    show_status("Could not pick up a brush");
+    return;
+  }
+  show_status(Glib::ustring::compose("Custom brush %1×%2 — background color is transparent",
+                                     brush_image_.width, brush_image_.height));
+}
+
+void MainWindow::action_effect_trace() {
+  const Color ink = document().foreground().a == 0 ? Color::black() : document().foreground();
+  const Color paper = document().background();
+  apply_layer_effect("Trace edges", [ink, paper](std::uint8_t* px, int w, int h, int stride) {
+    trace_edges_rgba(px, w, h, stride, ink, paper);
+  });
+}
+
 void MainWindow::action_effect_emboss() {
   apply_layer_effect("Emboss", [](std::uint8_t* px, int w, int h, int stride) {
     std::vector<std::uint8_t> src(static_cast<std::size_t>(h) * static_cast<std::size_t>(stride));
@@ -2631,6 +2803,9 @@ void MainWindow::action_effect_emboss() {
 
 void MainWindow::apply_preferences() {
   canvas_.set_checker_colors(prefs_.checker_light, prefs_.checker_dark);
+  if (prefs_.show_howdy) {
+    play_intro();
+  }
   canvas_.set_grid_threshold(prefs_.grid_threshold);
   for (int i = 0; i < workspace_.count(); ++i) {
     workspace_.at(i).history().set_depth(prefs_.undo_limit);

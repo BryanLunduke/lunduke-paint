@@ -45,8 +45,11 @@ int main(int argc, char** argv) {
   const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
   expect(!data.empty(), "production binary is empty");
 
+  // "/workspace/" is an absolute leaked build directory. Matching the shorter
+  // "/workspace" also hits the source file doc/workspace.cpp once debug info
+  // is present, which a plain package build still has when the test runs.
   const char* forbidden[] = {
-      "/workspace",
+      "/workspace/",
       "LUNDUKEPAINT_REQUIRE_DISPLAY",
       "REVIEW_R3_SOURCE",
       "REVIEW_R6_SOURCE",

@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace lundukepaint {
 
@@ -25,9 +26,18 @@ struct Pattern {
 };
 
 inline constexpr int kPatternCount = 38;
+inline constexpr int kBuiltinPatternCount = kPatternCount;
 
 const Pattern& pattern_at(int index);
 int clamp_pattern_index(int index);
+// Built-in patterns plus any the user picked up from a selection.
+int pattern_count();
+void set_custom_patterns(const std::vector<Pattern>& patterns);
+const std::vector<Pattern>& custom_patterns();
+int add_custom_pattern(const Pattern& pattern);
+
+// 8×8 pattern. A cell is set when most of its samples differ from `paper`.
+Pattern pattern_from_rgba(const std::uint8_t* rgba, int width, int height, int stride, Color paper);
 
 // Apply an 8×8 pattern over a 0/255 mask. The mask covers
 // [mask_x, mask_x+mask_w) × [mask_y, mask_y+mask_h) in buffer space.

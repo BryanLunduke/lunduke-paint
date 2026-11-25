@@ -585,6 +585,60 @@ int main() {
     unlink(anim.c_str());
   }
 
+  {
+    auto doc = lundukepaint::Document::create(8, 6, lundukepaint::Color{10, 20, 30, 255}, "Back");
+    lundukepaint::Layer& back = doc->layers().active_layer();
+    for (int y = 0; y < 6; ++y) {
+      for (int x = 0; x < 8; ++x) {
+        back.set_pixel(x, y, lundukepaint::Color{static_cast<std::uint8_t>(20 + x * 20),
+                                                 static_cast<std::uint8_t>(30 + y * 15), 40, 255});
+      }
+    }
+    auto top = std::make_unique<lundukepaint::Layer>(8, 6, lundukepaint::Color::transparent(), "Top");
+    for (int y = 0; y < 6; ++y) {
+      for (int x = 0; x < 8; ++x) {
+        const int a = (x + y) % 3 == 0 ? 0 : 180;
+        top->set_pixel(x, y, lundukepaint::Color{0, 0, static_cast<std::uint8_t>(80 + x * 10),
+                                                 static_cast<std::uint8_t>(a)});
+      }
+    }
+    top->set_opacity(0.7f);
+    doc->layers().insert(1, std::move(top));
+    lundukepaint::OraNode root;
+    root.is_stack = true;
+    lundukepaint::OraNode group;
+    group.is_stack = true;
+    group.opacity = 0.55f;
+    lundukepaint::OraNode leaf;
+    leaf.layer_index = 1;
+    group.children.push_back(leaf);
+    lundukepaint::OraNode backdrop;
+    backdrop.layer_index = 0;
+    root.children.push_back(group);
+    root.children.push_back(backdrop);
+    doc->set_ora_stack(std::move(root));
+
+    constexpr int kOutW = 5;
+    constexpr int kOutH = 4;
+    const lundukepaint::Rect view{0, 0, 8, 6};
+    std::vector<std::uint8_t> scaled(static_cast<std::size_t>(kOutW) * kOutH * 4, 9);
+    doc->layers().composite_scaled(scaled.data(), kOutW * 4, view, kOutW, kOutH);
+    bool match = true;
+    for (int oy = 0; oy < kOutH && match; ++oy) {
+      for (int ox = 0; ox < kOutW; ++ox) {
+        const int sx = view.x + static_cast<int>((static_cast<long long>(ox) * view.w + view.w / 2) / kOutW);
+        const int sy = view.y + static_cast<int>((static_cast<long long>(oy) * view.h + view.h / 2) / kOutH);
+        std::uint8_t pixel[4] = {};
+        doc->layers().composite_rect(pixel, 4, lundukepaint::Rect{sx, sy, 1, 1});
+        const std::uint8_t* got = scaled.data() + (static_cast<std::size_t>(oy) * kOutW + ox) * 4;
+        if (std::memcmp(got, pixel, 4) != 0) {
+          match = false;
+        }
+      }
+    }
+    errors += expect(match, "zoomed-out group composite matches a 1x1 composite");
+  }
+
   if (errors != 0) {
     std::fprintf(stderr, "test_ora: %d failure(s)\n", errors);
     return 1;

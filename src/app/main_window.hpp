@@ -17,6 +17,7 @@
 #include "ui/layers_panel.hpp"
 #include "ui/status_bar.hpp"
 #include "ui/pattern_strip.hpp"
+#include "raster/custom_brush.hpp"
 #include "raster/transform.hpp"
 #include "ui/toolbox.hpp"
 
@@ -52,8 +53,8 @@ public:
 
   void reset_canvas();
   void new_document(int width, int height, Color background);
-  // Plays the startup greeting once on a fresh empty canvas when enabled
-  // (see LUNDUKEPAINT_HOWDY_INTRO; default OFF → blank canvas).
+  // Plays the startup greeting once on a fresh empty canvas when the
+  // preference is on (default off, so a normal launch stays blank).
   void play_intro();
   void show_status(const Glib::ustring& message);
   void action_new();
@@ -90,6 +91,11 @@ public:
   void set_brush_tip(int index) override;
   int spray_radius() const override { return spray_radius_; }
   void set_spray_radius(int radius) override;
+  bool grid_snap_enabled() const override { return grid_snap_; }
+  int grid_snap_spacing() const override { return 8; }
+  const CustomBrush* custom_brush() const override {
+    return brush_image_.empty() ? nullptr : &brush_image_;
+  }
   void invalidate_canvas(Rect rect) override;
   void return_to_previous_tool() override;
   Color sample_canvas(int x, int y) const override;
@@ -122,8 +128,10 @@ public:
   void action_flip_h();
   void action_flip_v();
   void action_clear();
+  void action_quantize();
   void action_zoom_fit();
   void action_toggle_grid();
+  void action_snap_grid();
   void action_layer_new();
   void action_layer_duplicate();
   void action_layer_delete();
@@ -141,6 +149,10 @@ public:
   void action_effect_blur();
   void action_effect_sharpen();
   void action_effect_emboss();
+  void action_effect_trace();
+  void action_selection_brush();
+  void action_clear_brush();
+  void action_pattern_from_selection();
   void action_preferences();
   void action_shortcuts();
   void action_about();
@@ -266,6 +278,8 @@ private:
   int stroke_size_{1};
   bool brush_aa_{true};
   int fill_tolerance_{0};
+  bool grid_snap_{false};
+  CustomBrush brush_image_;
   int pattern_index_{0};
   int brush_tip_{3};
   int spray_radius_{16};
