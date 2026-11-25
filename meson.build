@@ -82,6 +82,7 @@ lunduke_paint_app_sources = files(
   'src/ui/history_panel.cpp',
   'src/ui/status_bar.cpp',
   'src/ui/dialogs_new.cpp',
+  'src/ui/open_thumbs.cpp',
   'src/tools/tool.cpp',
   'src/tools/tool_pencil.cpp',
   'src/tools/tool_brush.cpp',
@@ -171,6 +172,16 @@ test_blend = executable(
   install: false,
 )
 test('blend', test_blend)
+
+test_open_thumbs = executable(
+  'test_open_thumbs',
+  files('tests/test_open_thumbs.cpp', 'src/ui/open_thumbs.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, gdkpixbuf_dep, glib_dep],
+  install: false,
+)
+test('open_thumbs', test_open_thumbs, timeout: 30)
 
 # Not part of meson test: timings for the viewport expose, Normal blend, and
 # zoomed-out OpenRaster composite. Run build/bench_viewport by hand.

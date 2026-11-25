@@ -27,6 +27,7 @@
 #include "ui/dialogs_new.hpp"
 #include "ui/dialogs_prefs.hpp"
 #include "ui/intro_howdy.hpp"
+#include "ui/open_thumbs.hpp"
 #include "ui/toolbox_catalog.hpp"
 #include "tools/tools.hpp"
 
@@ -1653,6 +1654,9 @@ std::string MainWindow::choose_open_path() {
   dialog.set_preview_widget(preview);
   dialog.set_use_preview_label(false);
   dialog.set_preview_widget_active(false);
+  dialog.set_default_size(760, 560);
+  OpenThumbGrid thumbs(dialog);
+  dialog.set_extra_widget(thumbs);
   dialog.signal_update_preview().connect([&dialog, &preview]() {
     try {
       preview.clear();
