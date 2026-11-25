@@ -6,6 +6,7 @@
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
 #include "raster/brush_tip.hpp"
+#include "raster/custom_brush.hpp"
 #include "raster/grid_snap.hpp"
 #include "raster/stroke.hpp"
 
@@ -134,7 +135,13 @@ void BrushTool::stamp_to(double x, double y, bool shift) {
   const Layer& active = preview_layer_ref();
   Layer& tool = host_->document().layers().tool_layer();
   const BrushTip tip = brush_tip_at(host_->brush_tip());
+  const CustomBrush* custom = host_->custom_brush();
   auto paint = [&](double x0, double y0, double x1, double y1, Rect& stamp) {
+    if (custom != nullptr && !custom->empty()) {
+      stroke_custom_brush(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1,
+                          *custom, &stamp);
+      return;
+    }
     stroke_brush_tip(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1, tip,
                      stroke_color(button_), &stamp, &host_->active_pattern(), pattern_back(button_));
   };

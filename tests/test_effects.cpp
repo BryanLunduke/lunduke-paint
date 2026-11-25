@@ -2,6 +2,7 @@
 
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
+#include "raster/custom_brush.hpp"
 #include "raster/effects.hpp"
 #include "raster/grid_snap.hpp"
 
@@ -186,6 +187,25 @@ int main() {
     errors += expect(lundukepaint::snap_canvas_coord(0.2, 8) == 0, "near zero snaps to 0");
     errors += expect(lundukepaint::snap_canvas_coord(5.0, 8) == 8, "mid cell snaps to the next grid line");
     errors += expect(lundukepaint::snap_canvas_coord(3.0, 8) == 0, "early cell snaps back");
+  }
+
+  {
+    std::uint8_t src[16] = {255, 255, 255, 255, 200, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 0};
+    const auto brush = lundukepaint::custom_brush_from_rgba(src, 2, 2, 8, Color::white());
+    errors += expect(brush.width == 2 && brush.height == 2, "brush keeps a small selection");
+    errors += expect(brush.rgba[3] == 0, "background color is punched out");
+    errors += expect(brush.rgba[7] == 255 && brush.rgba[4] == 200, "foreground pixel is kept");
+    errors += expect(brush.rgba[15] == 0, "clear pixel stays clear");
+    std::vector<std::uint8_t> canvas(8 * 8 * 4, 0);
+    for (int i = 0; i < 64; ++i) {
+      canvas[i * 4 + 0] = 1;
+      canvas[i * 4 + 3] = 255;
+    }
+    lundukepaint::stamp_custom_brush(canvas.data(), 8, 8, 32, 3, 3, brush, nullptr);
+    const Color stamped = get(canvas.data(), 32, 3, 2);
+    errors += expect(stamped.r == 200 && stamped.a == 255, "brush stamps the opaque pixel");
+    const Color skipped = get(canvas.data(), 32, 2, 2);
+    errors += expect(skipped.r == 1, "transparent brush pixel does not cover the canvas");
   }
 
   if (errors != 0) {

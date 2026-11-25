@@ -68,6 +68,8 @@ constexpr const char* kEffectBlur = "effect-blur";
 constexpr const char* kEffectSharpen = "effect-sharpen";
 constexpr const char* kEffectEmboss = "effect-emboss";
 constexpr const char* kEffectTrace = "effect-trace";
+constexpr const char* kSelectionBrush = "selection-brush";
+constexpr const char* kClearBrush = "clear-brush";
 
 constexpr const char* kPreferences = "preferences";
 constexpr const char* kShortcuts = "shortcuts";

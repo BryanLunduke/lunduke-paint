@@ -30,6 +30,7 @@ inline const ShortcutHelpRow* shortcut_help_rows(int& count) {
       {"Zoom in / out / 100% / fit", "Ctrl++ / Ctrl+- / Ctrl+0 / Ctrl+1"},
       {"Grid / snap to 8px grid / dock / fullscreen", "Ctrl+G / Ctrl+Shift+G / F12 / F11"},
       {"Straight pencil or brush", "Shift while drawing"},
+      {"Selection as brush / clear it", "Edit menu"},
       {"Swap FG-BG / default colors", "X / D"},
       {"Pencil / Brush / Eraser", "P / B / A"},
       {"Rectangle select / Lasso / Ellipse select", "S / M / I"},

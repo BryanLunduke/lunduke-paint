@@ -4,6 +4,7 @@
 
 #include "raster/types.hpp"
 #include "raster/shapes.hpp"
+#include "raster/custom_brush.hpp"
 #include "raster/pattern.hpp"
 
 #include <cairomm/context.h>
@@ -71,6 +72,8 @@ public:
   // Canvas-pixel grid. Spacing is in image pixels, so it does not change with zoom.
   virtual bool grid_snap_enabled() const { return false; }
   virtual int grid_snap_spacing() const { return 8; }
+  // Null when the brush tool should use the left-rail tip.
+  virtual const CustomBrush* custom_brush() const { return nullptr; }
   // False cancels a flood fill or magic wand on a canvas past the soft size limit.
   virtual bool confirm_large_canvas(int /*width*/, int /*height*/) { return true; }
 };

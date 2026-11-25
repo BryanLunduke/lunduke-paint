@@ -20,6 +20,7 @@
 #include "io/save_target.hpp"
 #include "io/crash_recovery.hpp"
 #include "raster/brush_tip.hpp"
+#include "raster/custom_brush.hpp"
 #include "raster/effects.hpp"
 #include "raster/transform.hpp"
 #include "ui/dialogs_adjust.hpp"
@@ -176,6 +177,8 @@ MainWindow::MainWindow() {
   add_action(actions::kEffectSharpen, sigc::mem_fun(*this, &MainWindow::action_effect_sharpen));
   add_action(actions::kEffectEmboss, sigc::mem_fun(*this, &MainWindow::action_effect_emboss));
   add_action(actions::kEffectTrace, sigc::mem_fun(*this, &MainWindow::action_effect_trace));
+  add_action(actions::kSelectionBrush, sigc::mem_fun(*this, &MainWindow::action_selection_brush));
+  add_action(actions::kClearBrush, sigc::mem_fun(*this, &MainWindow::action_clear_brush));
   add_action(actions::kPreferences, sigc::mem_fun(*this, &MainWindow::action_preferences));
   add_action(actions::kShortcuts, sigc::mem_fun(*this, &MainWindow::action_shortcuts));
   add_action(actions::kAbout, sigc::mem_fun(*this, &MainWindow::action_about));
@@ -2630,6 +2633,77 @@ void MainWindow::action_effect_sharpen() {
     std::memcpy(src.data(), px, src.size());
     sharpen_rgba(src.data(), w, h, stride, px, stride);
   });
+}
+
+void MainWindow::action_clear_brush() {
+  brush_image_ = {};
+  show_status("Custom brush cleared");
+}
+
+void MainWindow::action_selection_brush() {
+  if (document_ptr() == nullptr) {
+    return;
+  }
+  const Selection& sel = document().selection();
+  if (sel.empty()) {
+    show_status("Select an area to pick up as a brush");
+    return;
+  }
+  const Color background = document().background();
+  std::vector<std::uint8_t> pixels;
+  int bw = 0;
+  int bh = 0;
+  if (sel.floating()) {
+    bw = sel.float_w();
+    bh = sel.float_h();
+    pixels.assign(static_cast<std::size_t>(bw) * static_cast<std::size_t>(bh) * 4, 0);
+    for (int y = 0; y < bh; ++y) {
+      for (int x = 0; x < bw; ++x) {
+        Color c = sel.float_covers(x, y) ? sel.float_pixel(x, y) : Color::transparent();
+        std::uint8_t* p = pixels.data() + (static_cast<std::size_t>(y) * bw + x) * 4;
+        p[0] = c.r;
+        p[1] = c.g;
+        p[2] = c.b;
+        p[3] = c.a;
+      }
+    }
+  } else {
+    const Rect bounds = rect_intersect(sel.bounds(), Rect{0, 0, document().width(), document().height()});
+    if (bounds.empty()) {
+      show_status("Select an area to pick up as a brush");
+      return;
+    }
+    bw = bounds.w;
+    bh = bounds.h;
+    pixels.assign(static_cast<std::size_t>(bw) * static_cast<std::size_t>(bh) * 4, 0);
+    const Layer& layer = document().layers().active_layer();
+    for (int y = 0; y < bh; ++y) {
+      for (int x = 0; x < bw; ++x) {
+        const int cx = bounds.x + x;
+        const int cy = bounds.y + y;
+        Color c = Color::transparent();
+        if (sel.contains(cx, cy)) {
+          const int lx = cx - layer.offset_x();
+          const int ly = cy - layer.offset_y();
+          if (lx >= 0 && ly >= 0 && lx < layer.width() && ly < layer.height()) {
+            c = layer.pixel(lx, ly);
+          }
+        }
+        std::uint8_t* p = pixels.data() + (static_cast<std::size_t>(y) * bw + x) * 4;
+        p[0] = c.r;
+        p[1] = c.g;
+        p[2] = c.b;
+        p[3] = c.a;
+      }
+    }
+  }
+  brush_image_ = custom_brush_from_rgba(pixels.data(), bw, bh, bw * 4, background);
+  if (brush_image_.empty()) {
+    show_status("Could not pick up a brush");
+    return;
+  }
+  show_status(Glib::ustring::compose("Custom brush %1×%2 — background color is transparent",
+                                     brush_image_.width, brush_image_.height));
 }
 
 void MainWindow::action_effect_trace() {

@@ -90,6 +90,14 @@
           <attribute name="label" translatable="yes">D_uplicate</attribute>
           <attribute name="action">win.duplicate</attribute>
         </item>
+        <item>
+          <attribute name="label" translatable="yes">Selection as B_rush</attribute>
+          <attribute name="action">win.selection-brush</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">Clear Custom Brush</attribute>
+          <attribute name="action">win.clear-brush</attribute>
+        </item>
       </section>
       <section>
         <item>
