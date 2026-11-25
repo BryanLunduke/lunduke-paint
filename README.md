@@ -19,7 +19,9 @@ user layers.
 
 ## 1.1.0
 
-LCOS 1.1.0. Package 1.1.0-1. About dialog and meson version read 1.1.0. No functional changes.
+LCOS 1.1.0. Package 1.1.0-1. About dialog and meson version read 1.1.0.
+
+Editor's picks, same MacPaint chrome: marching ants no longer rebuild the viewport composite; Normal blends and zoomed-out OpenRaster groups are faster; the Open dialog shows a folder thumbnail grid plus the side preview; Shift draws a straight pencil or brush stroke; Snap to Grid is an 8-pixel canvas grid at any zoom; Trace Edges, a Bayer gradient on the fill tool, selection-as-brush, and an 8×8 pattern from the selection; New Image presets and Quantize to Palette (ordered or Floyd–Steinberg); Howdy is a preference, off unless turned on.
 
 ## 1.0.1
 
@@ -161,7 +163,7 @@ What works:
 ## Out of scope
 
 - Live text objects (text still rasterizes on commit)
-- Gradient tool
+- A separate gradient tool (the fill tool draws a dithered two-color gradient)
 - Clone stamp
 - ICO load/save
 - Tablet pressure
@@ -238,13 +240,13 @@ part of the development loop. Target runtime: Linux X11 / XLibre + XFCE.
 - Curve is the KolourPaint two-handle cubic: drag endpoints, then two control points.
 - Polyline / polygon take click vertices; Enter or double-click finishes (polygon closes).
 - Lasso and ellipse selections store an 8-bit mask; invert is still “canvas minus that region.”
-- Text is a popup Entry; Pango rasterizes onto the layer on Enter or click-away (not a live object).
+- Text is an on-canvas box: drag or click to place it, type in the box, and it rasterizes onto the layer when you commit (Enter or click away). It is not a live text object, and it is not a separate popup entry.
 - Toolbox checker under the wells sets Transparent FG (left) or BG (right); painting with it punches alpha.
 - Brightness (−100..100) adds a channel offset; contrast (−100..100) scales around 128.
 - Hue/Saturation is a basic RGB↔HSV shift (hue ±180°, saturation ±100).
 - Posterize quantizes each RGB channel to 2–16 levels.
 - Box blur is separable with edge clamp; radius 1–16. Sharpen is a 3×3 unsharp kernel. Emboss is a 3×3 relief kernel with a +128 bias.
-- Preferences are `$XDG_CONFIG_HOME/lunduke-paint/lunduke-paint.ini` via GKeyFile (default size, undo limit, checker colors, grid threshold).
+- Preferences are `$XDG_CONFIG_HOME/lunduke-paint/lunduke-paint.ini` via GKeyFile (default size, undo limit, checker colors, grid threshold, Howdy intro off by default, custom patterns).
 - Print is a single fit-to-page `Gtk::PrintOperation` of the visible composite, painted on white.
 - File menu includes Recent (local paths in lunduke-paint.ini) and Revert. Edit includes Copy Merged. View includes Fullscreen (F11).
 - Toolbox tool icons are Pinta scalable symbolic SVGs (Paint.NET/Pinta/Fluent MIT, Material Apache-2.0, some GIMP CC-BY-4.0) plus original spray/curve/polyline icons; see `data/icons/ATTRIBUTION.md`.

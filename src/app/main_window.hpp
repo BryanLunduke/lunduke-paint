@@ -53,8 +53,8 @@ public:
 
   void reset_canvas();
   void new_document(int width, int height, Color background);
-  // Plays the startup greeting once on a fresh empty canvas when enabled
-  // (see LUNDUKEPAINT_HOWDY_INTRO; default OFF → blank canvas).
+  // Plays the startup greeting once on a fresh empty canvas when the
+  // preference is on (default off, so a normal launch stays blank).
   void play_intro();
   void show_status(const Glib::ustring& message);
   void action_new();

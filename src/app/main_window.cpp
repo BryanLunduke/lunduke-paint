@@ -560,24 +560,16 @@ bool MainWindow::adopt_document(std::unique_ptr<Document> document, bool prefer_
 }
 
 void MainWindow::play_intro() {
-#if LUNDUKEPAINT_HOWDY_INTRO
-  if (intro_played_) {
+  // Preference, default off. A fresh empty canvas stays blank until it is on.
+  if (!prefs_.show_howdy || intro_played_) {
+    return;
+  }
+  const Document* doc = workspace_.active_ptr();
+  if (doc == nullptr || doc->dirty() || !doc->path().empty() || doc->history().can_undo()) {
     return;
   }
   intro_played_ = true;
-  const Document* doc = workspace_.active_ptr();
-  if (doc == nullptr) {
-    return;
-  }
-  // Only a genuinely untouched, unsaved, empty canvas gets the greeting.
-  if (doc->dirty() || !doc->path().empty() || doc->history().can_undo()) {
-    return;
-  }
   canvas_.start_intro();
-#else
-  // Howdy intro shelved (LUNDUKEPAINT_HOWDY_INTRO=0): fresh launch stays blank.
-  (void)intro_played_;
-#endif
 }
 
 void MainWindow::show_status(const Glib::ustring& message) {
@@ -2811,6 +2803,9 @@ void MainWindow::action_effect_emboss() {
 
 void MainWindow::apply_preferences() {
   canvas_.set_checker_colors(prefs_.checker_light, prefs_.checker_dark);
+  if (prefs_.show_howdy) {
+    play_intro();
+  }
   canvas_.set_grid_threshold(prefs_.grid_threshold);
   for (int i = 0; i < workspace_.count(); ++i) {
     workspace_.at(i).history().set_depth(prefs_.undo_limit);

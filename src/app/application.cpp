@@ -79,8 +79,8 @@ void Application::on_activate() {
   const bool created = ensure_window();
   window_->present();
   if (created) {
-    // Fresh empty launch: play_intro() is a no-op unless LUNDUKEPAINT_HOWDY_INTRO
-    // is enabled. A second activation that only re-presents must not replay.
+    // Fresh empty launch: play_intro() is a no-op unless the Howdy preference
+    // is on (default off). A second activation must not replay it.
     window_->play_intro();
   }
 }

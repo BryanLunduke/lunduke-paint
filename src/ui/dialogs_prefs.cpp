@@ -26,7 +26,7 @@ Color rgba_to_color(const Gdk::RGBA& rgba) {
 }  // namespace
 
 PreferencesDialog::PreferencesDialog(Gtk::Window& parent, const Preferences& prefs)
-    : Gtk::Dialog("Preferences", parent, true) {
+    : Gtk::Dialog("Preferences", parent, true), howdy_("Show Howdy intro") {
   add_button("_Cancel", Gtk::RESPONSE_CANCEL);
   add_button("_OK", Gtk::RESPONSE_OK);
   set_default_response(Gtk::RESPONSE_OK);
@@ -61,6 +61,8 @@ PreferencesDialog::PreferencesDialog(Gtk::Window& parent, const Preferences& pre
   grid_threshold_.set_increments(100, 100);
   grid_threshold_.set_digits(0);
   grid_threshold_.set_value(prefs.grid_threshold);
+  howdy_.set_active(prefs.show_howdy);
+  howdy_.set_tooltip_text("Play the cursive howdy on a fresh empty canvas. Off by default.");
 
   auto* grid = Gtk::manage(new Gtk::Grid());
   grid->set_row_spacing(8);
@@ -78,6 +80,7 @@ PreferencesDialog::PreferencesDialog(Gtk::Window& parent, const Preferences& pre
   grid->attach(checker_dark_, 1, 4, 1, 1);
   grid->attach(*Gtk::manage(new Gtk::Label("Grid at zoom %")), 0, 5, 1, 1);
   grid->attach(grid_threshold_, 1, 5, 1, 1);
+  grid->attach(howdy_, 0, 6, 2, 1);
   get_content_area()->pack_start(*grid, Gtk::PACK_SHRINK);
   show_all();
 }
@@ -89,6 +92,7 @@ void PreferencesDialog::apply_to(Preferences& prefs) const {
   prefs.checker_light = rgba_to_color(checker_light_.get_rgba());
   prefs.checker_dark = rgba_to_color(checker_dark_.get_rgba());
   prefs.grid_threshold = grid_threshold_.get_value_as_int();
+  prefs.show_howdy = howdy_.get_active();
 }
 
 }  // namespace lundukepaint

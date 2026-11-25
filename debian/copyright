@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: lunduke-paint
+Source: https://lunduke.com
+
+Files: *
+Copyright: LCOS
+License: GPL-3.0-or-later
+
+License: GPL-3.0-or-later
+ The full text of the GPL is distributed in /usr/share/common-licenses/GPL-3
+ on Debian systems.

@@ -18,6 +18,8 @@ public:
   Color checker_light{209, 209, 209, 255};
   Color checker_dark{158, 158, 158, 255};
   int grid_threshold = 400;
+  // Cursive howdy on a fresh empty canvas. Off unless the user asks.
+  bool show_howdy = false;
   std::vector<std::string> recent_files;
   std::vector<Pattern> custom_patterns;
 

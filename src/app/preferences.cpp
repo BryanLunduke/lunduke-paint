@@ -100,6 +100,9 @@ void Preferences::load() {
     if (key.has_key("view", "grid_threshold")) {
       grid_threshold = clamp_int(key.get_integer("view", "grid_threshold"), 100, 1600);
     }
+    if (key.has_key("view", "howdy")) {
+      show_howdy = key.get_boolean("view", "howdy");
+    }
   } catch (const Glib::KeyFileError&) {
   }
 
@@ -167,6 +170,7 @@ bool Preferences::save() const {
   key.set_string("view", "checker_light", color_to_hex(checker_light));
   key.set_string("view", "checker_dark", color_to_hex(checker_dark));
   key.set_integer("view", "grid_threshold", grid_threshold);
+  key.set_boolean("view", "howdy", show_howdy);
   if (!custom_patterns.empty()) {
     std::vector<Glib::ustring> encoded;
     encoded.reserve(custom_patterns.size());
