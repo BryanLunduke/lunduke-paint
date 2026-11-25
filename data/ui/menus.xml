@@ -136,6 +136,10 @@
           <attribute name="action">win.toggle-grid</attribute>
         </item>
         <item>
+          <attribute name="label" translatable="yes">Snap to _Grid</attribute>
+          <attribute name="action">win.snap-grid</attribute>
+        </item>
+        <item>
           <attribute name="label" translatable="yes">_Layers, History, and Colors</attribute>
           <attribute name="action">win.toggle-right-dock</attribute>
         </item>
@@ -272,6 +276,10 @@
         <item>
           <attribute name="label" translatable="yes">_Emboss</attribute>
           <attribute name="action">win.effect-emboss</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">Trace _Edges</attribute>
+          <attribute name="action">win.effect-trace</attribute>
         </item>
       </section>
     </submenu>

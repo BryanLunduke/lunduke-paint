@@ -6,7 +6,12 @@
 #include "doc/document.hpp"
 #include "doc/selection.hpp"
 #include "raster/brush_tip.hpp"
+#include "raster/grid_snap.hpp"
 #include "raster/stroke.hpp"
+
+#include <cstring>
+#include <cstdint>
+#include <vector>
 
 #include <cmath>
 
@@ -17,7 +22,9 @@ public:
   const char* id() const override { return "brush"; }
   const char* name() const override { return "Brush"; }
   char shortcut() const override { return 'B'; }
-  const char* hint() const override { return "Brush: drag to paint; tip from left-rail picker"; }
+  const char* hint() const override {
+    return "Brush: drag to paint; Shift keeps a straight line from the last point";
+  }
   bool is_stroking() const override { return drawing_; }
   // Options live in the MacPaint left-rail tip picker (0.5-4).
   Gtk::Widget* options_widget() override { return nullptr; }
@@ -30,15 +37,30 @@ public:
 
 private:
   void begin_stroke(CanvasEvent event);
-  void stamp_to(double x, double y);
+  void stamp_to(double x, double y, bool shift);
+  double snapped(double v) const;
   bool finish_stroke();
 
   bool drawing_ = false;
   double last_x_ = 0;
   double last_y_ = 0;
+  bool shift_on_ = false;
+  double anchor_x_ = 0;
+  double anchor_y_ = 0;
+  double rubber_x_ = 0;
+  double rubber_y_ = 0;
+  Rect shift_dirty_{};
+  std::vector<std::uint8_t> shift_backup_;
   unsigned button_ = 1;
   Rect dirty_{};
 };
+
+double BrushTool::snapped(double v) const {
+  if (host_ != nullptr && host_->grid_snap_enabled()) {
+    return static_cast<double>(snap_canvas_coord(v, host_->grid_snap_spacing()));
+  }
+  return v;
+}
 
 void BrushTool::on_press(CanvasEvent event) {
   if (event.button != 1 && event.button != 3) {
@@ -49,7 +71,7 @@ void BrushTool::on_press(CanvasEvent event) {
 
 void BrushTool::on_motion(CanvasEvent event) {
   if (drawing_) {
-    stamp_to(event.x, event.y);
+    stamp_to(snapped(event.x), snapped(event.y), (event.modifiers & Modifier::Shift) != 0);
   }
 }
 
@@ -57,7 +79,7 @@ void BrushTool::on_release(CanvasEvent event) {
   if (!drawing_) {
     return;
   }
-  stamp_to(event.x, event.y);
+  stamp_to(snapped(event.x), snapped(event.y), (event.modifiers & Modifier::Shift) != 0);
   finish_stroke();
 }
 
@@ -68,6 +90,8 @@ void BrushTool::on_cancel() {
     return;
   }
   drawing_ = false;
+  shift_on_ = false;
+  shift_backup_.clear();
   host_->document().layers().clear_tool_layer();
   host_->invalidate_canvas(layer_dirty_to_canvas(preview_layer_ref(), dirty_));
   dirty_ = {};
@@ -92,41 +116,89 @@ void BrushTool::begin_stroke(CanvasEvent event) {
     return;
   }
   drawing_ = true;
+  shift_on_ = false;
+  shift_backup_.clear();
+  shift_dirty_ = {};
   button_ = event.button;
-  last_x_ = event.x;
-  last_y_ = event.y;
+  last_x_ = snapped(event.x);
+  last_y_ = snapped(event.y);
   dirty_ = {};
   arm_preview_layer();
-  stamp_to(last_x_, last_y_);
+  stamp_to(last_x_, last_y_, (event.modifiers & Modifier::Shift) != 0);
 }
 
-void BrushTool::stamp_to(double x, double y) {
+void BrushTool::stamp_to(double x, double y, bool shift) {
   if (host_ == nullptr || !drawing_) {
     return;
   }
   const Layer& active = preview_layer_ref();
   Layer& tool = host_->document().layers().tool_layer();
   const BrushTip tip = brush_tip_at(host_->brush_tip());
-  const double x0 = last_x_ - active.offset_x();
-  const double y0 = last_y_ - active.offset_y();
-  const double x1 = x - active.offset_x();
-  const double y1 = y - active.offset_y();
+  auto paint = [&](double x0, double y0, double x1, double y1, Rect& stamp) {
+    stroke_brush_tip(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1, tip,
+                     stroke_color(button_), &stamp, &host_->active_pattern(), pattern_back(button_));
+  };
+  auto restore_rect = [&](Rect rect) {
+    if (rect.empty() || shift_backup_.empty()) {
+      return;
+    }
+    rect = rect_intersect(rect, Rect{0, 0, tool.width(), tool.height()});
+    for (int row = rect.y; row < rect.y2(); ++row) {
+      std::memcpy(tool.pixels() + static_cast<std::size_t>(row) * tool.stride() +
+                      static_cast<std::size_t>(rect.x) * 4,
+                  shift_backup_.data() + static_cast<std::size_t>(row) * tool.stride() +
+                      static_cast<std::size_t>(rect.x) * 4,
+                  static_cast<std::size_t>(rect.w) * 4);
+    }
+  };
+  auto halo_of = [&](Rect stamp) {
+    if (stamp.empty()) {
+      return stamp;
+    }
+    stamp.x -= 1;
+    stamp.y -= 1;
+    stamp.w += 2;
+    stamp.h += 2;
+    return rect_intersect(stamp, Rect{0, 0, tool.width(), tool.height()});
+  };
+  if (shift) {
+    if (!shift_on_) {
+      shift_on_ = true;
+      anchor_x_ = last_x_;
+      anchor_y_ = last_y_;
+      shift_dirty_ = {};
+      shift_backup_.assign(tool.pixels(),
+                           tool.pixels() + static_cast<std::size_t>(tool.stride()) * tool.height());
+    }
+    const Rect previous = shift_dirty_;
+    restore_rect(previous);
+    Rect stamp{};
+    paint(anchor_x_ - active.offset_x(), anchor_y_ - active.offset_y(), x - active.offset_x(),
+          y - active.offset_y(), stamp);
+    shift_dirty_ = stamp;
+    clip_rect_to_selection(tool, active, stamp, host_->document().selection());
+    rubber_x_ = x;
+    rubber_y_ = y;
+    const Rect touched = rect_union(previous, stamp);
+    dirty_ = rect_union(dirty_, touched);
+    host_->invalidate_canvas(layer_dirty_to_canvas(active, halo_of(touched)));
+    return;
+  }
+  if (shift_on_) {
+    last_x_ = rubber_x_;
+    last_y_ = rubber_y_;
+    shift_on_ = false;
+    shift_backup_.clear();
+    shift_dirty_ = {};
+  }
   Rect stamp{};
-  stroke_brush_tip(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1, tip,
-                   stroke_color(button_), &stamp, &host_->active_pattern(), pattern_back(button_));
+  paint(last_x_ - active.offset_x(), last_y_ - active.offset_y(), x - active.offset_x(),
+        y - active.offset_y(), stamp);
   dirty_ = rect_union(dirty_, stamp);
   clip_rect_to_selection(tool, active, stamp, host_->document().selection());
   last_x_ = x;
   last_y_ = y;
-  Rect halo = stamp;
-  if (!halo.empty()) {
-    halo.x -= 1;
-    halo.y -= 1;
-    halo.w += 2;
-    halo.h += 2;
-    halo = rect_intersect(halo, Rect{0, 0, tool.width(), tool.height()});
-  }
-  host_->invalidate_canvas(layer_dirty_to_canvas(active, halo));
+  host_->invalidate_canvas(layer_dirty_to_canvas(active, halo_of(stamp)));
 }
 
 bool BrushTool::finish_stroke() {
@@ -138,6 +210,8 @@ bool BrushTool::finish_stroke() {
     return false;
   }
   drawing_ = false;
+  shift_on_ = false;
+  shift_backup_.clear();
   dirty_ = {};
   return true;
 }

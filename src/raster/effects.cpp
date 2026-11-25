@@ -401,4 +401,41 @@ void emboss_rgba(const std::uint8_t* src, int width, int height, int src_stride,
   conv3(src, width, height, src_stride, dest, dest_stride, k, 128, true);
 }
 
+void trace_edges_rgba(std::uint8_t* rgba, int width, int height, int stride, Color ink, Color paper) {
+  if (rgba == nullptr || width < 1 || height < 1) {
+    return;
+  }
+  const std::vector<std::uint8_t> src(rgba, rgba + static_cast<std::size_t>(stride) * height);
+  auto at = [&](int x, int y) -> Color {
+    const std::uint8_t* p = src.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
+                            static_cast<std::size_t>(x) * 4;
+    return {p[0], p[1], p[2], p[3]};
+  };
+  auto mark = [&](int x, int y) -> bool {
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return false;
+    }
+    const Color c = at(x, y);
+    return c.a > 16 && color_chebyshev(c, paper) > 24;
+  };
+  auto put = [&](std::uint8_t* p, Color c) {
+    p[0] = c.r;
+    p[1] = c.g;
+    p[2] = c.b;
+    p[3] = c.a;
+  };
+  for (int y = 0; y < height; ++y) {
+    std::uint8_t* row = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+    for (int x = 0; x < width; ++x) {
+      std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
+      if (!mark(x, y)) {
+        put(p, paper);
+        continue;
+      }
+      const bool edge = !mark(x - 1, y) || !mark(x + 1, y) || !mark(x, y - 1) || !mark(x, y + 1);
+      put(p, edge ? ink : paper);
+    }
+  }
+}
+
 }  // namespace lundukepaint

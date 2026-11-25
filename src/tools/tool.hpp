@@ -68,6 +68,9 @@ public:
   virtual void set_brush_tip(int /*index*/) {}
   virtual int spray_radius() const { return 16; }
   virtual void set_spray_radius(int /*radius*/) {}
+  // Canvas-pixel grid. Spacing is in image pixels, so it does not change with zoom.
+  virtual bool grid_snap_enabled() const { return false; }
+  virtual int grid_snap_spacing() const { return 8; }
   // False cancels a flood fill or magic wand on a canvas past the soft size limit.
   virtual bool confirm_large_canvas(int /*width*/, int /*height*/) { return true; }
 };

@@ -45,6 +45,7 @@ void Application::on_startup() {
   set_accels_for_action("win.zoom-100", {"<Primary>0"});
   set_accels_for_action("win.zoom-fit", {"<Primary>1"});
   set_accels_for_action("win.toggle-grid", {"<Primary>g"});
+  set_accels_for_action("win.snap-grid", {"<Primary><Shift>g"});
   set_accels_for_action("win.cut", {"<Primary>x"});
   set_accels_for_action("win.copy", {"<Primary>c"});
   set_accels_for_action("win.copy-merged", {"<Primary><Shift>c"});

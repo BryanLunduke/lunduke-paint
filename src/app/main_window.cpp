@@ -130,6 +130,7 @@ MainWindow::MainWindow() {
   add_action(actions::kZoom100, [this]() { canvas_.set_zoom(1.0); });
   add_action(actions::kZoomFit, sigc::mem_fun(*this, &MainWindow::action_zoom_fit));
   add_action(actions::kToggleGrid, sigc::mem_fun(*this, &MainWindow::action_toggle_grid));
+  add_action(actions::kSnapGrid, sigc::mem_fun(*this, &MainWindow::action_snap_grid));
   cut_action_ = add_action(actions::kCut, sigc::mem_fun(*this, &MainWindow::action_cut));
   copy_action_ = add_action(actions::kCopy, sigc::mem_fun(*this, &MainWindow::action_copy));
   copy_merged_action_ = add_action(actions::kCopyMerged, sigc::mem_fun(*this, &MainWindow::action_copy_merged));
@@ -174,6 +175,7 @@ MainWindow::MainWindow() {
   add_action(actions::kEffectBlur, sigc::mem_fun(*this, &MainWindow::action_effect_blur));
   add_action(actions::kEffectSharpen, sigc::mem_fun(*this, &MainWindow::action_effect_sharpen));
   add_action(actions::kEffectEmboss, sigc::mem_fun(*this, &MainWindow::action_effect_emboss));
+  add_action(actions::kEffectTrace, sigc::mem_fun(*this, &MainWindow::action_effect_trace));
   add_action(actions::kPreferences, sigc::mem_fun(*this, &MainWindow::action_preferences));
   add_action(actions::kShortcuts, sigc::mem_fun(*this, &MainWindow::action_shortcuts));
   add_action(actions::kAbout, sigc::mem_fun(*this, &MainWindow::action_about));
@@ -2057,6 +2059,11 @@ void MainWindow::action_toggle_grid() {
   show_status(canvas_.grid_visible() ? "Grid on" : "Grid off");
 }
 
+void MainWindow::action_snap_grid() {
+  grid_snap_ = !grid_snap_;
+  show_status(grid_snap_ ? "Snap to 8-pixel grid on" : "Snap to grid off");
+}
+
 bool MainWindow::warn_size(int width, int height) {
   if (width < 1 || height < 1) {
     return false;
@@ -2622,6 +2629,14 @@ void MainWindow::action_effect_sharpen() {
     std::vector<std::uint8_t> src(static_cast<std::size_t>(h) * static_cast<std::size_t>(stride));
     std::memcpy(src.data(), px, src.size());
     sharpen_rgba(src.data(), w, h, stride, px, stride);
+  });
+}
+
+void MainWindow::action_effect_trace() {
+  const Color ink = document().foreground().a == 0 ? Color::black() : document().foreground();
+  const Color paper = document().background();
+  apply_layer_effect("Trace edges", [ink, paper](std::uint8_t* px, int w, int h, int stride) {
+    trace_edges_rgba(px, w, h, stride, ink, paper);
   });
 }
 

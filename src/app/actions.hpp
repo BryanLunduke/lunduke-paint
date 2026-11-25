@@ -25,6 +25,7 @@ constexpr const char* kZoomOut = "zoom-out";
 constexpr const char* kZoom100 = "zoom-100";
 constexpr const char* kZoomFit = "zoom-fit";
 constexpr const char* kToggleGrid = "toggle-grid";
+constexpr const char* kSnapGrid = "snap-grid";
 
 constexpr const char* kCut = "cut";
 constexpr const char* kCopy = "copy";
@@ -66,6 +67,7 @@ constexpr const char* kAdjustPosterize = "adjust-posterize";
 constexpr const char* kEffectBlur = "effect-blur";
 constexpr const char* kEffectSharpen = "effect-sharpen";
 constexpr const char* kEffectEmboss = "effect-emboss";
+constexpr const char* kEffectTrace = "effect-trace";
 
 constexpr const char* kPreferences = "preferences";
 constexpr const char* kShortcuts = "shortcuts";

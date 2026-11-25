@@ -57,6 +57,10 @@ void sharpen_rgba(const std::uint8_t* src, int width, int height, int src_stride
 void emboss_rgba(const std::uint8_t* src, int width, int height, int src_stride,
                  std::uint8_t* dest, int dest_stride);
 
+// MacPaint Trace Edges: marks that touch the paper stay (drawn in `ink`);
+// interior marks and the paper itself become `paper`. A mark differs from paper.
+void trace_edges_rgba(std::uint8_t* rgba, int width, int height, int stride, Color ink, Color paper);
+
 }  // namespace lundukepaint
 
 #endif

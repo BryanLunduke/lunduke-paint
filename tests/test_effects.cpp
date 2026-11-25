@@ -3,6 +3,7 @@
 #include "doc/commands_pixels.hpp"
 #include "doc/document.hpp"
 #include "raster/effects.hpp"
+#include "raster/grid_snap.hpp"
 
 #include <cstdio>
 #include <vector>
@@ -147,6 +148,44 @@ int main() {
     errors += expect(edge.a > 0 && edge.a < 255, "blur softens alpha at the fringe");
     const Color clear = get(dest.data(), stride, 1, 0);
     errors += expect(clear.r == 255 || clear.a == 0, "transparent neighbor is not blackened");
+  }
+
+  {
+    constexpr int kW = 12;
+    constexpr int kH = 12;
+    const int stride = kW * 4;
+    std::vector<std::uint8_t> buf(static_cast<std::size_t>(stride) * kH);
+    for (int i = 0; i < kW * kH; ++i) {
+      set(buf.data(), stride, i % kW, i / kW, Color::white());
+    }
+    for (int y = 3; y <= 8; ++y) {
+      for (int x = 3; x <= 8; ++x) {
+        set(buf.data(), stride, x, y, Color::black());
+      }
+    }
+    lundukepaint::trace_edges_rgba(buf.data(), kW, kH, stride, Color::black(), Color::white());
+    errors += expect(get(buf.data(), stride, 3, 3) == Color::black(), "trace keeps the corner");
+    errors += expect(get(buf.data(), stride, 5, 3) == Color::black(), "trace keeps the top edge");
+    errors += expect(get(buf.data(), stride, 5, 5) == Color::white(), "trace clears the interior");
+    errors += expect(get(buf.data(), stride, 1, 1) == Color::white(), "trace leaves the paper");
+  }
+
+  {
+    const double zooms[] = {0.25, 0.5, 1.0, 2.0, 3.0, 8.0};
+    const double origin = 24.0;
+    bool stable = true;
+    for (double zoom : zooms) {
+      const double canvas = 20.2;
+      const double widget = origin + canvas * zoom;
+      const double recovered = lundukepaint::canvas_from_widget(widget, origin, zoom);
+      if (lundukepaint::snap_canvas_coord(recovered, 8) != lundukepaint::snap_canvas_coord(canvas, 8)) {
+        stable = false;
+      }
+    }
+    errors += expect(stable, "8px grid snap is the same at every zoom");
+    errors += expect(lundukepaint::snap_canvas_coord(0.2, 8) == 0, "near zero snaps to 0");
+    errors += expect(lundukepaint::snap_canvas_coord(5.0, 8) == 8, "mid cell snaps to the next grid line");
+    errors += expect(lundukepaint::snap_canvas_coord(3.0, 8) == 0, "early cell snaps back");
   }
 
   if (errors != 0) {
