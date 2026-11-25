@@ -91,15 +91,15 @@
           <attribute name="action">win.duplicate</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Selection as B_rush</attribute>
+          <attribute name="label" translatable="yes">Selection as _Brush</attribute>
           <attribute name="action">win.selection-brush</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Clear Custom Brush</attribute>
+          <attribute name="label" translatable="yes">Clear Custom Bru_sh</attribute>
           <attribute name="action">win.clear-brush</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Pattern from _Selection</attribute>
+          <attribute name="label" translatable="yes">Ma_ke Pattern from Selection</attribute>
           <attribute name="action">win.pattern-from-selection</attribute>
         </item>
       </section>
@@ -148,7 +148,7 @@
           <attribute name="action">win.toggle-grid</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Snap to _Grid</attribute>
+          <attribute name="label" translatable="yes">Snap to Gri_d</attribute>
           <attribute name="action">win.snap-grid</attribute>
         </item>
         <item>
@@ -294,7 +294,7 @@
           <attribute name="action">win.effect-emboss</attribute>
         </item>
         <item>
-          <attribute name="label" translatable="yes">Trace _Edges</attribute>
+          <attribute name="label" translatable="yes">Trace Ed_ges</attribute>
           <attribute name="action">win.effect-trace</attribute>
         </item>
       </section>
