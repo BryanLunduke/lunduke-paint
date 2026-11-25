@@ -21,7 +21,7 @@ user layers.
 
 LCOS 1.1.0. Package 1.1.0-1. About dialog and meson version read 1.1.0.
 
-Editor's picks, same MacPaint chrome: marching ants no longer rebuild the viewport composite; Normal blends and zoomed-out OpenRaster groups are faster; the Open dialog shows a folder thumbnail grid plus the side preview; Shift draws a straight pencil or brush stroke; Snap to Grid is an 8-pixel canvas grid at any zoom; Trace Edges, a Bayer gradient on the fill tool, selection-as-brush, and an 8×8 pattern from the selection; New Image presets and Quantize to Palette (ordered or Floyd–Steinberg); Howdy is a preference, off unless turned on.
+Editor's picks, same MacPaint chrome: marching ants no longer rebuild the viewport composite; Normal blends and zoomed-out OpenRaster groups are faster; Shift draws a straight pencil or brush stroke; Snap to Grid is an 8-pixel canvas grid at any zoom; Trace Edges, a Bayer gradient on the fill tool, selection-as-brush, and an 8×8 pattern from the selection; New Image presets and Quantize to Palette (ordered or Floyd–Steinberg); Howdy is a preference, off unless turned on.
 
 ## 1.0.1
 
