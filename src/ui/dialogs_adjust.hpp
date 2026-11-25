@@ -2,10 +2,13 @@
 #ifndef LUNDUKEPAINT_UI_DIALOGS_ADJUST_HPP
 #define LUNDUKEPAINT_UI_DIALOGS_ADJUST_HPP
 
+#include "raster/types.hpp"
+
 #include <functional>
 #include <glibmm/ustring.h>
 #include <sigc++/connection.h>
 #include <gtkmm/checkbutton.h>
+#include <gtkmm/colorbutton.h>
 #include <gtkmm/comboboxtext.h>
 #include <gtkmm/dialog.h>
 #include <gtkmm/grid.h>
@@ -118,10 +121,12 @@ public:
   explicit DropShadowDialog(Gtk::Window& parent);
   int offset_x() const;
   int offset_y() const;
+  Color shadow_color() const;
 
 private:
   Gtk::SpinButton dx_;
   Gtk::SpinButton dy_;
+  Gtk::ColorButton shadow_;
 };
 
 class WindDialog : public LivePreviewDialog {

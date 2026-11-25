@@ -530,14 +530,15 @@ LoadedImage load_flat_image(const std::string& path) {
 }
 
 bool save_flat_image(const std::string& path, ImageFormat format, const std::uint8_t* rgba,
-                     int width, int height, int stride, int jpeg_quality, std::string& error) {
+                     int width, int height, int stride, int jpeg_quality, std::string& error,
+                     const GifProgress& gif_progress) {
   if (rgba == nullptr || width < 1 || height < 1) {
     error = "Nothing to save";
     return false;
   }
   std::vector<std::uint8_t> encoded;
   if (format == ImageFormat::Gif) {
-    if (!encode_gif_memory(rgba, width, height, stride, encoded, error)) {
+    if (!encode_gif_memory(rgba, width, height, stride, encoded, error, gif_progress)) {
       return false;
     }
   } else if (format == ImageFormat::Png || format == ImageFormat::Ora || format == ImageFormat::Unknown) {

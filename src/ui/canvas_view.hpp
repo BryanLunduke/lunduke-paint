@@ -143,6 +143,7 @@ private:
   void draw_scanlines(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy, int canvas_w,
                       int canvas_h);
   void draw_pointer_outline(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy);
+  void queue_pointer_outline(double cx, double cy);
   void autoscroll_while_drawing(double area_x, double area_y, guint state);
   bool on_autoscroll_tick();
   bool on_intro_tick();

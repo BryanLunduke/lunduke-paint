@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <vector>
 
 namespace lundukepaint {
 
@@ -1055,52 +1056,81 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
 
 namespace {
 
+std::uint8_t mask_at(const std::uint8_t* in, int w, int x, int y) {
+  return in[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)];
+}
+
+void set_mask_at(std::uint8_t* out, int w, int x, int y, std::uint8_t bit) {
+  out[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = bit;
+}
+
+// Chebyshev dilation along one axis. O(width*height), independent of radius:
+// a pixel is set when the nearest set pixel on this line is within n.
 void max_filter_axis(const std::uint8_t* in, std::uint8_t* out, int w, int h, int n, bool horizontal) {
   const int primary = horizontal ? w : h;
   const int secondary = horizontal ? h : w;
+  std::vector<int> prev(static_cast<std::size_t>(primary));
+  std::vector<int> next(static_cast<std::size_t>(primary));
   for (int s = 0; s < secondary; ++s) {
+    int last = -1000000000;
     for (int i = 0; i < primary; ++i) {
-      std::uint8_t bit = 0;
-      const int a = std::max(0, i - n);
-      const int b = std::min(primary - 1, i + n);
-      for (int k = a; k <= b; ++k) {
-        const int x = horizontal ? k : s;
-        const int y = horizontal ? s : k;
-        if (in[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] != 0) {
-          bit = 1;
-          break;
-        }
-      }
       const int x = horizontal ? i : s;
       const int y = horizontal ? s : i;
-      out[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = bit;
+      if (mask_at(in, w, x, y) != 0) {
+        last = i;
+      }
+      prev[static_cast<std::size_t>(i)] = last;
+    }
+    last = 1000000000;
+    for (int i = primary - 1; i >= 0; --i) {
+      const int x = horizontal ? i : s;
+      const int y = horizontal ? s : i;
+      if (mask_at(in, w, x, y) != 0) {
+        last = i;
+      }
+      next[static_cast<std::size_t>(i)] = last;
+    }
+    for (int i = 0; i < primary; ++i) {
+      const bool on = i - prev[static_cast<std::size_t>(i)] <= n ||
+                      next[static_cast<std::size_t>(i)] - i <= n;
+      const int x = horizontal ? i : s;
+      const int y = horizontal ? s : i;
+      set_mask_at(out, w, x, y, on ? 1 : 0);
     }
   }
 }
 
+// Erosion. Outside the mask counts as clear, matching the old window check.
 void min_filter_axis(const std::uint8_t* in, std::uint8_t* out, int w, int h, int n, bool horizontal) {
   const int primary = horizontal ? w : h;
   const int secondary = horizontal ? h : w;
+  std::vector<int> prev(static_cast<std::size_t>(primary));
+  std::vector<int> next(static_cast<std::size_t>(primary));
   for (int s = 0; s < secondary; ++s) {
+    int last = -1;
     for (int i = 0; i < primary; ++i) {
-      std::uint8_t bit = 1;
-      const int a = i - n;
-      const int b = i + n;
-      if (a < 0 || b >= primary) {
-        bit = 0;
-      } else {
-        for (int k = a; k <= b; ++k) {
-          const int x = horizontal ? k : s;
-          const int y = horizontal ? s : k;
-          if (in[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] == 0) {
-            bit = 0;
-            break;
-          }
-        }
-      }
       const int x = horizontal ? i : s;
       const int y = horizontal ? s : i;
-      out[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = bit;
+      if (mask_at(in, w, x, y) == 0) {
+        last = i;
+      }
+      prev[static_cast<std::size_t>(i)] = last;
+    }
+    last = primary;
+    for (int i = primary - 1; i >= 0; --i) {
+      const int x = horizontal ? i : s;
+      const int y = horizontal ? s : i;
+      if (mask_at(in, w, x, y) == 0) {
+        last = i;
+      }
+      next[static_cast<std::size_t>(i)] = last;
+    }
+    for (int i = 0; i < primary; ++i) {
+      const bool on = i - prev[static_cast<std::size_t>(i)] > n &&
+                      next[static_cast<std::size_t>(i)] - i > n;
+      const int x = horizontal ? i : s;
+      const int y = horizontal ? s : i;
+      set_mask_at(out, w, x, y, on ? 1 : 0);
     }
   }
 }

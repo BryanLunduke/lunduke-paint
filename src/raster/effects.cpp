@@ -501,6 +501,9 @@ void halftone_rgba(std::uint8_t* rgba, int width, int height, int stride, Color 
       const int mx = (x / cell) & 7;
       const int threshold = (screen == HalftoneScreen::Clustered ? kCluster8[my][mx] : kBayer8[my][mx]) * 4;
       const Color src = read_color(p);
+      if (src.a == 0) {
+        continue;
+      }
       put_color(p, luma_of(src) <= threshold ? ink : paper);
     }
   }
@@ -571,7 +574,7 @@ void drop_shadow_rgba(std::uint8_t* rgba, int width, int height, int stride, int
 }
 
 void wind_rgba(std::uint8_t* rgba, int width, int height, int stride, WindDirection direction,
-               int strength, std::uint32_t seed) {
+               int strength, std::uint32_t seed, Color paper) {
   if (rgba == nullptr || width < 1 || height < 1) {
     return;
   }
@@ -593,27 +596,30 @@ void wind_rgba(std::uint8_t* rgba, int width, int height, int stride, WindDirect
                   static_cast<std::size_t>(x) * 4,
               c);
   };
+  auto mark = [&](Color c) { return c.a > 16 && color_chebyshev(c, paper) > 24; };
   const bool horizontal = direction == WindDirection::Left || direction == WindDirection::Right;
   const int primary = horizontal ? width : height;
   const int secondary = horizontal ? height : width;
   const int step = (direction == WindDirection::Left || direction == WindDirection::Up) ? -1 : 1;
   for (int s = 0; s < secondary; ++s) {
-    const int begin = step > 0 ? 0 : primary - 1;
-    for (int i = begin; i >= 0 && i < primary; i += step) {
+    for (int i = 0; i < primary; ++i) {
       const int x = horizontal ? i : s;
       const int y = horizontal ? s : i;
-      const int px = horizontal ? i - step : s;
-      const int py = horizontal ? s : i - step;
       const Color here = sample(x, y);
-      const bool edge = px < 0 || py < 0 || px >= width || py >= height ||
-                        color_chebyshev(here, sample(px, py)) > 24;
-      if (!edge) {
+      if (!mark(here)) {
+        continue;
+      }
+      const int nx = horizontal ? x + step : x;
+      const int ny = horizontal ? y : y + step;
+      // The image edge is not an edge: nothing wraps, and the border does not
+      // blow into the picture. Only the leeward side of a mark streaks outward.
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height || mark(sample(nx, ny))) {
         continue;
       }
       const int len = 1 + static_cast<int>(lcg(state) % static_cast<std::uint32_t>(strength));
       for (int k = 1; k <= len; ++k) {
-        const int tx = horizontal ? i + step * k : s;
-        const int ty = horizontal ? s : i + step * k;
+        const int tx = horizontal ? x + step * k : x;
+        const int ty = horizontal ? y : y + step * k;
         if (tx < 0 || ty < 0 || tx >= width || ty >= height) {
           break;
         }

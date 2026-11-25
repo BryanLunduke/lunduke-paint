@@ -788,6 +788,9 @@ bool CanvasView::on_area_motion(GdkEventMotion* event) {
   double cx = 0;
   double cy = 0;
   widget_to_canvas(event->x, event->y, cx, cy);
+  const double old_x = last_cx_;
+  const double old_y = last_cy_;
+  const bool had_pointer = has_pointer_;
   has_pointer_ = true;
   last_cx_ = cx;
   last_cy_ = cy;
@@ -803,17 +806,20 @@ bool CanvasView::on_area_motion(GdkEventMotion* event) {
     return true;
   }
   if (tool_ != nullptr && tool_->pointer_outline().kind != PointerOutline::None) {
-    area_.queue_draw();
+    if (had_pointer) {
+      queue_pointer_outline(old_x, old_y);
+    }
+    queue_pointer_outline(cx, cy);
   }
   return false;
 }
 
 bool CanvasView::on_area_leave(GdkEventCrossing* /*event*/) {
+  if (has_pointer_) {
+    queue_pointer_outline(last_cx_, last_cy_);
+  }
   has_pointer_ = false;
   signal_pointer_left_.emit();
-  if (tool_ != nullptr && tool_->pointer_outline().kind != PointerOutline::None) {
-    area_.queue_draw();
-  }
   return false;
 }
 
@@ -933,11 +939,36 @@ void CanvasView::draw_scanlines(const Cairo::RefPtr<Cairo::Context>& cr, int ox,
   }
   cr->save();
   cr->translate(ox, oy);
-  cr->scale(zoom_, zoom_);
+  // Screen pixels, not canvas pixels. Scaling the 1×2 tile with the zoom
+  // makes the lines vanish at 50% and turn into a flat tint at 25%.
   cr->set_source(scanline_pattern_);
-  cr->rectangle(0, 0, canvas_w, canvas_h);
+  cr->rectangle(0, 0, canvas_w * zoom_, canvas_h * zoom_);
   cr->fill();
   cr->restore();
+}
+
+void CanvasView::queue_pointer_outline(double cx, double cy) {
+  if (tool_ == nullptr || zoom_ <= 0.0) {
+    return;
+  }
+  const PointerOutlineInfo info = tool_->pointer_outline();
+  if (info.kind == PointerOutline::None) {
+    return;
+  }
+  int reach = 8;
+  if (info.kind == PointerOutline::Square || info.kind == PointerOutline::Circle) {
+    reach = std::max(1, info.size) / 2 + 2;
+  } else if (info.kind == PointerOutline::Tip) {
+    const int size = info.size > 0 ? info.size : brush_tip_at(info.tip).size;
+    reach = std::max(1, size) / 2 + 3;
+  } else if (info.kind == PointerOutline::Custom && info.brush != nullptr && !info.brush->empty()) {
+    reach = std::max(info.brush->width, info.brush->height) / 2 + 3;
+  }
+  const double rad = static_cast<double>(reach + 2) * std::max(1.0, zoom_) + 3.0;
+  const double sx = static_cast<double>(origin_x()) + cx * zoom_;
+  const double sy = static_cast<double>(origin_y()) + cy * zoom_;
+  area_.queue_draw_area(static_cast<int>(std::floor(sx - rad)), static_cast<int>(std::floor(sy - rad)),
+                        static_cast<int>(std::ceil(rad * 2.0)), static_cast<int>(std::ceil(rad * 2.0)));
 }
 
 void CanvasView::draw_pointer_outline(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy) {
@@ -969,7 +1000,10 @@ void CanvasView::draw_pointer_outline(const Cairo::RefPtr<Cairo::Context>& cr, i
     }
     stroke_light();
   } else if (info.kind == PointerOutline::Tip) {
-    const BrushTip tip = brush_tip_at(info.tip);
+    BrushTip tip = brush_tip_at(info.tip);
+    if (info.size > 0) {
+      tip.size = info.size;
+    }
     const int half = std::max(1, tip.size) / 2 + 1;
     for (int dy = -half; dy <= half; ++dy) {
       for (int dx = -half; dx <= half; ++dx) {

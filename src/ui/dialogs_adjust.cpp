@@ -2,7 +2,9 @@
 
 #include "ui/dialogs_adjust.hpp"
 
+#include <gdk/gdkkeysyms.h>
 #include <glibmm/main.h>
+#include <gtkmm/colorbutton.h>
 #include <gtkmm/grid.h>
 #include <gtkmm/label.h>
 
@@ -206,6 +208,22 @@ Gtk::Grid* labeled_grid() {
   return grid;
 }
 
+void enter_activates_ok(Gtk::Dialog& dialog, Gtk::ComboBox& combo) {
+  combo.signal_key_press_event().connect([&dialog, &combo](GdkEventKey* event) {
+    if (event == nullptr) {
+      return false;
+    }
+    if (event->keyval != GDK_KEY_Return && event->keyval != GDK_KEY_KP_Enter) {
+      return false;
+    }
+    if (combo.property_popup_shown().get_value()) {
+      return false;
+    }
+    dialog.response(Gtk::RESPONSE_OK);
+    return true;
+  });
+}
+
 void setup_spin(Gtk::SpinButton& spin, double lo, double hi, double value) {
   spin.set_range(lo, hi);
   spin.set_increments(1, 4);
@@ -233,6 +251,9 @@ HalftoneDialog::HalftoneDialog(Gtk::Window& parent) : LivePreviewDialog("Halfton
   add_live_preview(*grid, 2);
   watch(cell_);
   screen_.signal_changed().connect(sigc::mem_fun(*this, &HalftoneDialog::note_changed));
+  enter_activates_ok(*this, screen_);
+  // The title "Halftone / Newsprint" is wider than the spin row.
+  set_size_request(360, -1);
   get_content_area()->pack_start(*grid, Gtk::PACK_SHRINK);
   show_all();
 }
@@ -276,10 +297,19 @@ DropShadowDialog::DropShadowDialog(Gtk::Window& parent) : LivePreviewDialog("Dro
   grid->attach(dx_, 1, 0, 1, 1);
   grid->attach(*Gtk::manage(new Gtk::Label("Offset Y")), 0, 1, 1, 1);
   grid->attach(dy_, 1, 1, 1, 1);
-  auto* note = Gtk::manage(new Gtk::Label("Hard silhouette, painted in the background color"));
+  Gdk::RGBA black;
+  black.set_rgba(0, 0, 0, 1);
+  shadow_.set_rgba(black);
+  shadow_.set_use_alpha(false);
+  shadow_.set_title("Shadow color");
+  shadow_.set_tooltip_text("Hard shadow color. Black is the default.");
+  auto* note = Gtk::manage(new Gtk::Label("Hard silhouette"));
   note->set_halign(Gtk::ALIGN_START);
-  grid->attach(*note, 0, 2, 2, 1);
-  add_live_preview(*grid, 3);
+  grid->attach(*Gtk::manage(new Gtk::Label("Color")), 0, 2, 1, 1);
+  grid->attach(shadow_, 1, 2, 1, 1);
+  grid->attach(*note, 0, 3, 2, 1);
+  shadow_.signal_color_set().connect(sigc::mem_fun(*this, &DropShadowDialog::note_changed));
+  add_live_preview(*grid, 4);
   watch(dx_);
   watch(dy_);
   get_content_area()->pack_start(*grid, Gtk::PACK_SHRINK);
@@ -292,6 +322,16 @@ int DropShadowDialog::offset_x() const {
 
 int DropShadowDialog::offset_y() const {
   return dy_.get_value_as_int();
+}
+
+Color DropShadowDialog::shadow_color() const {
+  const Gdk::RGBA rgba = shadow_.get_rgba();
+  Color color;
+  color.r = static_cast<std::uint8_t>(rgba.get_red() * 255.0 + 0.5);
+  color.g = static_cast<std::uint8_t>(rgba.get_green() * 255.0 + 0.5);
+  color.b = static_cast<std::uint8_t>(rgba.get_blue() * 255.0 + 0.5);
+  color.a = 255;
+  return color;
 }
 
 WindDialog::WindDialog(Gtk::Window& parent) : LivePreviewDialog("Wind", parent) {
@@ -313,6 +353,7 @@ WindDialog::WindDialog(Gtk::Window& parent) : LivePreviewDialog("Wind", parent) 
   add_live_preview(*grid, 2);
   watch(strength_);
   direction_.signal_changed().connect(sigc::mem_fun(*this, &WindDialog::note_changed));
+  enter_activates_ok(*this, direction_);
   get_content_area()->pack_start(*grid, Gtk::PACK_SHRINK);
   show_all();
 }

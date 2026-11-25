@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include <giomm/menu.h>
 #include <giomm/menumodel.h>
 #include <giomm/simpleaction.h>
 #include <glibmm/ustring.h>
@@ -88,6 +89,7 @@ public:
   void set_pattern_index(int index) override;
   const Pattern& active_pattern() const override;
   int brush_tip() const override { return brush_tip_; }
+  int brush_tip_px() const override { return brush_tip_px_; }
   void set_brush_tip(int index) override;
   int spray_radius() const override { return spray_radius_; }
   void set_spray_radius(int radius) override;
@@ -259,6 +261,7 @@ private:
   void apply_layer_effect(const char* name,
                           const std::function<void(std::uint8_t*, int, int, int)>& fn);
   void remember_effect(const char* name, const EffectPreview::EffectFn& fn);
+  void sync_repeat_item();
   void step_tool_size(int delta);
   void morph_active_selection(SelectionMorph kind, const char* title);
   bool prepare_float_for_transform();
@@ -299,6 +302,7 @@ private:
   CustomBrush brush_image_;
   int pattern_index_{0};
   int brush_tip_{3};
+  int brush_tip_px_{0};
   int spray_radius_{16};
   int jpeg_quality_{90};
   bool intro_played_{false};
@@ -314,6 +318,8 @@ private:
   EffectPreview* effect_preview_{nullptr};
   std::string last_effect_name_;
   EffectPreview::EffectFn last_effect_;
+  Glib::RefPtr<Gio::Menu> menubar_menu_;
+  Glib::RefPtr<Gio::SimpleAction> repeat_action_;
   Glib::RefPtr<Gio::SimpleAction> undo_action_;
   Glib::RefPtr<Gio::SimpleAction> redo_action_;
   Glib::RefPtr<Gio::SimpleAction> cut_action_;

@@ -11,6 +11,11 @@ project(
   ],
 )
 
+# GTK, Pango, and fontconfig keep allocations for the life of the process.
+# LeakSanitizer treats those as failures and aborts the UI tests. Address and
+# undefined-behavior errors still abort.
+add_test_setup('default', env: ['LSAN_OPTIONS=detect_leaks=0'], is_default: true)
+
 # warning_level=2 => -Wall -Wextra
 gtkmm_dep = dependency('gtkmm-3.0', version: '>=3.24')
 cairomm_dep = dependency('cairomm-1.0')
@@ -181,7 +186,7 @@ test('blend', test_blend)
 bench_viewport = executable(
   'bench_viewport',
   files('tests/bench_viewport.cpp', 'src/ui/canvas_view.cpp', 'src/ui/intro_howdy.cpp',
-        'src/tools/selection_xform.cpp'),
+        'src/tools/selection_xform.cpp', 'src/tools/tool.cpp'),
   include_directories: lunduke_paint_inc,
   link_with: lunduke_paint_core,
   dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
@@ -225,6 +230,16 @@ test_round2 = executable(
   install: false,
 )
 test('round2', test_round2)
+
+test_review_r16 = executable(
+  'test_review_r16',
+  files('tests/test_review_r16.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  install: false,
+)
+test('review_r16', test_review_r16, timeout: 120)
 
 test_crash_recovery = executable(
   'test_crash_recovery',

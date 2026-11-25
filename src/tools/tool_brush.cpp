@@ -41,6 +41,9 @@ public:
     info.kind = PointerOutline::Tip;
     info.tip = host_ != nullptr ? host_->brush_tip() : 3;
     info.size = brush_tip_at(info.tip).size;
+    if (host_ != nullptr && host_->brush_tip_px() > 0) {
+      info.size = host_->brush_tip_px();
+    }
     return info;
   }
   Gtk::Widget* options_widget() override;
@@ -169,7 +172,10 @@ void BrushTool::stamp_to(double x, double y, bool shift) {
   }
   const Layer& active = preview_layer_ref();
   Layer& tool = host_->document().layers().tool_layer();
-  const BrushTip tip = brush_tip_at(host_->brush_tip());
+  BrushTip tip = brush_tip_at(host_->brush_tip());
+  if (host_->brush_tip_px() > 0) {
+    tip.size = host_->brush_tip_px();
+  }
   const CustomBrush* custom = host_->custom_brush();
   auto paint = [&](double x0, double y0, double x1, double y1, Rect& stamp) {
     if (smear_) {

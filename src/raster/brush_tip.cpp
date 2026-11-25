@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <vector>
 
 namespace lundukepaint {
 namespace {
@@ -93,6 +94,79 @@ int clamp_brush_tip_index(int index) {
   return index;
 }
 
+BrushTipStep step_brush_tip_size(int index, int size, int delta) {
+  index = clamp_brush_tip_index(index);
+  const BrushTip current = brush_tip_at(index);
+  if (size < 1) {
+    size = current.size;
+  }
+  struct Opt {
+    int size = 0;
+    int index = 0;
+  };
+  Opt same[kBrushTipCount];
+  int n = 0;
+  for (int i = 0; i < kBrushTipCount; ++i) {
+    const BrushTip tip = brush_tip_at(i);
+    if (tip.kind != current.kind) {
+      continue;
+    }
+    same[n++] = Opt{tip.size, i};
+  }
+  for (int i = 1; i < n; ++i) {
+    Opt key = same[i];
+    int j = i;
+    while (j > 0 && same[j - 1].size > key.size) {
+      same[j] = same[j - 1];
+      --j;
+    }
+    same[j] = key;
+  }
+  int pos = -1;
+  for (int i = 0; i < n; ++i) {
+    if (same[i].size == size) {
+      pos = i;
+      if (same[i].index == index) {
+        break;
+      }
+    }
+  }
+  if (pos >= 0) {
+    const int next = pos + (delta < 0 ? -1 : 1);
+    if (next >= 0 && next < n) {
+      return BrushTipStep{same[next].index, same[next].size};
+    }
+  }
+  static constexpr int kLadder[] = {1, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32};
+  constexpr int kLadderCount = static_cast<int>(sizeof(kLadder) / sizeof(kLadder[0]));
+  int best = 0;
+  int best_d = 1 << 30;
+  for (int i = 0; i < kLadderCount; ++i) {
+    const int d = size - kLadder[i];
+    const int ad = d < 0 ? -d : d;
+    if (ad < best_d) {
+      best_d = ad;
+      best = i;
+    }
+  }
+  int next_i = best + (delta < 0 ? -1 : 1);
+  if (next_i < 0) {
+    next_i = 0;
+  }
+  if (next_i >= kLadderCount) {
+    next_i = kLadderCount - 1;
+  }
+  const int stepped = kLadder[next_i];
+  int match = index;
+  for (int i = 0; i < n; ++i) {
+    if (same[i].size == stepped) {
+      match = same[i].index;
+      break;
+    }
+  }
+  return BrushTipStep{match, stepped};
+}
+
 void stamp_brush_tip(std::uint8_t* rgba, int width, int height, int stride, double cx, double cy,
                      const BrushTip& tip, Color color, Rect* dirty, const Pattern* pattern,
                      Color pattern_bg) {
@@ -157,23 +231,6 @@ void smear_steps(std::uint8_t* rgba, int width, int height, int stride, double x
   }
   const int steps = std::max(1, static_cast<int>(std::lround(len)));
   const int half = std::max(1, reach);
-  auto copy_pixel = [&](int sx, int sy, int dxp, int dyp) {
-    if (sx < 0 || sy < 0 || dxp < 0 || dyp < 0 || sx >= width || sy >= height || dxp >= width ||
-        dyp >= height) {
-      return;
-    }
-    const std::uint8_t* s = rgba + static_cast<std::size_t>(sy) * static_cast<std::size_t>(stride) +
-                           static_cast<std::size_t>(sx) * 4;
-    std::uint8_t* d = rgba + static_cast<std::size_t>(dyp) * static_cast<std::size_t>(stride) +
-                     static_cast<std::size_t>(dxp) * 4;
-    d[0] = s[0];
-    d[1] = s[1];
-    d[2] = s[2];
-    d[3] = s[3];
-    if (dirty != nullptr) {
-      *dirty = rect_union(*dirty, Rect{dxp, dyp, 1, 1});
-    }
-  };
   for (int i = 1; i <= steps; ++i) {
     const double t = static_cast<double>(i) / static_cast<double>(steps);
     const double pt = static_cast<double>(i - 1) / static_cast<double>(steps);
@@ -186,12 +243,49 @@ void smear_steps(std::uint8_t* rgba, int width, int height, int stride, double x
     if (ux == 0 && uy == 0) {
       continue;
     }
+    // Read every source before writing. A left-to-right loop that copies from
+    // the left overwrites its own source when the drag goes right or down.
+    struct Sampled {
+      int dxp = 0;
+      int dyp = 0;
+      std::uint8_t px[4] = {};
+    };
+    std::vector<Sampled> samples;
+    samples.reserve(static_cast<std::size_t>(half * 2 + 1) * static_cast<std::size_t>(half * 2 + 1));
     for (int oy = -half; oy <= half; ++oy) {
       for (int ox = -half; ox <= half; ++ox) {
         if (!covers(ox, oy)) {
           continue;
         }
-        copy_pixel(cx + ox - ux, cy + oy - uy, cx + ox, cy + oy);
+        const int sx = cx + ox - ux;
+        const int sy = cy + oy - uy;
+        const int dxp = cx + ox;
+        const int dyp = cy + oy;
+        if (sx < 0 || sy < 0 || dxp < 0 || dyp < 0 || sx >= width || sy >= height || dxp >= width ||
+            dyp >= height) {
+          continue;
+        }
+        const std::uint8_t* s = rgba + static_cast<std::size_t>(sy) * static_cast<std::size_t>(stride) +
+                               static_cast<std::size_t>(sx) * 4;
+        Sampled sample;
+        sample.dxp = dxp;
+        sample.dyp = dyp;
+        sample.px[0] = s[0];
+        sample.px[1] = s[1];
+        sample.px[2] = s[2];
+        sample.px[3] = s[3];
+        samples.push_back(sample);
+      }
+    }
+    for (const Sampled& sample : samples) {
+      std::uint8_t* d = rgba + static_cast<std::size_t>(sample.dyp) * static_cast<std::size_t>(stride) +
+                       static_cast<std::size_t>(sample.dxp) * 4;
+      d[0] = sample.px[0];
+      d[1] = sample.px[1];
+      d[2] = sample.px[2];
+      d[3] = sample.px[3];
+      if (dirty != nullptr) {
+        *dirty = rect_union(*dirty, Rect{sample.dxp, sample.dyp, 1, 1});
       }
     }
   }

@@ -67,8 +67,8 @@ Gtk::Widget* LineTool::options_widget() {
       shape_family_options(family_).antialias = antialias_;
     });
     options_->pack_start(*aa, Gtk::PACK_SHRINK);
-    auto* start = Gtk::manage(new Gtk::CheckButton("Arrow at start"));
-    auto* end = Gtk::manage(new Gtk::CheckButton("Arrow at end"));
+    auto* start = Gtk::manage(new Gtk::CheckButton("Start"));
+    auto* end = Gtk::manage(new Gtk::CheckButton("End"));
     start->set_tooltip_text("Hard arrowhead on the first point");
     end->set_tooltip_text("Hard arrowhead on the last point");
     configure_rail_check(*start);

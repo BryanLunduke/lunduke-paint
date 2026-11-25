@@ -79,9 +79,11 @@ void drop_shadow_rgba(std::uint8_t* rgba, int width, int height, int stride, int
 
 enum class WindDirection { Right, Left, Down, Up };
 
-// Hard streaks. An edge pixel is copied 1..`strength` pixels along `direction`.
+// Hard streaks off the leeward edge of a mark (a pixel that differs from
+// `paper`). Streaks run outward along `direction` and do not wrap, and the
+// image border is not an edge. `paper` defaults to white.
 void wind_rgba(std::uint8_t* rgba, int width, int height, int stride, WindDirection direction,
-               int strength, std::uint32_t seed);
+               int strength, std::uint32_t seed, Color paper = Color::white());
 
 // Every odd row is darkened. `percent` is 0..100. Even rows and alpha stay.
 void crt_scanlines_rgba(std::uint8_t* rgba, int width, int height, int stride, int percent);

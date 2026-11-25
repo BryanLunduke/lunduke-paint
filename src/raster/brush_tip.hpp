@@ -30,6 +30,15 @@ inline constexpr int kBrushTipCount = 16;
 
 const BrushTip& brush_tip_at(int index);
 int clamp_brush_tip_index(int index);
+
+// `[` / `]` step the size of the current tip shape. `size` <= 0 means the
+// size stored on that tip. The returned index stays on the same shape when a
+// picker cell has that size.
+struct BrushTipStep {
+  int index = 0;
+  int size = 1;
+};
+BrushTipStep step_brush_tip_size(int index, int size, int delta);
 // True when (dx, dy) from the tip center is inside the hard tip.
 bool brush_tip_covers(const BrushTip& tip, int dx, int dy);
 

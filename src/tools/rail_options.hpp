@@ -22,8 +22,10 @@ inline void configure_rail_check(Gtk::CheckButton& button) {
     // One line, ellipsized to the column. Wrapping makes GTK report a
     // minimum height for the narrowest width, taller than the rail allocates.
     label->set_ellipsize(Pango::ELLIPSIZE_END);
+    // Minimum stays at four characters so the rail does not grow. The
+    // allocation can show a short word ("Start", "End", "Smear") in full.
     label->set_width_chars(4);
-    label->set_max_width_chars(4);
+    label->set_max_width_chars(12);
     label->set_xalign(0.0f);
   }
 }
