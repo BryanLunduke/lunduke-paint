@@ -2,6 +2,7 @@
 
 #include "doc/document.hpp"
 #include "raster/fill.hpp"
+#include "raster/gradient.hpp"
 
 #include <cstdio>
 #include <vector>
@@ -90,6 +91,35 @@ int main() {
     errors += expect(doc->merge_down(), "merge down for the pump hook");
     errors += expect(lundukepaint::mutation_main_loop_pumps() == 0,
                      "merge down does not pump the main loop");
+  }
+
+  {
+    constexpr int kW = 16;
+    std::vector<std::uint8_t> buf(static_cast<std::size_t>(kW) * 8 * 4, 0);
+    lundukepaint::gradient_dither(buf.data(), kW, 8, kW * 4, 0, 0, kW - 1, 0, Color::black(),
+                                  Color::white(), lundukepaint::GradientKind::Linear, nullptr, 0, 0, 0,
+                                  0, nullptr);
+    const Color left = get(buf, kW, 0, 0);
+    const Color right = get(buf, kW, kW - 1, 0);
+    errors += expect(left == Color::black(), "linear dither starts on the first color");
+    errors += expect(right == Color::white(), "linear dither ends on the second color");
+    int flips = 0;
+    Color prev = left;
+    for (int x = 1; x < kW; ++x) {
+      const Color c = get(buf, kW, x, 3);
+      if (c != prev && (c == Color::black() || c == Color::white())) {
+        ++flips;
+        prev = c;
+      }
+    }
+    errors += expect(flips >= 2, "linear dither mixes both colors across the span");
+
+    std::vector<std::uint8_t> radial(static_cast<std::size_t>(kW) * kW * 4, 0);
+    lundukepaint::gradient_dither(radial.data(), kW, kW, kW * 4, kW / 2, kW / 2, kW - 1, kW / 2,
+                                  Color::black(), Color::white(), lundukepaint::GradientKind::Radial,
+                                  nullptr, 0, 0, 0, 0, nullptr);
+    errors += expect(get(radial, kW, kW / 2, kW / 2) == Color::black(), "radial center is the first color");
+    errors += expect(get(radial, kW, kW - 1, kW / 2) == Color::white(), "radial rim is the second color");
   }
 
   if (errors != 0) {
