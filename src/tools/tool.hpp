@@ -76,6 +76,8 @@ public:
   virtual const Pattern& active_pattern() const { return pattern_at(0); }
   virtual int brush_tip() const { return 3; }
   virtual void set_brush_tip(int /*index*/) {}
+  // 0 keeps the size stored on the tip. `[` and `]` change this, not the shape.
+  virtual int brush_tip_px() const { return 0; }
   virtual int spray_radius() const { return 16; }
   virtual void set_spray_radius(int /*radius*/) {}
   // Canvas-pixel grid. Spacing is in image pixels, so it does not change with zoom.

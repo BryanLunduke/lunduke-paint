@@ -101,7 +101,13 @@ public:
   // source layer is locked; the float stays up and nothing else should proceed.
   bool try_commit_floating(const char* name = "Move selection");
   // Drop a paste/copy, or put a move back on its origin, without stamping.
+  // A pending free-rotate is restored to the selection from before the
+  // transform, and no history entry is written.
   bool cancel_floating();
+  // Free Rotate leaves the pixels unstamped. Undo and Escape cancel it.
+  // Placing stamps one history step back to `before`, not to the float.
+  void arm_pending_transform(const char* name, SelectionState before);
+  bool pending_transform() const { return pending_transform_; }
   void nudge_floating(int dx, int dy);
   // Crop to the selection bounds. Pixels the mask does not cover are cleared
   // so a lasso does not become its bounding rectangle.
@@ -183,6 +189,9 @@ private:
   BlockedFn on_blocked_;
   DisruptFn on_disrupt_;
   InvalidatedFn on_invalidated_;
+  bool pending_transform_ = false;
+  std::string pending_name_;
+  SelectionState pending_before_{};
 };
 
 }  // namespace lundukepaint

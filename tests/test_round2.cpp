@@ -192,7 +192,7 @@ void test_rotate_shear() {
   }
   expect(seen == 4, "a 90 degree rotate keeps every source pixel");
 
-  std::vector<std::uint8_t> row(12, 0);
+  std::vector<std::uint8_t> row(3 * 2 * 4, 0);
   setpx(row.data(), 12, 0, 0, a);
   setpx(row.data(), 12, 1, 0, b);
   setpx(row.data(), 12, 0, 1, c);

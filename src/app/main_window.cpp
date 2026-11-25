@@ -62,6 +62,8 @@
 #include <gtkmm/label.h>
 #include <gtkmm/clipboard.h>
 #include <gtkmm/colorchooserdialog.h>
+#include <gtkmm/drawingarea.h>
+#include <gtkmm/progressbar.h>
 #include <gtkmm/filechooserdialog.h>
 #include <gtkmm/filefilter.h>
 #include <gtkmm/image.h>
@@ -195,7 +197,8 @@ MainWindow::MainWindow() {
   add_action(actions::kEffectShadow, sigc::mem_fun(*this, &MainWindow::action_effect_shadow));
   add_action(actions::kEffectWind, sigc::mem_fun(*this, &MainWindow::action_effect_wind));
   add_action(actions::kEffectScanlines, sigc::mem_fun(*this, &MainWindow::action_effect_scanlines));
-  add_action(actions::kRepeatEffect, sigc::mem_fun(*this, &MainWindow::action_repeat_effect));
+  repeat_action_ = add_action(actions::kRepeatEffect, sigc::mem_fun(*this, &MainWindow::action_repeat_effect));
+  repeat_action_->set_enabled(false);
   add_action(actions::kViewScanlines, sigc::mem_fun(*this, &MainWindow::action_view_scanlines));
   add_action(actions::kSaveGif, sigc::mem_fun(*this, &MainWindow::action_save_gif));
   add_action(actions::kBrushWorkshop, sigc::mem_fun(*this, &MainWindow::action_brush_workshop));
@@ -321,6 +324,8 @@ gboolean MainWindow::recovery_idle_cb(gpointer data) {
 
 void MainWindow::build_ui() {
   auto model = load_menubar_model();
+  menubar_menu_ = Glib::RefPtr<Gio::Menu>::cast_dynamic(model);
+  sync_repeat_item();
   auto* menubar = Gtk::make_managed<Gtk::MenuBar>(model);
   auto mchildren = menubar->get_children();
   if (!mchildren.empty()) {
@@ -465,6 +470,11 @@ void MainWindow::build_ui() {
   canvas_.signal_pointer_moved().connect([this](double x, double y) {
     const int ix = static_cast<int>(std::floor(x));
     const int iy = static_cast<int>(std::floor(y));
+    if (document_ptr() == nullptr || ix < 0 || iy < 0 || ix >= document().width() ||
+        iy >= document().height()) {
+      status_bar_.show_pointer_readout(x, y, "");
+      return;
+    }
     const Color color = canvas_.sample_pixel(ix, iy);
     char buffer[80];
     std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X", color.r, color.g, color.b);
@@ -740,6 +750,7 @@ const Pattern& MainWindow::active_pattern() const {
 
 void MainWindow::set_brush_tip(int index) {
   brush_tip_ = clamp_brush_tip_index(index);
+  brush_tip_px_ = brush_tip_at(brush_tip_).size;
   toolbox_.set_brush_tip(brush_tip_);
   // The tip picker is its own control. It must not move the line-width mark
   // onto a size that stack cannot show.
@@ -791,6 +802,12 @@ bool MainWindow::canvas_to_screen(int canvas_x, int canvas_y, int& screen_x, int
 }
 
 void MainWindow::on_undo() {
+  if (document_ptr() != nullptr && document().pending_transform()) {
+    document().cancel_floating();
+    canvas_.invalidate_all();
+    update_chrome();
+    return;
+  }
   document().undo();
 }
 
@@ -1638,8 +1655,43 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool 
   std::vector<std::uint8_t> flat;
   composite_visible(flat);
   std::string error;
-  if (!save_flat_image(path, format, flat.data(), document().width(), document().height(),
-                       document().width() * 4, jpeg_quality_, error)) {
+  const int pixels = document().width() * document().height();
+  std::unique_ptr<Gtk::Dialog> exporting;
+  Gtk::ProgressBar* bar = nullptr;
+  if (format == ImageFormat::Gif && pixels >= 512 * 512) {
+    exporting = std::make_unique<Gtk::Dialog>("Exporting GIF", *this, true);
+    exporting->set_deletable(false);
+    bar = Gtk::manage(new Gtk::ProgressBar());
+    bar->set_show_text(true);
+    bar->set_text("Writing GIF…");
+    bar->set_margin_start(12);
+    bar->set_margin_end(12);
+    bar->set_margin_top(12);
+    bar->set_margin_bottom(12);
+    bar->set_size_request(260, -1);
+    exporting->get_content_area()->pack_start(*bar, Gtk::PACK_SHRINK);
+    exporting->show_all();
+    while (Glib::MainContext::get_default()->pending()) {
+      Glib::MainContext::get_default()->iteration(false);
+    }
+  }
+  GifProgress gif_progress;
+  if (bar != nullptr) {
+    gif_progress = [bar](int done, int total) {
+      if (total > 0) {
+        bar->set_fraction(std::min(1.0, static_cast<double>(done) / static_cast<double>(total)));
+      }
+      while (Glib::MainContext::get_default()->pending()) {
+        Glib::MainContext::get_default()->iteration(false);
+      }
+    };
+  }
+  const bool saved = save_flat_image(path, format, flat.data(), document().width(), document().height(),
+                                     document().width() * 4, jpeg_quality_, error, gif_progress);
+  if (exporting) {
+    exporting->hide();
+  }
+  if (!saved) {
     Gtk::MessageDialog err(*this, save_error_title(path), false, Gtk::MESSAGE_ERROR,
                            Gtk::BUTTONS_OK, true);
     err.set_secondary_text(save_error_detail(path, error));
@@ -2554,6 +2606,49 @@ void MainWindow::remember_effect(const char* name, const EffectPreview::EffectFn
   }
   last_effect_name_ = name != nullptr ? name : "Effect";
   last_effect_ = fn;
+  if (repeat_action_) {
+    repeat_action_->set_enabled(true);
+  }
+  sync_repeat_item();
+}
+
+void MainWindow::sync_repeat_item() {
+  if (!menubar_menu_) {
+    return;
+  }
+  const bool has = static_cast<bool>(last_effect_);
+  const Glib::ustring label = has ? Glib::ustring("Repeat ") + last_effect_name_ : "Repeat Last Effect";
+  if (repeat_action_) {
+    repeat_action_->set_enabled(has);
+  }
+  std::function<void(const Glib::RefPtr<Gio::Menu>&)> walk;
+  walk = [&](const Glib::RefPtr<Gio::Menu>& menu) {
+    if (!menu) {
+      return;
+    }
+    const int n = menu->get_n_items();
+    for (int i = 0; i < n; ++i) {
+      gchar* action = nullptr;
+      if (g_menu_model_get_item_attribute(G_MENU_MODEL(menu->gobj()), i, G_MENU_ATTRIBUTE_ACTION, "s",
+                                         &action) &&
+          action != nullptr && std::strcmp(action, "win.repeat-effect") == 0) {
+        g_free(action);
+        menu->remove(i);
+        menu->insert(i, label, "win.repeat-effect");
+        return;
+      }
+      g_free(action);
+      auto section = Glib::RefPtr<Gio::Menu>::cast_dynamic(menu->get_item_link(i, Gio::MENU_LINK_SECTION));
+      if (section) {
+        walk(section);
+      }
+      auto sub = Glib::RefPtr<Gio::Menu>::cast_dynamic(menu->get_item_link(i, Gio::MENU_LINK_SUBMENU));
+      if (sub) {
+        walk(sub);
+      }
+    }
+  };
+  walk(menubar_menu_);
 }
 
 void MainWindow::step_tool_size(int delta) {
@@ -2561,7 +2656,11 @@ void MainWindow::step_tool_size(int delta) {
   if (std::strcmp(id, "spray") == 0) {
     set_spray_radius(step_choice(spray_radius_, kSprayRadiusChoices, kSprayRadiusChoiceCount, delta));
   } else if (std::strcmp(id, "brush") == 0) {
-    set_brush_tip(brush_tip_ + delta);
+    const BrushTipStep stepped = step_brush_tip_size(brush_tip_, brush_tip_px_, delta);
+    brush_tip_ = stepped.index;
+    brush_tip_px_ = stepped.size;
+    toolbox_.set_brush_tip(brush_tip_);
+    show_status(Glib::ustring::compose("Brush %1 px", brush_tip_px_));
   } else {
     set_stroke_size(step_choice(stroke_size_, kLineWidthChoices, kLineWidthChoiceCount, delta));
   }
@@ -2679,26 +2778,14 @@ void MainWindow::action_adjust_posterize() {
 
 void MainWindow::action_effect_blur() {
   BlurDialog dialog(*this);
-  Rect region{};
-  bool limited = false;
-  if (document_ptr() != nullptr) {
-    const Selection& sel = document().selection();
-    if (!sel.empty() && !sel.inverted()) {
-      const Layer& layer = document().layers().active_layer();
-      const Rect bounds = sel.bounds();
-      region = rect_intersect(Rect{bounds.x - layer.offset_x(), bounds.y - layer.offset_y(), bounds.w,
-                                   bounds.h},
-                              Rect{0, 0, layer.width(), layer.height()});
-      limited = !region.empty();
-    }
-  }
-  run_adjust_dialog(dialog, "Blur", [&dialog, limited, region]() -> EffectPreview::EffectFn {
+  // The selection is read when the effect runs, not captured here, so Ctrl+F
+  // follows whatever is selected now.
+  run_adjust_dialog(dialog, "Blur", [&dialog]() -> EffectPreview::EffectFn {
     const int radius = dialog.radius();
-    return [radius, limited, region](std::uint8_t* px, int w, int h, int stride) {
+    return [radius](std::uint8_t* px, int w, int h, int stride) {
       std::vector<std::uint8_t> src(static_cast<std::size_t>(h) * static_cast<std::size_t>(stride));
       std::memcpy(src.data(), px, src.size());
-      const Rect area = limited ? region : Rect{0, 0, w, h};
-      box_blur_rect(src.data(), w, h, stride, px, stride, radius, area);
+      box_blur_rect(src.data(), w, h, stride, px, stride, radius, Rect{0, 0, w, h});
     };
   });
 }
@@ -2821,12 +2908,8 @@ void MainWindow::action_save_gif() {
   if (!rebind_save_target()) {
     return;
   }
-  document().set_path(path);
-  document().mark_clean();
-  remember_recent(document().path());
-  clear_document_recovery(document());
-  update_chrome();
-  show_status("Saved static GIF");
+  // GIF is an export. The document title and the unsaved marker stay put.
+  show_status("Exported GIF");
 }
 
 void MainWindow::action_brush_workshop() {
@@ -2834,37 +2917,108 @@ void MainWindow::action_brush_workshop() {
     show_status("Pick up a selection as a brush first");
     return;
   }
+  const CustomBrush original = brush_image_;
+  CustomBrush working = brush_image_;
+  std::vector<CustomBrush> undo_stack;
   Gtk::Dialog dialog("Brush Workshop", *this, true);
-  dialog.add_button("_Close", Gtk::RESPONSE_CLOSE);
+  dialog.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+  dialog.add_button("_OK", Gtk::RESPONSE_OK);
+  dialog.set_default_response(Gtk::RESPONSE_OK);
+  auto* undo_button = Gtk::manage(new Gtk::Button("_Undo"));
+  auto* preview = Gtk::manage(new Gtk::DrawingArea());
+  preview->set_size_request(160, 120);
+  preview->signal_draw().connect([&working](const Cairo::RefPtr<Cairo::Context>& cr) {
+    const int pw = 160;
+    const int ph = 120;
+    for (int y = 0; y < ph; y += 8) {
+      for (int x = 0; x < pw; x += 8) {
+        const bool dark = ((x / 8) + (y / 8)) % 2 == 0;
+        cr->set_source_rgb(dark ? 0.75 : 0.9, dark ? 0.75 : 0.9, dark ? 0.75 : 0.9);
+        cr->rectangle(x, y, 8, 8);
+        cr->fill();
+      }
+    }
+    if (working.empty()) {
+      return true;
+    }
+    const double scale = std::min(140.0 / working.width, 100.0 / working.height);
+    const double ox = (pw - working.width * scale) * 0.5;
+    const double oy = (ph - working.height * scale) * 0.5;
+    for (int y = 0; y < working.height; ++y) {
+      for (int x = 0; x < working.width; ++x) {
+        const std::uint8_t* p =
+            working.rgba.data() + (static_cast<std::size_t>(y) * working.width + x) * 4;
+        if (p[3] == 0) {
+          continue;
+        }
+        cr->set_source_rgba(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3] / 255.0);
+        cr->rectangle(ox + x * scale, oy + y * scale, std::max(1.0, scale), std::max(1.0, scale));
+        cr->fill();
+      }
+    }
+    return true;
+  });
   auto* grid = Gtk::manage(new Gtk::Grid());
   grid->set_row_spacing(6);
   grid->set_column_spacing(6);
   grid->set_border_width(8);
+  auto edit = [&](const std::function<void()>& fn) {
+    undo_stack.push_back(working);
+    fn();
+    undo_button->set_sensitive(!undo_stack.empty());
+    preview->queue_draw();
+  };
   auto add = [&](const char* label, int col, int row, const std::function<void()>& fn) {
     auto* button = Gtk::manage(new Gtk::Button(label));
-    button->signal_clicked().connect(fn);
+    button->signal_clicked().connect([edit, fn]() { edit(fn); });
     grid->attach(*button, col, row, 1, 1);
   };
-  add("Flip H", 0, 0, [this]() { custom_brush_flip_h(brush_image_); });
-  add("Flip V", 1, 0, [this]() { custom_brush_flip_v(brush_image_); });
-  add("Rotate 90", 2, 0, [this]() { custom_brush_rotate_90(brush_image_); });
-  add("Double", 0, 1, [this]() { custom_brush_scale(brush_image_, 2, 1); });
-  add("Halve", 1, 1, [this]() { custom_brush_scale(brush_image_, 1, 2); });
-  add("Remap FG", 2, 1, [this]() { custom_brush_remap(brush_image_, document().foreground()); });
+  add("Flip H", 0, 0, [&working]() { custom_brush_flip_h(working); });
+  add("Flip V", 1, 0, [&working]() { custom_brush_flip_v(working); });
+  add("Rotate 90", 2, 0, [&working]() { custom_brush_rotate_90(working); });
+  add("Double", 0, 1, [&working]() { custom_brush_scale(working, 2, 1); });
+  add("Halve", 1, 1, [&working]() { custom_brush_scale(working, 1, 2); });
+  add("Remap FG", 2, 1, [this, &working]() { custom_brush_remap(working, document().foreground()); });
   auto* spacing = Gtk::manage(new Gtk::SpinButton());
   spacing->set_range(0, 64);
   spacing->set_increments(1, 4);
   spacing->set_digits(0);
-  spacing->set_value(brush_image_.spacing);
+  spacing->set_value(working.spacing);
   spacing->set_tooltip_text("Stamp gap in pixels. 0 keeps the automatic step.");
-  spacing->signal_value_changed().connect([this, spacing]() {
-    brush_image_.spacing = spacing->get_value_as_int();
+  spacing->set_activates_default(true);
+  spacing->signal_value_changed().connect([&working, spacing, &undo_stack, undo_button, preview]() {
+    if (working.spacing == spacing->get_value_as_int()) {
+      return;
+    }
+    undo_stack.push_back(working);
+    working.spacing = spacing->get_value_as_int();
+    undo_button->set_sensitive(!undo_stack.empty());
+    preview->queue_draw();
   });
+  undo_button->signal_clicked().connect([&working, &undo_stack, undo_button, preview, spacing]() {
+    if (undo_stack.empty()) {
+      return;
+    }
+    working = undo_stack.back();
+    undo_stack.pop_back();
+    spacing->set_value(working.spacing);
+    undo_button->set_sensitive(!undo_stack.empty());
+    preview->queue_draw();
+  });
+  undo_button->set_sensitive(false);
+  grid->attach(*undo_button, 0, 4, 3, 1);
   grid->attach(*Gtk::manage(new Gtk::Label("Spacing")), 0, 2, 1, 1);
   grid->attach(*spacing, 1, 2, 2, 1);
+  grid->attach(*preview, 0, 3, 3, 1);
   dialog.get_content_area()->pack_start(*grid, Gtk::PACK_SHRINK);
   dialog.show_all();
-  dialog.run();
+  const int response = dialog.run();
+  if (response != Gtk::RESPONSE_OK) {
+    brush_image_ = original;
+    show_status("Brush workshop cancelled");
+    return;
+  }
+  brush_image_ = working;
   show_status(Glib::ustring::compose("Custom brush %1×%2", brush_image_.width, brush_image_.height));
   canvas_.queue_draw();
 }
@@ -2917,6 +3071,14 @@ bool MainWindow::prepare_float_for_transform() {
     show_status("Free rotate needs a normal selection");
     return false;
   }
+  int index = document().layers().active_index();
+  if (document().selection().floating() && document().selection().source_layer() >= 0) {
+    index = document().selection().source_layer();
+  }
+  if (index < 0 || index >= document().layers().count() || document().layers().at(index).locked()) {
+    report_blocked("Layer is locked");
+    return false;
+  }
   if (!commit_live_edits()) {
     return false;
   }
@@ -2967,7 +3129,9 @@ void MainWindow::action_free_rotate() {
   const int ny = static_cast<int>(std::lround(cy - sampled.height * 0.5));
   sel.transform_float(nx, ny, sampled.width, sampled.height, std::move(sampled.rgba),
                       std::move(sampled.coverage));
-  document().commit(std::make_unique<SelectionCommand>("Free rotate", before, sel.capture()));
+  // One step, written when the float is placed. Escape and Ctrl+Z cancel
+  // without a history entry. Undo after placing does not return to the float.
+  document().arm_pending_transform("Free rotate", before);
   canvas_.invalidate_all();
   update_chrome();
 }
@@ -3067,7 +3231,7 @@ void MainWindow::action_effect_shadow() {
   run_adjust_dialog(dialog, "Drop shadow", [&dialog, this]() -> EffectPreview::EffectFn {
     const int dx = dialog.offset_x();
     const int dy = dialog.offset_y();
-    const Color shadow = document().background();
+    const Color shadow = dialog.shadow_color();
     const Color paper = document().background();
     if (dx == 0 && dy == 0) {
       return nullptr;
@@ -3080,15 +3244,16 @@ void MainWindow::action_effect_shadow() {
 
 void MainWindow::action_effect_wind() {
   WindDialog dialog(*this);
-  run_adjust_dialog(dialog, "Wind", [&dialog]() -> EffectPreview::EffectFn {
+  run_adjust_dialog(dialog, "Wind", [&dialog, this]() -> EffectPreview::EffectFn {
     const int which = dialog.direction();
     const WindDirection direction = which == 1   ? WindDirection::Left
                                     : which == 2 ? WindDirection::Down
                                     : which == 3 ? WindDirection::Up
                                                  : WindDirection::Right;
     const int strength = dialog.strength();
-    return [direction, strength](std::uint8_t* px, int w, int h, int stride) {
-      wind_rgba(px, w, h, stride, direction, strength, 0xA11CEu);
+    const Color paper = document().background();
+    return [direction, strength, paper](std::uint8_t* px, int w, int h, int stride) {
+      wind_rgba(px, w, h, stride, direction, strength, 0xA11CEu, paper);
     };
   });
 }

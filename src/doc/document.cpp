@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstring>
 #include <utility>
 
 namespace {
@@ -325,7 +326,19 @@ bool Document::commit_floating(const char* name) {
   if (index < 0 || index >= layers_.count() || layers_.at(index).locked()) {
     return false;
   }
-  const SelectionState selection_before = selection_.capture();
+  SelectionState selection_before = selection_.capture();
+  const char* stamp_name = name != nullptr ? name : "Move selection";
+  std::string armed_name;
+  if (pending_transform_) {
+    selection_before = pending_before_;
+    if (name == nullptr || std::strcmp(name, "Move selection") == 0) {
+      armed_name = pending_name_;
+      stamp_name = armed_name.c_str();
+    }
+    pending_transform_ = false;
+    pending_name_.clear();
+    pending_before_ = {};
+  }
   Layer& layer = layers_.at(index);
   const int ox = layer.offset_x();
   const int oy = layer.offset_y();
@@ -387,7 +400,7 @@ bool Document::commit_floating(const char* name) {
   } else {
     selection_.clear();
   }
-  auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, name ? name : "Move selection", index);
+  auto cmd = PixelPatchCommand::from_layers(before, layer, dirty, stamp_name, index);
   // A float that misses the layer has an empty pixel patch. It is still a
   // history step so the paste can be undone and redone.
   if (cmd) {
@@ -504,9 +517,29 @@ void Document::paste_floating(int x, int y, int w, int h, std::vector<std::uint8
   notify_changed();
 }
 
+void Document::arm_pending_transform(const char* name, SelectionState before) {
+  pending_transform_ = true;
+  pending_name_ = name != nullptr ? name : "Free rotate";
+  pending_before_ = std::move(before);
+}
+
 bool Document::cancel_floating() {
   if (!selection_.floating()) {
+    pending_transform_ = false;
+    pending_name_.clear();
+    pending_before_ = {};
     return false;
+  }
+  if (pending_transform_) {
+    Rect dirty = selection_.dirty_union();
+    selection_.restore(pending_before_);
+    dirty = rect_union(dirty, selection_.dirty_union());
+    pending_transform_ = false;
+    pending_name_.clear();
+    pending_before_ = {};
+    notify_invalidated(dirty);
+    notify_changed();
+    return true;
   }
   const Rect dirty = selection_.dirty_union();
   if (selection_.copy_mode()) {

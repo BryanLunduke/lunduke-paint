@@ -482,11 +482,44 @@ SampledPixels rotate_nearest_angle(const std::uint8_t* src, int width, int heigh
   return out;
 }
 
+static SampledPixels copy_sampled(const std::uint8_t* src, int width, int height, int stride,
+                           const std::uint8_t* coverage) {
+  SampledPixels out;
+  out.width = width;
+  out.height = height;
+  out.rgba.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4, 0);
+  out.coverage.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      if (coverage_at(coverage, width, x, y) == 0) {
+        continue;
+      }
+      const std::uint8_t* sp = src + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
+                              static_cast<std::size_t>(x) * 4;
+      std::uint8_t* dp = out.rgba.data() +
+                        (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                         static_cast<std::size_t>(x)) *
+                            4;
+      dp[0] = sp[0];
+      dp[1] = sp[1];
+      dp[2] = sp[2];
+      dp[3] = sp[3];
+      out.coverage[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                   static_cast<std::size_t>(x)] = 1;
+    }
+  }
+  return out;
+}
+
 SampledPixels shear_horizontal_nearest(const std::uint8_t* src, int width, int height, int stride,
                                        const std::uint8_t* coverage, int shift) {
   SampledPixels out;
   if (src == nullptr || width < 1 || height < 1) {
     return out;
+  }
+  // One row has no far edge to shift, so a shear would only pad empty pixels.
+  if (height < 2 || shift == 0) {
+    return copy_sampled(src, width, height, stride, coverage);
   }
   const int extra = std::abs(shift);
   out.width = width + extra;
@@ -527,6 +560,9 @@ SampledPixels shear_vertical_nearest(const std::uint8_t* src, int width, int hei
   SampledPixels out;
   if (src == nullptr || width < 1 || height < 1) {
     return out;
+  }
+  if (width < 2 || shift == 0) {
+    return copy_sampled(src, width, height, stride, coverage);
   }
   const int extra = std::abs(shift);
   out.width = width;
