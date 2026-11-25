@@ -174,6 +174,12 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
 void blit_rgba(Layer& dest, int dx, int dy, const std::uint8_t* src, int sw, int sh, int sstride,
                bool skip_transparent, const std::uint8_t* coverage = nullptr);
 
+// Hard (Chebyshev) selection edit. Expand grows by N, Contract shrinks by N,
+// Border keeps the band N pixels either side of the edge. A solid result
+// stays a rectangle. Returns false when nothing is selected or N < 1.
+enum class SelectionMorph { Expand, Contract, Border };
+bool morph_selection(Selection& selection, int canvas_w, int canvas_h, SelectionMorph kind, int pixels);
+
 // Paint a floating selection into a layer-sized straight-RGBA buffer the way
 // a commit would: punch the origin hole, then blit the float. Does not modify
 // the selection or the live layer. Used by crash recovery.

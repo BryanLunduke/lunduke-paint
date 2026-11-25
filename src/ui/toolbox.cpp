@@ -7,6 +7,7 @@
 #include "ui/symbolic_icon.hpp"
 
 #include "raster/brush_tip.hpp"
+#include "ui/rail_sizes.hpp"
 
 #include <gdkmm/pixbuf.h>
 #include <gdkmm/screen.h>
@@ -31,8 +32,6 @@ namespace {
 // 220 px minimum; b8a8e37 (v0.9-7) then stretched the pickers to that width.
 constexpr int kGridWidthSlop = 36;
 constexpr int kSideAir = 8;
-constexpr int kLineChoices[5] = {1, 2, 3, 5, 8};
-constexpr int kSprayChoices[5] = {4, 8, 12, 16, 24};
 constexpr int kBrushCols = 4;
 constexpr int kBrushRows = 4;
 
@@ -482,13 +481,13 @@ bool Toolbox::width_tracks_tool_grid() const {
 int Toolbox::width_at_y(double y) const {
   const int h = line_widths_.get_allocated_height();
   const int row = std::max(0, std::min(4, static_cast<int>(y * 5.0 / std::max(1, h))));
-  return kLineChoices[row];
+  return kLineWidthChoices[row];
 }
 
 int Toolbox::spray_radius_at_y(double y) const {
   const int h = spray_radii_.get_allocated_height();
   const int row = std::max(0, std::min(4, static_cast<int>(y * 5.0 / std::max(1, h))));
-  return kSprayChoices[row];
+  return kSprayRadiusChoices[row];
 }
 
 int Toolbox::brush_tip_at(double x, double y) const {
@@ -504,10 +503,10 @@ bool Toolbox::on_line_width_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const int h = line_widths_.get_allocated_height();
   fill_picker_bg(*this, cr, w, h);
 
-  const int marked = marked_line_width(line_width_, kLineChoices, 5);
+  const int marked = marked_line_width(line_width_, kLineWidthChoices, 5);
   int best = -1;
   for (int j = 0; j < 5; ++j) {
-    if (kLineChoices[j] == marked) {
+    if (kLineWidthChoices[j] == marked) {
       best = j;
       break;
     }
@@ -516,7 +515,7 @@ bool Toolbox::on_line_width_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const double row_h = h / 5.0;
   for (int i = 0; i < 5; ++i) {
     const double cy = row_h * (i + 0.5);
-    const int lw = kLineChoices[i];
+    const int lw = kLineWidthChoices[i];
     if (best >= 0 && i == best) {
       cr->set_source_rgb(0.1, 0.1, 0.1);
       cr->move_to(4, cy);
@@ -651,7 +650,7 @@ bool Toolbox::on_spray_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   int best = 0;
   int bestd = 999;
   for (int j = 0; j < 5; ++j) {
-    const int d = std::abs(spray_radius_ - kSprayChoices[j]);
+    const int d = std::abs(spray_radius_ - kSprayRadiusChoices[j]);
     if (d < bestd) {
       bestd = d;
       best = j;
@@ -661,7 +660,7 @@ bool Toolbox::on_spray_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const double row_h = h / 5.0;
   for (int i = 0; i < 5; ++i) {
     const double cy = row_h * (i + 0.5);
-    const int rad = kSprayChoices[i];
+    const int rad = kSprayRadiusChoices[i];
     if (i == best) {
       cr->set_source_rgb(0.1, 0.1, 0.1);
       cr->move_to(4, cy);

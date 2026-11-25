@@ -56,6 +56,7 @@ lunduke_paint_core_sources = files(
   'src/raster/pattern.cpp',
   'src/doc/commands_layers.cpp',
   'src/io/image_io.cpp',
+  'src/io/gif.cpp',
   'src/io/ora.cpp',
   'src/io/crash_recovery.cpp',
 )
@@ -214,6 +215,16 @@ test_effects = executable(
   install: false,
 )
 test('effects', test_effects)
+
+test_round2 = executable(
+  'test_round2',
+  files('tests/test_round2.cpp', 'src/ui/colors_panel.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, gdkpixbuf_dep, glib_dep],
+  install: false,
+)
+test('round2', test_round2)
 
 test_crash_recovery = executable(
   'test_crash_recovery',

@@ -61,6 +61,31 @@ void emboss_rgba(const std::uint8_t* src, int width, int height, int src_stride,
 // interior marks and the paper itself become `paper`. A mark differs from paper.
 void trace_edges_rgba(std::uint8_t* rgba, int width, int height, int stride, Color ink, Color paper);
 
+// Hard halftone. Each matrix cell is `cell` pixels (1..16). Output is only
+// `ink` or `paper` — a newspaper screen, not a blur.
+enum class HalftoneScreen { Bayer, Clustered };
+void halftone_rgba(std::uint8_t* rgba, int width, int height, int stride, Color ink, Color paper,
+                   int cell, HalftoneScreen screen);
+
+// Swap each pixel with one random neighbor inside the Chebyshev radius.
+// `seed` makes the shuffle repeatable (0 is treated as 1).
+void diffuse_rgba(std::uint8_t* rgba, int width, int height, int stride, int radius,
+                  std::uint32_t seed);
+
+// Hard silhouette offset. Marks (pixels that differ from `paper`) stay.
+// The offset copy is painted in `shadow` only where the source was not a mark.
+void drop_shadow_rgba(std::uint8_t* rgba, int width, int height, int stride, int dx, int dy,
+                      Color shadow, Color paper);
+
+enum class WindDirection { Right, Left, Down, Up };
+
+// Hard streaks. An edge pixel is copied 1..`strength` pixels along `direction`.
+void wind_rgba(std::uint8_t* rgba, int width, int height, int stride, WindDirection direction,
+               int strength, std::uint32_t seed);
+
+// Every odd row is darkened. `percent` is 0..100. Even rows and alpha stay.
+void crt_scanlines_rgba(std::uint8_t* rgba, int width, int height, int stride, int percent);
+
 }  // namespace lundukepaint
 
 #endif

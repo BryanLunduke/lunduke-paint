@@ -13,6 +13,8 @@ namespace lundukepaint {
 struct ShapeFamilyOptions {
   bool antialias = false;
   int corner_radius = 12;
+  bool arrow_start = false;
+  bool arrow_end = false;
 };
 
 inline ShapeFamilyOptions& shape_family_options(const char* family) {

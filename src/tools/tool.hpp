@@ -38,6 +38,15 @@ struct Modifier {
   static constexpr unsigned Alt = 4u;
 };
 
+enum class PointerOutline { None, Square, Circle, Tip, Custom };
+
+struct PointerOutlineInfo {
+  PointerOutline kind = PointerOutline::None;
+  int size = 1;
+  int tip = 0;
+  const CustomBrush* brush = nullptr;
+};
+
 class ToolHost {
 public:
   virtual ~ToolHost() = default;
@@ -142,6 +151,8 @@ public:
   // transparency checker over opaque canvas content (R-F03).
   virtual bool uses_tool_layer() const { return is_stroking(); }
   virtual bool captures_keys() const { return false; }
+  // Screen-space outline of the tip. The Gdk cursor stays a crosshair.
+  virtual PointerOutlineInfo pointer_outline() const { return {}; }
   // Drop a half-finished pointer gesture (rubber band, scale drag) without
   // moving a floating selection back to its origin. Tool changes call this
   // when the float itself is being kept.

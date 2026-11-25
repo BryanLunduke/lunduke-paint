@@ -21,6 +21,12 @@ public:
   const char* name() const override { return "Eraser"; }
   char shortcut() const override { return 'A'; }
   const char* hint() const override { return "Eraser: paints the background color"; }
+  PointerOutlineInfo pointer_outline() const override {
+    PointerOutlineInfo info;
+    info.kind = PointerOutline::Circle;
+    info.size = stroke_px();
+    return info;
+  }
   bool is_stroking() const override { return drawing_; }
   Gtk::Widget* options_widget() override;
 

@@ -7,6 +7,7 @@
 #include "doc/selection.hpp"
 #include "raster/stroke.hpp"
 
+#include <algorithm>
 #include <cstdint>
 
 namespace lundukepaint {
@@ -17,6 +18,12 @@ public:
   const char* name() const override { return "Spraycan"; }
   char shortcut() const override { return 'Y'; }
   const char* hint() const override { return "Spraycan: drag; right uses BG"; }
+  PointerOutlineInfo pointer_outline() const override {
+    PointerOutlineInfo info;
+    info.kind = PointerOutline::Circle;
+    info.size = std::max(2, (host_ != nullptr ? host_->spray_radius() : 16) * 2);
+    return info;
+  }
   bool is_stroking() const override { return drawing_; }
   // Options live in the MacPaint left-rail spray picker (0.5-4).
   Gtk::Widget* options_widget() override { return nullptr; }

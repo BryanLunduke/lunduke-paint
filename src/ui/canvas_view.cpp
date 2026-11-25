@@ -216,6 +216,10 @@ CanvasView::CanvasView() {
   update_area_size();
 }
 
+CanvasView::~CanvasView() {
+  autoscroll_timer_.disconnect();
+}
+
 void CanvasView::update_cursor() {
   const char* id = tool_ != nullptr && tool_->id() != nullptr ? tool_->id() : "";
   if (space_down_ || std::strcmp(id, "hand") == 0) {
@@ -753,9 +757,13 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   (void)cw;
   (void)ch;
 
+  if (scanlines_) {
+    draw_scanlines(cr, ox, oy, cw, ch);
+  }
   if (grid_visible_ && zoom_ + 1e-9 >= static_cast<double>(grid_threshold_) / 100.0) {
     draw_pixel_grid(cr, ox, oy, vis_x0, vis_y0, vis_x1, vis_y1);
   }
+  draw_pointer_outline(cr, ox, oy);
   draw_marching_ants(cr, ox, oy);
   if (document_ != nullptr) {
     draw_selection_handles(cr, document_->selection(), ox, oy, zoom_);
@@ -791,7 +799,11 @@ bool CanvasView::on_area_motion(GdkEventMotion* event) {
   }
   if (tool_ != nullptr && tool_->is_stroking()) {
     tool_->on_motion(make_event(event->x, event->y, 0, event->state));
+    autoscroll_while_drawing(event->x, event->y, event->state);
     return true;
+  }
+  if (tool_ != nullptr && tool_->pointer_outline().kind != PointerOutline::None) {
+    area_.queue_draw();
   }
   return false;
 }
@@ -799,6 +811,9 @@ bool CanvasView::on_area_motion(GdkEventMotion* event) {
 bool CanvasView::on_area_leave(GdkEventCrossing* /*event*/) {
   has_pointer_ = false;
   signal_pointer_left_.emit();
+  if (tool_ != nullptr && tool_->pointer_outline().kind != PointerOutline::None) {
+    area_.queue_draw();
+  }
   return false;
 }
 
@@ -837,6 +852,9 @@ bool CanvasView::on_area_button_release(GdkEventButton* event) {
     return true;
   }
   if (tool_ != nullptr && (event->button == 1 || event->button == 3)) {
+    autoscroll_timer_.disconnect();
+    autoscroll_dx_ = 0;
+    autoscroll_dy_ = 0;
     tool_->on_release(make_event(event->x, event->y, event->button, event->state));
     return true;
   }
@@ -885,6 +903,167 @@ void CanvasView::set_grid_visible(bool visible) {
   }
   grid_visible_ = visible;
   invalidate_all();
+}
+
+void CanvasView::set_scanlines(bool enabled) {
+  if (scanlines_ == enabled) {
+    return;
+  }
+  scanlines_ = enabled;
+  // Overlay only. The composite cache stays as it is.
+  queue_draw();
+}
+
+void CanvasView::draw_scanlines(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy, int canvas_w,
+                                int canvas_h) {
+  if (!scanline_pattern_) {
+    auto tile = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, 1, 2);
+    unsigned char* pixels = tile->get_data();
+    const int stride = tile->get_stride();
+    pixels[0] = pixels[1] = pixels[2] = pixels[3] = 0;
+    unsigned char* dark = pixels + stride;
+    dark[0] = 0;
+    dark[1] = 0;
+    dark[2] = 0;
+    dark[3] = 110;
+    tile->mark_dirty();
+    scanline_pattern_ = Cairo::SurfacePattern::create(tile);
+    scanline_pattern_->set_extend(Cairo::EXTEND_REPEAT);
+    cairo_pattern_set_filter(scanline_pattern_->cobj(), CAIRO_FILTER_NEAREST);
+  }
+  cr->save();
+  cr->translate(ox, oy);
+  cr->scale(zoom_, zoom_);
+  cr->set_source(scanline_pattern_);
+  cr->rectangle(0, 0, canvas_w, canvas_h);
+  cr->fill();
+  cr->restore();
+}
+
+void CanvasView::draw_pointer_outline(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy) {
+  if (!has_pointer_ || tool_ == nullptr || zoom_ <= 0.0) {
+    return;
+  }
+  const PointerOutlineInfo info = tool_->pointer_outline();
+  if (info.kind == PointerOutline::None) {
+    return;
+  }
+  const double sx = ox + last_cx_ * zoom_;
+  const double sy = oy + last_cy_ * zoom_;
+  auto stroke_light = [&]() {
+    cr->set_line_width(1.0);
+    cr->set_source_rgba(1.0, 1.0, 1.0, 0.92);
+    cr->stroke_preserve();
+    cr->set_source_rgba(0.05, 0.05, 0.05, 0.55);
+    cr->set_dash(std::vector<double>{1.0, 1.0}, 0);
+    cr->stroke();
+    cr->unset_dash();
+  };
+  cr->save();
+  if (info.kind == PointerOutline::Square || info.kind == PointerOutline::Circle) {
+    const double side = std::max(1, info.size) * zoom_;
+    if (info.kind == PointerOutline::Square) {
+      cr->rectangle(sx - side * 0.5, sy - side * 0.5, side, side);
+    } else {
+      cr->arc(sx, sy, std::max(0.5, side * 0.5), 0, 6.283185307179586);
+    }
+    stroke_light();
+  } else if (info.kind == PointerOutline::Tip) {
+    const BrushTip tip = brush_tip_at(info.tip);
+    const int half = std::max(1, tip.size) / 2 + 1;
+    for (int dy = -half; dy <= half; ++dy) {
+      for (int dx = -half; dx <= half; ++dx) {
+        if (!brush_tip_covers(tip, dx, dy)) {
+          continue;
+        }
+        const bool edge = !brush_tip_covers(tip, dx - 1, dy) || !brush_tip_covers(tip, dx + 1, dy) ||
+                          !brush_tip_covers(tip, dx, dy - 1) || !brush_tip_covers(tip, dx, dy + 1);
+        if (!edge) {
+          continue;
+        }
+        cr->rectangle(sx + dx * zoom_, sy + dy * zoom_, std::max(1.0, zoom_), std::max(1.0, zoom_));
+      }
+    }
+    stroke_light();
+  } else if (info.kind == PointerOutline::Custom && info.brush != nullptr && !info.brush->empty()) {
+    const CustomBrush& brush = *info.brush;
+    const int left = -(brush.width / 2);
+    const int top = -(brush.height / 2);
+    auto opaque = [&](int bx, int by) {
+      if (bx < 0 || by < 0 || bx >= brush.width || by >= brush.height) {
+        return false;
+      }
+      return brush.rgba[(static_cast<std::size_t>(by) * brush.width + bx) * 4 + 3] != 0;
+    };
+    for (int by = 0; by < brush.height; ++by) {
+      for (int bx = 0; bx < brush.width; ++bx) {
+        if (!opaque(bx, by)) {
+          continue;
+        }
+        if (opaque(bx - 1, by) && opaque(bx + 1, by) && opaque(bx, by - 1) && opaque(bx, by + 1)) {
+          continue;
+        }
+        cr->rectangle(sx + (left + bx) * zoom_, sy + (top + by) * zoom_, std::max(1.0, zoom_),
+                      std::max(1.0, zoom_));
+      }
+    }
+    stroke_light();
+  }
+  cr->restore();
+}
+
+void CanvasView::autoscroll_while_drawing(double area_x, double area_y, guint state) {
+  autoscroll_state_ = state;
+  const auto hadj = get_hadjustment();
+  const auto vadj = get_vadjustment();
+  if (!hadj || !vadj) {
+    return;
+  }
+  const double layout_x = static_cast<double>(area_move_x_) + area_x;
+  const double layout_y = static_cast<double>(area_move_y_) + area_y;
+  const double margin = 16.0;
+  const double step = 24.0;
+  autoscroll_dx_ = 0;
+  autoscroll_dy_ = 0;
+  if (layout_x < hadj->get_value() + margin) {
+    autoscroll_dx_ = -1;
+  } else if (layout_x > hadj->get_value() + hadj->get_page_size() - margin) {
+    autoscroll_dx_ = 1;
+  }
+  if (layout_y < vadj->get_value() + margin) {
+    autoscroll_dy_ = -1;
+  } else if (layout_y > vadj->get_value() + vadj->get_page_size() - margin) {
+    autoscroll_dy_ = 1;
+  }
+  if (autoscroll_dx_ == 0 && autoscroll_dy_ == 0) {
+    autoscroll_timer_.disconnect();
+    return;
+  }
+  hadj->set_value(hadj->get_value() + autoscroll_dx_ * step);
+  vadj->set_value(vadj->get_value() + autoscroll_dy_ * step);
+  if (!autoscroll_timer_.connected()) {
+    autoscroll_timer_ = Glib::signal_timeout().connect(sigc::mem_fun(*this, &CanvasView::on_autoscroll_tick),
+                                                       40);
+  }
+}
+
+bool CanvasView::on_autoscroll_tick() {
+  if (tool_ == nullptr || !tool_->is_stroking() || (autoscroll_dx_ == 0 && autoscroll_dy_ == 0)) {
+    return false;
+  }
+  const auto hadj = get_hadjustment();
+  const auto vadj = get_vadjustment();
+  if (!hadj || !vadj) {
+    return false;
+  }
+  const double step = 24.0;
+  hadj->set_value(hadj->get_value() + autoscroll_dx_ * step);
+  vadj->set_value(vadj->get_value() + autoscroll_dy_ * step);
+  int px = 0;
+  int py = 0;
+  area_.get_pointer(px, py);
+  tool_->on_motion(make_event(px, py, 0, autoscroll_state_));
+  return true;
 }
 
 void CanvasView::set_checker_colors(Color light, Color dark) {

@@ -23,6 +23,8 @@ LCOS 1.1.0. Package 1.1.0-1. About dialog and meson version read 1.1.0.
 
 Editor's picks, same MacPaint chrome: marching ants no longer rebuild the viewport composite; Normal blends and zoomed-out OpenRaster groups are faster; Shift draws a straight pencil or brush stroke; Snap to Grid is an 8-pixel canvas grid at any zoom; Trace Edges, a Bayer gradient on the fill tool, selection-as-brush, and an 8×8 pattern from the selection; New Image presets and Quantize to Palette (ordered or Floyd–Steinberg); Howdy is a preference, off unless turned on.
 
+Round 2, same chrome and the same 1.1.0-1 package: Halftone / Newsprint (Bayer or clustered-dot, foreground and background only), Diffuse, a hard drop shadow in the background color, Wind, and CRT scanlines both as a View overlay and as a bake. Ctrl+F repeats the last effect or adjustment. `[` and `]` step line width, brush tip, or spray radius. The status bar shows `#RRGGBB` and a palette index when the pixel is a swatch. Drawing at the edge of the view scrolls the canvas. The brush workshop flips, rotates, scales, remaps, and spaces a selection brush; the brush can smear. Free Rotate and Shear is nearest-neighbor. File → Save as GIF writes one static frame (the current palette, or reduced to 256). Line and polyline can put a hard arrowhead at either end. Expand, Shrink, and Border grow a selection by hard pixels.
+
 ## 1.0.1
 
 LCOS 1.0.1. Package 1.0.1-1. About dialog and meson version read 1.0.1. No functional changes.

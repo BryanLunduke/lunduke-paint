@@ -438,4 +438,211 @@ void trace_edges_rgba(std::uint8_t* rgba, int width, int height, int stride, Col
   }
 }
 
+namespace {
+
+constexpr int kBayer8[8][8] = {
+    {0, 32, 8, 40, 2, 34, 10, 42}, {48, 16, 56, 24, 50, 18, 58, 26},
+    {12, 44, 4, 36, 14, 46, 6, 38}, {60, 28, 52, 20, 62, 30, 54, 22},
+    {3, 35, 11, 43, 1, 33, 9, 41},  {51, 19, 59, 27, 49, 17, 57, 25},
+    {15, 47, 7, 39, 13, 45, 5, 37}, {63, 31, 55, 23, 61, 29, 53, 21},
+};
+
+// Clustered-dot screen: ink grows from the middle of each 8×8 cell.
+constexpr int kCluster8[8][8] = {
+    {24, 10, 12, 26, 35, 47, 49, 37}, {8, 0, 2, 14, 45, 59, 61, 51},
+    {22, 6, 4, 16, 43, 57, 63, 53},   {30, 20, 18, 28, 33, 41, 55, 39},
+    {34, 46, 48, 36, 25, 11, 13, 27}, {44, 58, 60, 50, 9, 1, 3, 15},
+    {42, 56, 62, 52, 23, 7, 5, 17},   {32, 40, 54, 38, 31, 21, 19, 29},
+};
+
+int clamp_cell(int cell) {
+  if (cell < 1) {
+    return 1;
+  }
+  if (cell > 16) {
+    return 16;
+  }
+  return cell;
+}
+
+void put_color(std::uint8_t* p, Color c) {
+  p[0] = c.r;
+  p[1] = c.g;
+  p[2] = c.b;
+  p[3] = c.a;
+}
+
+Color read_color(const std::uint8_t* p) {
+  return {p[0], p[1], p[2], p[3]};
+}
+
+int luma_of(Color c) {
+  return (static_cast<int>(c.r) * 77 + static_cast<int>(c.g) * 150 + static_cast<int>(c.b) * 29) >> 8;
+}
+
+std::uint32_t lcg(std::uint32_t& state) {
+  state = state * 1664525u + 1013904223u;
+  return state;
+}
+
+}  // namespace
+
+void halftone_rgba(std::uint8_t* rgba, int width, int height, int stride, Color ink, Color paper,
+                   int cell, HalftoneScreen screen) {
+  if (rgba == nullptr || width < 1 || height < 1) {
+    return;
+  }
+  cell = clamp_cell(cell);
+  for (int y = 0; y < height; ++y) {
+    std::uint8_t* row = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+    const int my = (y / cell) & 7;
+    for (int x = 0; x < width; ++x) {
+      std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
+      const int mx = (x / cell) & 7;
+      const int threshold = (screen == HalftoneScreen::Clustered ? kCluster8[my][mx] : kBayer8[my][mx]) * 4;
+      const Color src = read_color(p);
+      put_color(p, luma_of(src) <= threshold ? ink : paper);
+    }
+  }
+}
+
+void diffuse_rgba(std::uint8_t* rgba, int width, int height, int stride, int radius,
+                  std::uint32_t seed) {
+  if (rgba == nullptr || width < 1 || height < 1 || radius < 1) {
+    return;
+  }
+  if (radius > 64) {
+    radius = 64;
+  }
+  std::uint32_t state = seed == 0 ? 1u : seed;
+  const int span = radius * 2 + 1;
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      const int dx = static_cast<int>(lcg(state) % static_cast<std::uint32_t>(span)) - radius;
+      const int dy = static_cast<int>(lcg(state) % static_cast<std::uint32_t>(span)) - radius;
+      const int nx = std::max(0, std::min(width - 1, x + dx));
+      const int ny = std::max(0, std::min(height - 1, y + dy));
+      std::uint8_t* a = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
+                       static_cast<std::size_t>(x) * 4;
+      std::uint8_t* b = rgba + static_cast<std::size_t>(ny) * static_cast<std::size_t>(stride) +
+                       static_cast<std::size_t>(nx) * 4;
+      for (int c = 0; c < 4; ++c) {
+        const std::uint8_t tmp = a[c];
+        a[c] = b[c];
+        b[c] = tmp;
+      }
+    }
+  }
+}
+
+void drop_shadow_rgba(std::uint8_t* rgba, int width, int height, int stride, int dx, int dy,
+                      Color shadow, Color paper) {
+  if (rgba == nullptr || width < 1 || height < 1 || (dx == 0 && dy == 0)) {
+    return;
+  }
+  const std::vector<std::uint8_t> src(rgba, rgba + static_cast<std::size_t>(stride) * static_cast<std::size_t>(height));
+  auto at = [&](int x, int y) {
+    const std::uint8_t* p = src.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
+                            static_cast<std::size_t>(x) * 4;
+    return read_color(p);
+  };
+  auto mark = [&](int x, int y) {
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return false;
+    }
+    const Color c = at(x, y);
+    return c.a > 16 && color_chebyshev(c, paper) > 24;
+  };
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      if (!mark(x, y)) {
+        continue;
+      }
+      const int sx = x + dx;
+      const int sy = y + dy;
+      if (sx < 0 || sy < 0 || sx >= width || sy >= height || mark(sx, sy)) {
+        continue;
+      }
+      put_color(rgba + static_cast<std::size_t>(sy) * static_cast<std::size_t>(stride) +
+                    static_cast<std::size_t>(sx) * 4,
+                shadow);
+    }
+  }
+}
+
+void wind_rgba(std::uint8_t* rgba, int width, int height, int stride, WindDirection direction,
+               int strength, std::uint32_t seed) {
+  if (rgba == nullptr || width < 1 || height < 1) {
+    return;
+  }
+  if (strength < 1) {
+    return;
+  }
+  if (strength > 64) {
+    strength = 64;
+  }
+  const std::vector<std::uint8_t> src(rgba, rgba + static_cast<std::size_t>(stride) * static_cast<std::size_t>(height));
+  std::uint32_t state = seed == 0 ? 1u : seed;
+  auto sample = [&](int x, int y) {
+    const std::uint8_t* p = src.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
+                            static_cast<std::size_t>(x) * 4;
+    return read_color(p);
+  };
+  auto write = [&](int x, int y, Color c) {
+    put_color(rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
+                  static_cast<std::size_t>(x) * 4,
+              c);
+  };
+  const bool horizontal = direction == WindDirection::Left || direction == WindDirection::Right;
+  const int primary = horizontal ? width : height;
+  const int secondary = horizontal ? height : width;
+  const int step = (direction == WindDirection::Left || direction == WindDirection::Up) ? -1 : 1;
+  for (int s = 0; s < secondary; ++s) {
+    const int begin = step > 0 ? 0 : primary - 1;
+    for (int i = begin; i >= 0 && i < primary; i += step) {
+      const int x = horizontal ? i : s;
+      const int y = horizontal ? s : i;
+      const int px = horizontal ? i - step : s;
+      const int py = horizontal ? s : i - step;
+      const Color here = sample(x, y);
+      const bool edge = px < 0 || py < 0 || px >= width || py >= height ||
+                        color_chebyshev(here, sample(px, py)) > 24;
+      if (!edge) {
+        continue;
+      }
+      const int len = 1 + static_cast<int>(lcg(state) % static_cast<std::uint32_t>(strength));
+      for (int k = 1; k <= len; ++k) {
+        const int tx = horizontal ? i + step * k : s;
+        const int ty = horizontal ? s : i + step * k;
+        if (tx < 0 || ty < 0 || tx >= width || ty >= height) {
+          break;
+        }
+        write(tx, ty, here);
+      }
+    }
+  }
+}
+
+void crt_scanlines_rgba(std::uint8_t* rgba, int width, int height, int stride, int percent) {
+  if (rgba == nullptr || width < 1 || height < 1) {
+    return;
+  }
+  if (percent < 0) {
+    percent = 0;
+  }
+  if (percent > 100) {
+    percent = 100;
+  }
+  const int keep = 255 - (percent * 255) / 100;
+  for (int y = 1; y < height; y += 2) {
+    std::uint8_t* row = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+    for (int x = 0; x < width; ++x) {
+      std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
+      p[0] = static_cast<std::uint8_t>((static_cast<int>(p[0]) * keep) / 255);
+      p[1] = static_cast<std::uint8_t>((static_cast<int>(p[1]) * keep) / 255);
+      p[2] = static_cast<std::uint8_t>((static_cast<int>(p[2]) * keep) / 255);
+    }
+  }
+}
+
 }  // namespace lundukepaint

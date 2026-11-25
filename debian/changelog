@@ -3,6 +3,10 @@ lunduke-paint (1.1.0-1) unstable; urgency=medium
   * Version stays 1.1.0-1. Editor's picks: faster viewport and blends,
     straight strokes, grid snap, trace edges, dithered gradient, selection
     brush, custom patterns, retro presets, optional Howdy.
+  * Round 2 picks, same package: halftone, diffuse, drop shadow, wind,
+    CRT scanlines (view and bake), repeat last effect, size keys, color
+    readout, edge auto-scroll, brush workshop, smear, free rotate and shear,
+    static GIF, line arrows, and expand / shrink / border selection.
 
  -- Ted <ted@brushpad.local>  Thu, 12 Nov 2026 03:03:18 +0000
 

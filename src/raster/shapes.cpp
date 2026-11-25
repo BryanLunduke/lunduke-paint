@@ -466,4 +466,73 @@ void stroke_polyline_mask(std::uint8_t* mask, int width, int height, const int* 
   }
 }
 
+namespace {
+
+void fill_triangle(std::uint8_t* rgba, int width, int height, int stride, int ax, int ay, int bx,
+                   int by, int cx, int cy, Color color, Rect* dirty) {
+  const int min_x = std::max(0, std::min(ax, std::min(bx, cx)));
+  const int max_x = std::min(width - 1, std::max(ax, std::max(bx, cx)));
+  const int min_y = std::max(0, std::min(ay, std::min(by, cy)));
+  const int max_y = std::min(height - 1, std::max(ay, std::max(by, cy)));
+  auto edge = [](int x0, int y0, int x1, int y1, int x, int y) {
+    return (x - x0) * (y1 - y0) - (y - y0) * (x1 - x0);
+  };
+  const int ab = edge(ax, ay, bx, by, cx, cy);
+  const int sign = ab < 0 ? -1 : 1;
+  for (int y = min_y; y <= max_y; ++y) {
+    for (int x = min_x; x <= max_x; ++x) {
+      const int e0 = edge(ax, ay, bx, by, x, y) * sign;
+      const int e1 = edge(bx, by, cx, cy, x, y) * sign;
+      const int e2 = edge(cx, cy, ax, ay, x, y) * sign;
+      if (e0 < 0 || e1 < 0 || e2 < 0) {
+        continue;
+      }
+      std::uint8_t* p = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
+                       static_cast<std::size_t>(x) * 4;
+      p[0] = color.r;
+      p[1] = color.g;
+      p[2] = color.b;
+      p[3] = color.a;
+      if (dirty != nullptr) {
+        *dirty = rect_union(*dirty, Rect{x, y, 1, 1});
+      }
+    }
+  }
+}
+
+void arrow_head(std::uint8_t* rgba, int width, int height, int stride, int tip_x, int tip_y,
+                double angle, int thickness, Color color, Rect* dirty) {
+  const int len = std::max(7, thickness * 4);
+  const int half = std::max(3, (thickness * 3) / 2);
+  const double ux = std::cos(angle);
+  const double uy = std::sin(angle);
+  const int bx = static_cast<int>(std::lround(tip_x - ux * len));
+  const int by = static_cast<int>(std::lround(tip_y - uy * len));
+  const int lx = static_cast<int>(std::lround(bx - uy * half));
+  const int ly = static_cast<int>(std::lround(by + ux * half));
+  const int rx = static_cast<int>(std::lround(bx + uy * half));
+  const int ry = static_cast<int>(std::lround(by - ux * half));
+  fill_triangle(rgba, width, height, stride, tip_x, tip_y, lx, ly, rx, ry, color, dirty);
+}
+
+}  // namespace
+
+void draw_line_arrows(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0, int x1,
+                      int y1, int thickness, Color color, bool start, bool end, Rect* dirty) {
+  if (rgba == nullptr || (!start && !end)) {
+    return;
+  }
+  if (thickness < 1) {
+    thickness = 1;
+  }
+  const double angle = std::atan2(static_cast<double>(y1 - y0), static_cast<double>(x1 - x0));
+  if (end) {
+    arrow_head(rgba, width, height, stride, x1, y1, angle, thickness, color, dirty);
+  }
+  if (start) {
+    arrow_head(rgba, width, height, stride, x0, y0, angle + 3.14159265358979323846, thickness, color,
+               dirty);
+  }
+}
+
 }  // namespace lundukepaint

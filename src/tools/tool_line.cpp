@@ -67,6 +67,20 @@ Gtk::Widget* LineTool::options_widget() {
       shape_family_options(family_).antialias = antialias_;
     });
     options_->pack_start(*aa, Gtk::PACK_SHRINK);
+    auto* start = Gtk::manage(new Gtk::CheckButton("Arrow at start"));
+    auto* end = Gtk::manage(new Gtk::CheckButton("Arrow at end"));
+    start->set_tooltip_text("Hard arrowhead on the first point");
+    end->set_tooltip_text("Hard arrowhead on the last point");
+    configure_rail_check(*start);
+    configure_rail_check(*end);
+    start->signal_toggled().connect([this, start]() {
+      shape_family_options(family_).arrow_start = start->get_active();
+    });
+    end->signal_toggled().connect([this, end]() {
+      shape_family_options(family_).arrow_end = end->get_active();
+    });
+    options_->pack_start(*start, Gtk::PACK_SHRINK);
+    options_->pack_start(*end, Gtk::PACK_SHRINK);
     options_->show_all();
   }
   antialias_ = shape_family_options(family_).antialias;
@@ -121,6 +135,12 @@ void LineTool::preview(int x1, int y1, bool constrain) {
   const int oy = active.offset_y();
   draw_line(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy, x1_ - ox,
             y1_ - oy, stroke_px(), stroke_color(button_), antialias_, &dirty_);
+  const ShapeFamilyOptions& opts = shape_family_options(family_);
+  if (opts.arrow_start || opts.arrow_end) {
+    draw_line_arrows(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0_ - ox, y0_ - oy,
+                     x1_ - ox, y1_ - oy, stroke_px(), stroke_color(button_), opts.arrow_start,
+                     opts.arrow_end, &dirty_);
+  }
   clip_rect_to_selection(tool, active, dirty_, doc.selection());
   host_->invalidate_canvas(layer_dirty_to_canvas(active, rect_union(previous, dirty_)));
 }

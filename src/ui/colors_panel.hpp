@@ -24,6 +24,9 @@ public:
 
   std::function<void(Color color, bool background)> on_swatch;
 
+  // Exact match in the 9×5 shade palette, or -1.
+  static int swatch_index(Color color);
+
 private:
   enum class SlotKind { Palette, Custom, Add };
 

@@ -14,6 +14,11 @@ enum class ShapeFillMode { Stroke, Fill, Both };
 void draw_line(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0, int x1,
                int y1, int thickness, Color color, bool antialias, Rect* dirty);
 
+// Hard filled arrowheads. `start` sits on (x0, y0) pointing back along the
+// segment; `end` sits on (x1, y1) pointing forward. No anti-alias.
+void draw_line_arrows(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0, int x1,
+                      int y1, int thickness, Color color, bool start, bool end, Rect* dirty);
+
 void draw_rectangle(std::uint8_t* rgba, int width, int height, int stride, int x0, int y0, int x1,
                     int y1, int thickness, Color color, ShapeFillMode mode, bool antialias,
                     Rect* dirty, const Pattern* pattern = nullptr,
