@@ -48,6 +48,7 @@ constexpr const char* kRotateCcw = "rotate-ccw";
 constexpr const char* kFlipH = "flip-h";
 constexpr const char* kFlipV = "flip-v";
 constexpr const char* kClear = "clear";
+constexpr const char* kQuantize = "quantize";
 
 constexpr const char* kLayerNew = "layer-new";
 constexpr const char* kLayerDuplicate = "layer-duplicate";

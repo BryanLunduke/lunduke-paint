@@ -2,6 +2,8 @@
 
 #include "ui/dialogs_image.hpp"
 
+#include "raster/palette.hpp"
+
 #include <algorithm>
 #include <gtkmm/box.h>
 #include <gtkmm/grid.h>
@@ -151,6 +153,39 @@ bool ScaleImageDialog::nearest() const {
 
 bool ScaleImageDialog::oversized() const {
   return image_width() > kSoftMaxSide || image_height() > kSoftMaxSide;
+}
+
+QuantizeDialog::QuantizeDialog(Gtk::Window& parent) : Gtk::Dialog("Quantize to Palette", parent, true) {
+  add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+  add_button("_OK", Gtk::RESPONSE_OK);
+  set_default_response(Gtk::RESPONSE_OK);
+  set_resizable(false);
+  for (int i = 0; i < retro_palette_count(); ++i) {
+    palette_.append(retro_palette_at(i).name);
+  }
+  palette_.set_active(0);
+  dither_.append("None");
+  dither_.append("Ordered (Bayer)");
+  dither_.append("Floyd–Steinberg");
+  dither_.set_active(1);
+  auto* grid = Gtk::manage(new Gtk::Grid());
+  grid->set_row_spacing(8);
+  grid->set_column_spacing(8);
+  grid->set_border_width(8);
+  grid->attach(*Gtk::manage(new Gtk::Label("Palette")), 0, 0, 1, 1);
+  grid->attach(palette_, 1, 0, 1, 1);
+  grid->attach(*Gtk::manage(new Gtk::Label("Dither")), 0, 1, 1, 1);
+  grid->attach(dither_, 1, 1, 1, 1);
+  get_content_area()->pack_start(*grid, Gtk::PACK_SHRINK);
+  show_all();
+}
+
+int QuantizeDialog::palette_index() const {
+  return palette_.get_active_row_number();
+}
+
+int QuantizeDialog::dither_index() const {
+  return dither_.get_active_row_number();
 }
 
 }  // namespace lundukepaint

@@ -128,6 +128,7 @@ public:
   void action_flip_h();
   void action_flip_v();
   void action_clear();
+  void action_quantize();
   void action_zoom_fit();
   void action_toggle_grid();
   void action_snap_grid();

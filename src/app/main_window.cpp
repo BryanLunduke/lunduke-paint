@@ -22,6 +22,7 @@
 #include "raster/brush_tip.hpp"
 #include "raster/custom_brush.hpp"
 #include "raster/effects.hpp"
+#include "raster/palette.hpp"
 #include "raster/transform.hpp"
 #include "ui/dialogs_adjust.hpp"
 #include "ui/dialogs_image.hpp"
@@ -154,6 +155,7 @@ MainWindow::MainWindow() {
   add_action(actions::kFlipH, sigc::mem_fun(*this, &MainWindow::action_flip_h));
   add_action(actions::kFlipV, sigc::mem_fun(*this, &MainWindow::action_flip_v));
   add_action(actions::kClear, sigc::mem_fun(*this, &MainWindow::action_clear));
+  add_action(actions::kQuantize, sigc::mem_fun(*this, &MainWindow::action_quantize));
   add_action(actions::kPrint, sigc::mem_fun(*this, &MainWindow::action_print));
   add_action(actions::kLayerNew, sigc::mem_fun(*this, &MainWindow::action_layer_new));
   add_action(actions::kLayerDuplicate, sigc::mem_fun(*this, &MainWindow::action_layer_duplicate));
@@ -2273,6 +2275,22 @@ void MainWindow::action_flip_v() {
   xform.new_w = xform.old_w;
   xform.new_h = xform.old_h;
   commit_stack_transform("Flip vertical", xform);
+}
+
+void MainWindow::action_quantize() {
+  QuantizeDialog dialog(*this);
+  if (dialog.run() != Gtk::RESPONSE_OK) {
+    return;
+  }
+  const RetroPalette& palette = retro_palette_at(dialog.palette_index());
+  const int dither = dialog.dither_index();
+  const DitherKind kind = dither <= 0 ? DitherKind::None
+                                      : (dither == 2 ? DitherKind::FloydSteinberg : DitherKind::Ordered);
+  const Color* colors = palette.colors;
+  const int count = palette.count;
+  apply_layer_effect("Quantize", [colors, count, kind](std::uint8_t* px, int w, int h, int stride) {
+    quantize_palette(px, w, h, stride, colors, count, kind);
+  });
 }
 
 void MainWindow::action_clear() {

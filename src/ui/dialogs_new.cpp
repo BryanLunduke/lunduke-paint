@@ -3,7 +3,10 @@
 #include "ui/dialogs_new.hpp"
 
 #include <cstdint>
+#include "raster/palette.hpp"
+
 #include <gtkmm/box.h>
+#include <gtkmm/comboboxtext.h>
 #include <gtkmm/grid.h>
 #include <gtkmm/label.h>
 
@@ -42,21 +45,39 @@ NewImageDialog::NewImageDialog(Gtk::Window& parent, int width, int height)
   color_.set_sensitive(false);
   custom_.signal_toggled().connect([this]() { color_.set_sensitive(custom_.get_active()); });
 
+  auto* preset = Gtk::manage(new Gtk::ComboBoxText());
+  preset->append("Custom");
+  for (int i = 0; i < retro_palette_count(); ++i) {
+    preset->append(retro_palette_at(i).name);
+  }
+  preset->set_active(0);
+  preset->signal_changed().connect([this, preset]() {
+    const int row = preset->get_active_row_number();
+    if (row <= 0) {
+      return;
+    }
+    const RetroPalette& item = retro_palette_at(row - 1);
+    width_.set_value(item.width);
+    height_.set_value(item.height);
+  });
+
   auto* grid = Gtk::manage(new Gtk::Grid());
   grid->set_row_spacing(8);
   grid->set_column_spacing(8);
   grid->set_border_width(8);
-  grid->attach(*Gtk::manage(new Gtk::Label("Width")), 0, 0, 1, 1);
-  grid->attach(width_, 1, 0, 2, 1);
-  grid->attach(*Gtk::manage(new Gtk::Label("Height")), 0, 1, 1, 1);
-  grid->attach(height_, 1, 1, 2, 1);
-  grid->attach(*Gtk::manage(new Gtk::Label("Background")), 0, 2, 1, 1);
+  grid->attach(*Gtk::manage(new Gtk::Label("Preset")), 0, 0, 1, 1);
+  grid->attach(*preset, 1, 0, 2, 1);
+  grid->attach(*Gtk::manage(new Gtk::Label("Width")), 0, 1, 1, 1);
+  grid->attach(width_, 1, 1, 2, 1);
+  grid->attach(*Gtk::manage(new Gtk::Label("Height")), 0, 2, 1, 1);
+  grid->attach(height_, 1, 2, 2, 1);
+  grid->attach(*Gtk::manage(new Gtk::Label("Background")), 0, 3, 1, 1);
   auto* box = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 8));
   box->pack_start(white_, Gtk::PACK_SHRINK);
   box->pack_start(transparent_, Gtk::PACK_SHRINK);
   box->pack_start(custom_, Gtk::PACK_SHRINK);
   box->pack_start(color_, Gtk::PACK_SHRINK);
-  grid->attach(*box, 1, 2, 2, 1);
+  grid->attach(*box, 1, 3, 2, 1);
 
   get_content_area()->pack_start(*grid, Gtk::PACK_SHRINK);
   show_all();

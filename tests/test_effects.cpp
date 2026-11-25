@@ -4,6 +4,7 @@
 #include "doc/document.hpp"
 #include "raster/custom_brush.hpp"
 #include "raster/effects.hpp"
+#include "raster/palette.hpp"
 #include "raster/pattern.hpp"
 #include "raster/grid_snap.hpp"
 
@@ -226,6 +227,55 @@ int main() {
     errors += expect(index == before, "custom pattern is appended");
     errors += expect(lundukepaint::pattern_at(index).rows[0] == made.rows[0], "lookup finds the new pattern");
     lundukepaint::set_custom_patterns({});
+  }
+
+  {
+    const lundukepaint::RetroPalette& mac = lundukepaint::retro_palette_at(0);
+    errors += expect(mac.width == 512 && mac.height == 342 && mac.count == 2, "Mac preset is 512x342 1-bit");
+    const lundukepaint::RetroPalette& gb = lundukepaint::retro_palette_at(5);
+    errors += expect(gb.width == 160 && gb.height == 144 && gb.count == 4, "Game Boy preset is 160x144");
+    std::vector<std::uint8_t> row(16 * 4);
+    for (int x = 0; x < 16; ++x) {
+      set(row.data(), 64, x, 0, Color{128, 128, 128, 255});
+    }
+    lundukepaint::quantize_palette(row.data(), 16, 1, 64, mac.colors, mac.count,
+                                   lundukepaint::DitherKind::Ordered);
+    int black = 0;
+    int white = 0;
+    bool only = true;
+    for (int x = 0; x < 16; ++x) {
+      const Color c = get(row.data(), 64, x, 0);
+      if (c == Color::black()) {
+        ++black;
+      } else if (c == Color::white()) {
+        ++white;
+      } else {
+        only = false;
+      }
+    }
+    errors += expect(only && black > 0 && white > 0, "ordered 1-bit dither mixes black and white");
+
+    std::vector<std::uint8_t> ramp(8 * 4);
+    for (int x = 0; x < 8; ++x) {
+      set(ramp.data(), 32, x, 0, Color{static_cast<std::uint8_t>(x * 32), static_cast<std::uint8_t>(x * 32),
+                                       static_cast<std::uint8_t>(x * 32), 200});
+    }
+    lundukepaint::quantize_palette(ramp.data(), 8, 1, 32, mac.colors, mac.count,
+                                   lundukepaint::DitherKind::FloydSteinberg);
+    bool in_palette = true;
+    bool alpha_kept = true;
+    for (int x = 0; x < 8; ++x) {
+      const Color c = get(ramp.data(), 32, x, 0);
+      const bool mono = (c.r == 0 && c.g == 0 && c.b == 0) || (c.r == 255 && c.g == 255 && c.b == 255);
+      if (!mono) {
+        in_palette = false;
+      }
+      if (c.a != 200) {
+        alpha_kept = false;
+      }
+    }
+    errors += expect(in_palette, "Floyd–Steinberg lands on palette colors");
+    errors += expect(alpha_kept, "quantize keeps alpha");
   }
 
   if (errors != 0) {

@@ -206,6 +206,10 @@
           <attribute name="label" translatable="yes">Clea_r</attribute>
           <attribute name="action">win.clear</attribute>
         </item>
+        <item>
+          <attribute name="label" translatable="yes">_Quantize to Palette…</attribute>
+          <attribute name="action">win.quantize</attribute>
+        </item>
       </section>
     </submenu>
     <submenu>

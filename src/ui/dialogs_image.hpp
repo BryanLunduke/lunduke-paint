@@ -5,6 +5,7 @@
 #include "raster/types.hpp"
 
 #include <gtkmm/checkbutton.h>
+#include <gtkmm/comboboxtext.h>
 #include <gtkmm/dialog.h>
 #include <gtkmm/radiobutton.h>
 #include <gtkmm/spinbutton.h>
@@ -53,6 +54,18 @@ private:
   Gtk::CheckButton keep_aspect_;
   Gtk::RadioButton nearest_;
   Gtk::RadioButton bilinear_;
+};
+
+class QuantizeDialog : public Gtk::Dialog {
+public:
+  explicit QuantizeDialog(Gtk::Window& parent);
+
+  int palette_index() const;
+  int dither_index() const;
+
+private:
+  Gtk::ComboBoxText palette_;
+  Gtk::ComboBoxText dither_;
 };
 
 }  // namespace lundukepaint
