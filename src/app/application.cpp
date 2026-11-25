@@ -59,6 +59,7 @@ void Application::on_startup() {
   set_accels_for_action("win.layer-flatten", {"<Primary><Shift>e"});
   set_accels_for_action("win.print", {"<Primary>p"});
   set_accels_for_action("win.revert", {"<Primary>r"});
+  set_accels_for_action("win.repeat-effect", {"<Primary>f"});
 }
 
 bool Application::ensure_window() {

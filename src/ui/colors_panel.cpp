@@ -128,6 +128,18 @@ ColorsPanel::ColorsPanel()
   rebuild_custom_row();
 }
 
+int ColorsPanel::swatch_index(Color color) {
+  if (color.a != 255) {
+    return -1;
+  }
+  for (int i = 0; i < kCols * kRows; ++i) {
+    if (kShadePalette[i].r == color.r && kShadePalette[i].g == color.g && kShadePalette[i].b == color.b) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 void ColorsPanel::set_colors(Color fg, Color bg) {
   fg_ = fg;
   bg_ = bg;

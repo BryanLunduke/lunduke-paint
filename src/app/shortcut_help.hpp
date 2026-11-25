@@ -29,6 +29,8 @@ inline const ShortcutHelpRow* shortcut_help_rows(int& count) {
       {"Flatten", "Ctrl+Shift+E"},
       {"Zoom in / out / 100% / fit", "Ctrl++ / Ctrl+- / Ctrl+0 / Ctrl+1"},
       {"Grid / snap to 8px grid / dock / fullscreen", "Ctrl+G / Ctrl+Shift+G / F12 / F11"},
+      {"Repeat last effect", "Ctrl+F"},
+      {"Step line width, tip, or spray", "[ / ]"},
       {"Straight pencil or brush", "Shift while drawing"},
       {"Selection as brush / clear it", "Edit menu"},
       {"Swap FG-BG / default colors", "X / D"},

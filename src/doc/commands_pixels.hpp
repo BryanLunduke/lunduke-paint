@@ -72,6 +72,25 @@ private:
   SelectionState selection_after_{};
 };
 
+// History step that only moves the marching ants (expand, contract, border,
+// free rotate, shear). Pixel edits stay on PixelPatchCommand.
+class SelectionCommand : public Command {
+public:
+  SelectionCommand(std::string name, SelectionState before, SelectionState after);
+
+  std::string name() const override { return name_; }
+  void apply(Document& document) override;
+  void undo(Document& document) override;
+  Rect dirty_rect() const override { return dirty_; }
+  std::size_t memory_bytes() const override;
+
+private:
+  std::string name_;
+  SelectionState before_;
+  SelectionState after_;
+  Rect dirty_{};
+};
+
 }  // namespace lundukepaint
 
 #endif

@@ -2,6 +2,8 @@
 
 #include "raster/custom_brush.hpp"
 
+#include "raster/transform.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -91,13 +93,72 @@ void stroke_custom_brush(std::uint8_t* rgba, int width, int height, int stride, 
   const double dy = y1 - y0;
   const double dist = std::hypot(dx, dy);
   const int span = std::max(brush.width, brush.height);
-  const int step = span <= 24 ? 1 : std::max(1, span / 8);
+  const int step = brush.spacing > 0 ? brush.spacing : (span <= 24 ? 1 : std::max(1, span / 8));
   const int n = std::max(1, static_cast<int>(dist / step));
   for (int i = 0; i <= n; ++i) {
     const double t = static_cast<double>(i) / static_cast<double>(n);
     const int cx = static_cast<int>(std::floor(x0 + dx * t + 0.5));
     const int cy = static_cast<int>(std::floor(y0 + dy * t + 0.5));
     stamp_custom_brush(rgba, width, height, stride, cx, cy, brush, dirty);
+  }
+}
+
+void custom_brush_flip_h(CustomBrush& brush) {
+  if (brush.empty()) {
+    return;
+  }
+  flip_h(brush.rgba.data(), brush.width, brush.height, brush.width * 4);
+}
+
+void custom_brush_flip_v(CustomBrush& brush) {
+  if (brush.empty()) {
+    return;
+  }
+  flip_v(brush.rgba.data(), brush.width, brush.height, brush.width * 4);
+}
+
+void custom_brush_rotate_90(CustomBrush& brush) {
+  if (brush.empty()) {
+    return;
+  }
+  std::vector<std::uint8_t> dest(static_cast<std::size_t>(brush.width) * static_cast<std::size_t>(brush.height) * 4);
+  rotate_90_cw(brush.rgba.data(), brush.width, brush.height, brush.width * 4, dest.data(), brush.height * 4);
+  std::swap(brush.width, brush.height);
+  brush.rgba = std::move(dest);
+}
+
+void custom_brush_scale(CustomBrush& brush, int numerator, int denominator) {
+  if (brush.empty() || numerator < 1 || denominator < 1) {
+    return;
+  }
+  int nw = std::max(1, brush.width * numerator / denominator);
+  int nh = std::max(1, brush.height * numerator / denominator);
+  constexpr int kLimit = 256;
+  if (nw > kLimit || nh > kLimit) {
+    const double fit = static_cast<double>(kLimit) / static_cast<double>(std::max(nw, nh));
+    nw = std::max(1, static_cast<int>(nw * fit));
+    nh = std::max(1, static_cast<int>(nh * fit));
+  }
+  std::vector<std::uint8_t> dest(static_cast<std::size_t>(nw) * static_cast<std::size_t>(nh) * 4);
+  scale_nearest(brush.rgba.data(), brush.width, brush.height, brush.width * 4, dest.data(), nw, nh, nw * 4);
+  brush.width = nw;
+  brush.height = nh;
+  brush.rgba = std::move(dest);
+}
+
+void custom_brush_remap(CustomBrush& brush, Color ink) {
+  if (brush.empty()) {
+    return;
+  }
+  for (int i = 0; i < brush.width * brush.height; ++i) {
+    std::uint8_t* p = brush.rgba.data() + static_cast<std::size_t>(i) * 4;
+    if (p[3] == 0) {
+      continue;
+    }
+    p[0] = ink.r;
+    p[1] = ink.g;
+    p[2] = ink.b;
+    p[3] = ink.a == 0 ? 0 : p[3];
   }
 }
 

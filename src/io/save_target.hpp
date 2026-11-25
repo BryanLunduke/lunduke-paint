@@ -26,9 +26,10 @@ namespace lundukepaint {
 //   ignored. Only the last suffix counts, so "a.ora.png" is PNG and
 //   "file.jpeg.BMP" is BMP. jpg and jpeg are the same format; a typed
 //   ".jpeg" or ".JPG" is not rewritten to ".jpg".
-// * GIF is recognized, so a typed ".gif" is not rewritten. Saving GIF is
-//   still refused later ("GIF save is not supported"); Save and the close
-//   prompt send a GIF document to Save As with PNG proposed instead.
+// * GIF is recognized, so a typed ".gif" is not rewritten. File → Save as GIF
+//   and a typed ".gif" in Save As write one static frame (palette reduced to
+//   256 when needed). A document whose own path is .gif still goes to Save As
+//   with PNG proposed, because GIF is not the project format.
 // * There is no typed extension when the name has no '.', the only '.' is
 //   a leading dot and the name is not itself a known extension (".hidden"),
 //   the suffix is empty ("bft."), or the suffix is longer than 5 characters
@@ -302,8 +303,11 @@ inline bool ora_companion_needs_confirm(bool exists, bool is_own_file) {
 }
 
 inline bool flat_save_needs_warning(ImageFormat format, bool multi, bool transparent) {
-  if (format == ImageFormat::Ora || format == ImageFormat::Gif || format == ImageFormat::Unknown) {
+  if (format == ImageFormat::Ora || format == ImageFormat::Unknown) {
     return false;
+  }
+  if (format == ImageFormat::Gif) {
+    return multi;
   }
   if (multi) {
     return true;
@@ -325,6 +329,8 @@ inline std::string flat_save_message(ImageFormat format, bool multi, bool transp
       message += " ";
     }
     message += "JPEG cannot store transparency or layers. The image will be flattened onto white.";
+  } else if (format == ImageFormat::Gif && multi) {
+    message += " A GIF is one static image of at most 256 colors.";
   } else if (format == ImageFormat::Bmp && (multi || transparent)) {
     if (!message.empty()) {
       message += " ";

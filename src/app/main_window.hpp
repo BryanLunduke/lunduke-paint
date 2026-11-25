@@ -150,6 +150,19 @@ public:
   void action_effect_sharpen();
   void action_effect_emboss();
   void action_effect_trace();
+  void action_effect_halftone();
+  void action_effect_diffuse();
+  void action_effect_shadow();
+  void action_effect_wind();
+  void action_effect_scanlines();
+  void action_repeat_effect();
+  void action_view_scanlines();
+  void action_save_gif();
+  void action_brush_workshop();
+  void action_selection_expand();
+  void action_selection_shrink();
+  void action_selection_border();
+  void action_free_rotate();
   void action_selection_brush();
   void action_clear_brush();
   void action_pattern_from_selection();
@@ -245,6 +258,10 @@ private:
                              const Gtk::SelectionData& data, guint info, guint time);
   void apply_layer_effect(const char* name,
                           const std::function<void(std::uint8_t*, int, int, int)>& fn);
+  void remember_effect(const char* name, const EffectPreview::EffectFn& fn);
+  void step_tool_size(int delta);
+  void morph_active_selection(SelectionMorph kind, const char* title);
+  bool prepare_float_for_transform();
   // Runs a modal adjustment dialog with optional live preview. build_effect
   // returns the effect for the dialog's current values, or nullptr for a no-op.
   bool run_adjust_dialog(LivePreviewDialog& dialog, const char* name,
@@ -295,6 +312,8 @@ private:
   void report_out_of_memory();
   bool live_effect_preview_{false};
   EffectPreview* effect_preview_{nullptr};
+  std::string last_effect_name_;
+  EffectPreview::EffectFn last_effect_;
   Glib::RefPtr<Gio::SimpleAction> undo_action_;
   Glib::RefPtr<Gio::SimpleAction> redo_action_;
   Glib::RefPtr<Gio::SimpleAction> cut_action_;

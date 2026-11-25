@@ -1053,4 +1053,163 @@ void copy_merged_rgba(const LayerStack& layers, const Selection& sel, int canvas
   }
 }
 
+namespace {
+
+void max_filter_axis(const std::uint8_t* in, std::uint8_t* out, int w, int h, int n, bool horizontal) {
+  const int primary = horizontal ? w : h;
+  const int secondary = horizontal ? h : w;
+  for (int s = 0; s < secondary; ++s) {
+    for (int i = 0; i < primary; ++i) {
+      std::uint8_t bit = 0;
+      const int a = std::max(0, i - n);
+      const int b = std::min(primary - 1, i + n);
+      for (int k = a; k <= b; ++k) {
+        const int x = horizontal ? k : s;
+        const int y = horizontal ? s : k;
+        if (in[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] != 0) {
+          bit = 1;
+          break;
+        }
+      }
+      const int x = horizontal ? i : s;
+      const int y = horizontal ? s : i;
+      out[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = bit;
+    }
+  }
+}
+
+void min_filter_axis(const std::uint8_t* in, std::uint8_t* out, int w, int h, int n, bool horizontal) {
+  const int primary = horizontal ? w : h;
+  const int secondary = horizontal ? h : w;
+  for (int s = 0; s < secondary; ++s) {
+    for (int i = 0; i < primary; ++i) {
+      std::uint8_t bit = 1;
+      const int a = i - n;
+      const int b = i + n;
+      if (a < 0 || b >= primary) {
+        bit = 0;
+      } else {
+        for (int k = a; k <= b; ++k) {
+          const int x = horizontal ? k : s;
+          const int y = horizontal ? s : k;
+          if (in[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] == 0) {
+            bit = 0;
+            break;
+          }
+        }
+      }
+      const int x = horizontal ? i : s;
+      const int y = horizontal ? s : i;
+      out[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = bit;
+    }
+  }
+}
+
+void dilate_mask(std::vector<std::uint8_t>& mask, int w, int h, int n) {
+  std::vector<std::uint8_t> tmp(mask.size());
+  std::vector<std::uint8_t> out(mask.size());
+  max_filter_axis(mask.data(), tmp.data(), w, h, n, true);
+  max_filter_axis(tmp.data(), out.data(), w, h, n, false);
+  mask.swap(out);
+}
+
+void erode_mask(std::vector<std::uint8_t>& mask, int w, int h, int n) {
+  std::vector<std::uint8_t> tmp(mask.size());
+  std::vector<std::uint8_t> out(mask.size());
+  min_filter_axis(mask.data(), tmp.data(), w, h, n, true);
+  min_filter_axis(tmp.data(), out.data(), w, h, n, false);
+  mask.swap(out);
+}
+
+}  // namespace
+
+bool morph_selection(Selection& selection, int canvas_w, int canvas_h, SelectionMorph kind, int pixels) {
+  if (selection.empty() || pixels < 1 || canvas_w < 1 || canvas_h < 1) {
+    return false;
+  }
+  if (pixels > 64) {
+    pixels = 64;
+  }
+  const int pad = kind == SelectionMorph::Contract ? 0 : pixels;
+  Rect area{0, 0, canvas_w, canvas_h};
+  if (!selection.inverted()) {
+    Rect bounds = selection.bounds();
+    bounds.x -= pad;
+    bounds.y -= pad;
+    bounds.w += pad * 2;
+    bounds.h += pad * 2;
+    area = rect_clamp(bounds, canvas_w, canvas_h);
+  }
+  if (area.empty()) {
+    selection.clear();
+    return true;
+  }
+  std::vector<std::uint8_t> mask(static_cast<std::size_t>(area.w) * static_cast<std::size_t>(area.h), 0);
+  for (int y = 0; y < area.h; ++y) {
+    for (int x = 0; x < area.w; ++x) {
+      if (selection.contains(area.x + x, area.y + y)) {
+        mask[static_cast<std::size_t>(y) * static_cast<std::size_t>(area.w) + static_cast<std::size_t>(x)] = 1;
+      }
+    }
+  }
+  if (kind == SelectionMorph::Expand) {
+    dilate_mask(mask, area.w, area.h, pixels);
+  } else if (kind == SelectionMorph::Contract) {
+    erode_mask(mask, area.w, area.h, pixels);
+  } else {
+    std::vector<std::uint8_t> grown = mask;
+    std::vector<std::uint8_t> shrunk = mask;
+    dilate_mask(grown, area.w, area.h, pixels);
+    erode_mask(shrunk, area.w, area.h, pixels);
+    for (std::size_t i = 0; i < mask.size(); ++i) {
+      mask[i] = (grown[i] != 0 && shrunk[i] == 0) ? 1 : 0;
+    }
+  }
+  int min_x = area.w;
+  int min_y = area.h;
+  int max_x = -1;
+  int max_y = -1;
+  bool solid = true;
+  for (int y = 0; y < area.h; ++y) {
+    for (int x = 0; x < area.w; ++x) {
+      const bool on =
+          mask[static_cast<std::size_t>(y) * static_cast<std::size_t>(area.w) + static_cast<std::size_t>(x)] != 0;
+      if (!on) {
+        continue;
+      }
+      min_x = std::min(min_x, x);
+      min_y = std::min(min_y, y);
+      max_x = std::max(max_x, x);
+      max_y = std::max(max_y, y);
+    }
+  }
+  if (max_x < min_x || max_y < min_y) {
+    selection.clear();
+    return true;
+  }
+  for (int y = min_y; y <= max_y && solid; ++y) {
+    for (int x = min_x; x <= max_x; ++x) {
+      if (mask[static_cast<std::size_t>(y) * static_cast<std::size_t>(area.w) + static_cast<std::size_t>(x)] == 0) {
+        solid = false;
+        break;
+      }
+    }
+  }
+  const Rect tight{area.x + min_x, area.y + min_y, max_x - min_x + 1, max_y - min_y + 1};
+  if (solid) {
+    selection.set_rect(tight);
+    return true;
+  }
+  std::vector<std::uint8_t> tight_mask(static_cast<std::size_t>(tight.w) * static_cast<std::size_t>(tight.h), 0);
+  for (int y = 0; y < tight.h; ++y) {
+    for (int x = 0; x < tight.w; ++x) {
+      tight_mask[static_cast<std::size_t>(y) * static_cast<std::size_t>(tight.w) + static_cast<std::size_t>(x)] =
+          mask[static_cast<std::size_t>(min_y + y) * static_cast<std::size_t>(area.w) +
+               static_cast<std::size_t>(min_x + x)];
+    }
+  }
+  selection.set_mask(tight, std::move(tight_mask));
+  return true;
+}
+
 }  // namespace lundukepaint

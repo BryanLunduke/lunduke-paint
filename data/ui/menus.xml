@@ -33,6 +33,10 @@
           <attribute name="label" translatable="yes">Save _As…</attribute>
           <attribute name="action">app.save-as</attribute>
         </item>
+        <item>
+          <attribute name="label" translatable="yes">Save as _GIF…</attribute>
+          <attribute name="action">win.save-gif</attribute>
+        </item>
       </section>
       <section>
         <item>
@@ -99,6 +103,10 @@
           <attribute name="action">win.clear-brush</attribute>
         </item>
         <item>
+          <attribute name="label" translatable="yes">Brush _Workshop…</attribute>
+          <attribute name="action">win.brush-workshop</attribute>
+        </item>
+        <item>
           <attribute name="label" translatable="yes">Ma_ke Pattern from Selection</attribute>
           <attribute name="action">win.pattern-from-selection</attribute>
         </item>
@@ -115,6 +123,18 @@
         <item>
           <attribute name="label" translatable="yes">_Invert Selection</attribute>
           <attribute name="action">win.invert-selection</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">E_xpand Selection…</attribute>
+          <attribute name="action">win.selection-expand</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">S_hrink Selection…</attribute>
+          <attribute name="action">win.selection-shrink</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">Bord_er Selection…</attribute>
+          <attribute name="action">win.selection-border</attribute>
         </item>
       </section>
       <section>
@@ -158,6 +178,10 @@
         <item>
           <attribute name="label" translatable="yes">_Fullscreen</attribute>
           <attribute name="action">win.fullscreen</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">CRT _Scanlines</attribute>
+          <attribute name="action">win.view-scanlines</attribute>
         </item>
       </section>
     </submenu>
@@ -209,6 +233,10 @@
         <item>
           <attribute name="label" translatable="yes">_Quantize to Palette…</attribute>
           <attribute name="action">win.quantize</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">_Free Rotate and Shear…</attribute>
+          <attribute name="action">win.free-rotate</attribute>
         </item>
       </section>
     </submenu>
@@ -296,6 +324,30 @@
         <item>
           <attribute name="label" translatable="yes">Trace Ed_ges</attribute>
           <attribute name="action">win.effect-trace</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">_Halftone / Newsprint…</attribute>
+          <attribute name="action">win.effect-halftone</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">_Diffuse…</attribute>
+          <attribute name="action">win.effect-diffuse</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">Dro_p Shadow…</attribute>
+          <attribute name="action">win.effect-shadow</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">_Wind…</attribute>
+          <attribute name="action">win.effect-wind</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">_CRT Scanlines…</attribute>
+          <attribute name="action">win.effect-scanlines</attribute>
+        </item>
+        <item>
+          <attribute name="label" translatable="yes">_Repeat Last Effect</attribute>
+          <attribute name="action">win.repeat-effect</attribute>
         </item>
       </section>
     </submenu>

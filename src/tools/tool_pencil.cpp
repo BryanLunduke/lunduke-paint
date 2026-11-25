@@ -30,6 +30,12 @@ public:
   const char* hint() const override {
     return "Pencil: drag to draw; Shift keeps a straight line from the last point";
   }
+  PointerOutlineInfo pointer_outline() const override {
+    PointerOutlineInfo info;
+    info.kind = PointerOutline::Square;
+    info.size = stroke_px();
+    return info;
+  }
   bool is_stroking() const override { return drawing_; }
   Gtk::Widget* options_widget() override;
 

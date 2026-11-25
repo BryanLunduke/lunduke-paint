@@ -536,8 +536,11 @@ bool save_flat_image(const std::string& path, ImageFormat format, const std::uin
     return false;
   }
   std::vector<std::uint8_t> encoded;
-  if (format == ImageFormat::Png || format == ImageFormat::Ora || format == ImageFormat::Unknown ||
-      format == ImageFormat::Gif) {
+  if (format == ImageFormat::Gif) {
+    if (!encode_gif_memory(rgba, width, height, stride, encoded, error)) {
+      return false;
+    }
+  } else if (format == ImageFormat::Png || format == ImageFormat::Ora || format == ImageFormat::Unknown) {
     if (format != ImageFormat::Png) {
       error = "Unsupported flat image format";
       return false;

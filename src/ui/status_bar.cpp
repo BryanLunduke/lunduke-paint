@@ -13,7 +13,7 @@ StatusBar::StatusBar() : Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 8) {
   hint_.set_xalign(0.0f);
   hint_.set_hexpand(true);
   hint_.set_ellipsize(Pango::ELLIPSIZE_END);
-  coords_.set_width_chars(14);
+  coords_.set_width_chars(28);
   sel_.set_width_chars(12);
   size_.set_width_chars(14);
   zoom_.set_width_chars(8);
@@ -45,9 +45,18 @@ void StatusBar::set_hint(const Glib::ustring& hint) {
 }
 
 void StatusBar::show_coordinates(double x, double y) {
-  char buffer[64];
+  show_pointer_readout(x, y, "");
+}
+
+void StatusBar::show_pointer_readout(double x, double y, const Glib::ustring& color_text) {
+  char buffer[32];
   std::snprintf(buffer, sizeof(buffer), "%d, %d", static_cast<int>(x), static_cast<int>(y));
-  coords_.set_text(buffer);
+  Glib::ustring text = buffer;
+  if (!color_text.empty()) {
+    text += "  ";
+    text += color_text;
+  }
+  coords_.set_text(text);
 }
 
 void StatusBar::clear_coordinates() {

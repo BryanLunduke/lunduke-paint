@@ -18,6 +18,8 @@ public:
 
   void set_hint(const Glib::ustring& hint);
   void show_coordinates(double x, double y);
+  // `color_text` is "#RRGGBB" plus an optional palette hint. Empty hides it.
+  void show_pointer_readout(double x, double y, const Glib::ustring& color_text);
   void clear_coordinates();
   void set_canvas_size(int width, int height);
   void set_selection_size(int width, int height, bool visible);

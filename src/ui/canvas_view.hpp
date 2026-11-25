@@ -2,6 +2,7 @@
 #ifndef LUNDUKEPAINT_UI_CANVAS_VIEW_HPP
 #define LUNDUKEPAINT_UI_CANVAS_VIEW_HPP
 
+#include "raster/brush_tip.hpp"
 #include "raster/types.hpp"
 #include "tools/tool.hpp"
 
@@ -28,6 +29,7 @@ class Tool;
 class CanvasView : public Gtk::ScrolledWindow {
 public:
   CanvasView();
+  ~CanvasView() override;
 
   void set_document(Document* document);
   void set_tool(Tool* tool);
@@ -69,6 +71,9 @@ public:
 
   bool grid_visible() const { return grid_visible_; }
   void set_grid_visible(bool visible);
+  // View-only CRT overlay. Does not touch the composite cache.
+  bool scanlines() const { return scanlines_; }
+  void set_scanlines(bool enabled);
   void set_checker_colors(Color light, Color dark);
   void set_grid_threshold(int percent);
 
@@ -135,6 +140,11 @@ private:
   std::uint64_t float_display_key() const;
   void paint_scaled_float(std::uint8_t* dest, int dest_stride, Rect view, int out_w, int out_h);
   void draw_intro(const Cairo::RefPtr<Cairo::Context>& cr);
+  void draw_scanlines(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy, int canvas_w,
+                      int canvas_h);
+  void draw_pointer_outline(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy);
+  void autoscroll_while_drawing(double area_x, double area_y, guint state);
+  bool on_autoscroll_tick();
   bool on_intro_tick();
 
   Gtk::Layout layout_;
@@ -144,6 +154,12 @@ private:
   const char* cursor_name_{"default"};
   double zoom_{1.0};
   bool grid_visible_{true};
+  bool scanlines_{false};
+  Cairo::RefPtr<Cairo::SurfacePattern> scanline_pattern_;
+  int autoscroll_dx_{0};
+  int autoscroll_dy_{0};
+  guint autoscroll_state_{0};
+  sigc::connection autoscroll_timer_;
   Color checker_light_{209, 209, 209, 255};
   Color checker_dark_{158, 158, 158, 255};
   int grid_threshold_{400};

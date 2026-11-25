@@ -63,6 +63,26 @@ PlacedPixels place_resize_canvas(const std::uint8_t* src, int src_w, int src_h, 
                                  int ox, int oy, int canvas_w, int canvas_h, int new_w, int new_h,
                                  Color fill);
 
+// Nearest-neighbor image plus an optional coverage grid (empty means solid).
+struct SampledPixels {
+  int width = 0;
+  int height = 0;
+  std::vector<std::uint8_t> rgba;
+  std::vector<std::uint8_t> coverage;
+};
+
+// Clockwise degrees. The result is the bounding box of the rotated rectangle.
+// Samples that fall outside the source are transparent and uncovered.
+SampledPixels rotate_nearest_angle(const std::uint8_t* src, int width, int height, int stride,
+                                   const std::uint8_t* coverage, double degrees_clockwise);
+
+// Horizontal shear: the bottom row shifts by `shift` pixels (positive = right).
+// Vertical shear: the right column shifts by `shift` pixels (positive = down).
+SampledPixels shear_horizontal_nearest(const std::uint8_t* src, int width, int height, int stride,
+                                       const std::uint8_t* coverage, int shift);
+SampledPixels shear_vertical_nearest(const std::uint8_t* src, int width, int height, int stride,
+                                     const std::uint8_t* coverage, int shift);
+
 }  // namespace lundukepaint
 
 #endif

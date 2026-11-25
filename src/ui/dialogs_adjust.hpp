@@ -6,6 +6,7 @@
 #include <glibmm/ustring.h>
 #include <sigc++/connection.h>
 #include <gtkmm/checkbutton.h>
+#include <gtkmm/comboboxtext.h>
 #include <gtkmm/dialog.h>
 #include <gtkmm/grid.h>
 #include <gtkmm/range.h>
@@ -30,6 +31,9 @@ public:
   std::function<void()> on_preview;
   // Fired when Live Preview is switched off (restore the original pixels).
   std::function<void()> on_preview_reset;
+
+  // A combo or other control that is not a scale can ask for a preview.
+  void note_changed();
 
 protected:
   // Adds the check button as the last row of the dialog's grid.
@@ -87,6 +91,79 @@ public:
 
 private:
   Gtk::SpinButton radius_;
+};
+
+class HalftoneDialog : public LivePreviewDialog {
+public:
+  explicit HalftoneDialog(Gtk::Window& parent);
+  int screen() const;
+  int cell() const;
+
+private:
+  Gtk::ComboBoxText screen_;
+  Gtk::SpinButton cell_;
+};
+
+class DiffuseDialog : public LivePreviewDialog {
+public:
+  explicit DiffuseDialog(Gtk::Window& parent);
+  int radius() const;
+
+private:
+  Gtk::SpinButton radius_;
+};
+
+class DropShadowDialog : public LivePreviewDialog {
+public:
+  explicit DropShadowDialog(Gtk::Window& parent);
+  int offset_x() const;
+  int offset_y() const;
+
+private:
+  Gtk::SpinButton dx_;
+  Gtk::SpinButton dy_;
+};
+
+class WindDialog : public LivePreviewDialog {
+public:
+  explicit WindDialog(Gtk::Window& parent);
+  int direction() const;
+  int strength() const;
+
+private:
+  Gtk::ComboBoxText direction_;
+  Gtk::SpinButton strength_;
+};
+
+class ScanlineDialog : public LivePreviewDialog {
+public:
+  explicit ScanlineDialog(Gtk::Window& parent);
+  int percent() const;
+
+private:
+  Gtk::SpinButton percent_;
+};
+
+class PixelCountDialog : public Gtk::Dialog {
+public:
+  PixelCountDialog(Gtk::Window& parent, const Glib::ustring& title, int initial);
+  int pixels() const;
+
+private:
+  Gtk::SpinButton pixels_;
+};
+
+class RotateShearDialog : public Gtk::Dialog {
+public:
+  explicit RotateShearDialog(Gtk::Window& parent);
+  double degrees() const;
+  int shear_x() const;
+  int shear_y() const;
+
+private:
+  Gtk::SpinButton degrees_;
+  Gtk::SpinButton shear_x_;
+  Gtk::SpinButton shear_y_;
 };
 
 }  // namespace lundukepaint

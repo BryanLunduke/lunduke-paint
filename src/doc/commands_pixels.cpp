@@ -255,4 +255,41 @@ void PixelPatchCommand::undo(Document& document) {
   }
 }
 
+namespace {
+
+Rect cover_state(const SelectionState& state) {
+  if (state.empty) {
+    return {};
+  }
+  if (state.floating) {
+    return rect_union(Rect{state.origin_x, state.origin_y, state.origin_w, state.origin_h},
+                      Rect{state.float_x, state.float_y, state.float_w, state.float_h});
+  }
+  return state.rect;
+}
+
+std::size_t state_bytes(const SelectionState& state) {
+  return state.float_pixels.size() + state.float_coverage.size() + state.origin_coverage.size() +
+         state.mask.size();
+}
+
+}  // namespace
+
+SelectionCommand::SelectionCommand(std::string name, SelectionState before, SelectionState after)
+    : name_(std::move(name)), before_(std::move(before)), after_(std::move(after)) {
+  dirty_ = rect_union(cover_state(before_), cover_state(after_));
+}
+
+void SelectionCommand::apply(Document& document) {
+  document.selection().restore(after_);
+}
+
+void SelectionCommand::undo(Document& document) {
+  document.selection().restore(before_);
+}
+
+std::size_t SelectionCommand::memory_bytes() const {
+  return 64 + state_bytes(before_) + state_bytes(after_);
+}
+
 }  // namespace lundukepaint

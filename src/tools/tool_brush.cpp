@@ -10,8 +10,12 @@
 #include "raster/grid_snap.hpp"
 #include "raster/stroke.hpp"
 
+#include <gtkmm/box.h>
+#include <gtkmm/checkbutton.h>
+
 #include <cstring>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <cmath>
@@ -24,11 +28,23 @@ public:
   const char* name() const override { return "Brush"; }
   char shortcut() const override { return 'B'; }
   const char* hint() const override {
-    return "Brush: drag to paint; Shift keeps a straight line from the last point";
+    return smear_ ? "Smear: drag to drag pixels with the tip; Shift keeps a straight line"
+                  : "Brush: drag to paint; Shift keeps a straight line from the last point";
   }
+  PointerOutlineInfo pointer_outline() const override {
+    PointerOutlineInfo info;
+    if (host_ != nullptr && host_->custom_brush() != nullptr && !host_->custom_brush()->empty()) {
+      info.kind = PointerOutline::Custom;
+      info.brush = host_->custom_brush();
+      return info;
+    }
+    info.kind = PointerOutline::Tip;
+    info.tip = host_ != nullptr ? host_->brush_tip() : 3;
+    info.size = brush_tip_at(info.tip).size;
+    return info;
+  }
+  Gtk::Widget* options_widget() override;
   bool is_stroking() const override { return drawing_; }
-  // Options live in the MacPaint left-rail tip picker (0.5-4).
-  Gtk::Widget* options_widget() override { return nullptr; }
 
   void on_press(CanvasEvent event) override;
   void on_motion(CanvasEvent event) override;
@@ -54,7 +70,26 @@ private:
   std::vector<std::uint8_t> shift_backup_;
   unsigned button_ = 1;
   Rect dirty_{};
+  bool smear_ = false;
+  Gtk::CheckButton* smear_button_ = nullptr;
+  std::unique_ptr<Gtk::Box> options_;
 };
+
+Gtk::Widget* BrushTool::options_widget() {
+  if (!options_) {
+    options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
+    auto* smear = Gtk::manage(new Gtk::CheckButton("Smear"));
+    smear_button_ = smear;
+    smear->set_tooltip_text("Deluxe Paint smear: the tip drags the pixels under it");
+    smear->signal_toggled().connect([this, smear]() { smear_ = smear->get_active(); });
+    options_->pack_start(*smear, Gtk::PACK_SHRINK);
+    options_->show_all();
+  }
+  if (smear_button_ != nullptr && smear_button_->get_active() != smear_) {
+    smear_button_->set_active(smear_);
+  }
+  return options_.get();
+}
 
 double BrushTool::snapped(double v) const {
   if (host_ != nullptr && host_->grid_snap_enabled()) {
@@ -137,6 +172,16 @@ void BrushTool::stamp_to(double x, double y, bool shift) {
   const BrushTip tip = brush_tip_at(host_->brush_tip());
   const CustomBrush* custom = host_->custom_brush();
   auto paint = [&](double x0, double y0, double x1, double y1, Rect& stamp) {
+    if (smear_) {
+      if (custom != nullptr && !custom->empty()) {
+        smear_custom_brush(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1,
+                           *custom, &stamp);
+      } else {
+        smear_brush_tip(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1, tip,
+                        &stamp);
+      }
+      return;
+    }
     if (custom != nullptr && !custom->empty()) {
       stroke_custom_brush(tool.pixels(), tool.width(), tool.height(), tool.stride(), x0, y0, x1, y1,
                           *custom, &stamp);

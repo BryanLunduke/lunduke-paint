@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace lundukepaint {
 namespace {
@@ -37,7 +38,9 @@ void put_px(std::uint8_t* rgba, int width, int height, int stride, int x, int y,
   }
 }
 
-bool tip_covers(const BrushTip& tip, int dx, int dy) {
+}  // namespace
+
+bool brush_tip_covers(const BrushTip& tip, int dx, int dy) {
   const int s = std::max(1, tip.size);
   const int half = s / 2;
   switch (tip.kind) {
@@ -76,8 +79,6 @@ bool tip_covers(const BrushTip& tip, int dx, int dy) {
   return false;
 }
 
-}  // namespace
-
 const BrushTip& brush_tip_at(int index) {
   return kTips[clamp_brush_tip_index(index)];
 }
@@ -114,7 +115,7 @@ void stamp_brush_tip(std::uint8_t* rgba, int width, int height, int stride, doub
   const int half = std::max(1, tip.size) / 2 + 1;
   for (int dy = -half; dy <= half; ++dy) {
     for (int dx = -half; dx <= half; ++dx) {
-      if (tip_covers(tip, dx, dy)) {
+      if (brush_tip_covers(tip, dx, dy)) {
         put_px(rgba, width, height, stride, icx + dx, icy + dy, color, dirty, pattern, pattern_bg);
       }
     }
@@ -138,6 +139,93 @@ void stroke_brush_tip(std::uint8_t* rgba, int width, int height, int stride, dou
     stamp_brush_tip(rgba, width, height, stride, x0 + dx * t, y0 + dy * t, tip, color, dirty,
                     pattern, pattern_bg);
   }
+}
+
+namespace {
+
+void smear_steps(std::uint8_t* rgba, int width, int height, int stride, double x0, double y0,
+                 double x1, double y1, int reach, const std::function<bool(int, int)>& covers,
+                 Rect* dirty) {
+  if (rgba == nullptr) {
+    return;
+  }
+  const double dx = x1 - x0;
+  const double dy = y1 - y0;
+  const double len = std::hypot(dx, dy);
+  if (len < 0.5) {
+    return;
+  }
+  const int steps = std::max(1, static_cast<int>(std::lround(len)));
+  const int half = std::max(1, reach);
+  auto copy_pixel = [&](int sx, int sy, int dxp, int dyp) {
+    if (sx < 0 || sy < 0 || dxp < 0 || dyp < 0 || sx >= width || sy >= height || dxp >= width ||
+        dyp >= height) {
+      return;
+    }
+    const std::uint8_t* s = rgba + static_cast<std::size_t>(sy) * static_cast<std::size_t>(stride) +
+                           static_cast<std::size_t>(sx) * 4;
+    std::uint8_t* d = rgba + static_cast<std::size_t>(dyp) * static_cast<std::size_t>(stride) +
+                     static_cast<std::size_t>(dxp) * 4;
+    d[0] = s[0];
+    d[1] = s[1];
+    d[2] = s[2];
+    d[3] = s[3];
+    if (dirty != nullptr) {
+      *dirty = rect_union(*dirty, Rect{dxp, dyp, 1, 1});
+    }
+  };
+  for (int i = 1; i <= steps; ++i) {
+    const double t = static_cast<double>(i) / static_cast<double>(steps);
+    const double pt = static_cast<double>(i - 1) / static_cast<double>(steps);
+    const int cx = static_cast<int>(std::floor(x0 + dx * t));
+    const int cy = static_cast<int>(std::floor(y0 + dy * t));
+    const int px = static_cast<int>(std::floor(x0 + dx * pt));
+    const int py = static_cast<int>(std::floor(y0 + dy * pt));
+    const int ux = cx - px;
+    const int uy = cy - py;
+    if (ux == 0 && uy == 0) {
+      continue;
+    }
+    for (int oy = -half; oy <= half; ++oy) {
+      for (int ox = -half; ox <= half; ++ox) {
+        if (!covers(ox, oy)) {
+          continue;
+        }
+        copy_pixel(cx + ox - ux, cy + oy - uy, cx + ox, cy + oy);
+      }
+    }
+  }
+}
+
+}  // namespace
+
+void smear_brush_tip(std::uint8_t* rgba, int width, int height, int stride, double x0, double y0,
+                     double x1, double y1, const BrushTip& tip, Rect* dirty) {
+  const int reach = std::max(1, tip.size) / 2 + 1;
+  smear_steps(rgba, width, height, stride, x0, y0, x1, y1, reach,
+              [&](int dx, int dy) { return brush_tip_covers(tip, dx, dy); }, dirty);
+}
+
+void smear_custom_brush(std::uint8_t* rgba, int width, int height, int stride, double x0, double y0,
+                        double x1, double y1, const CustomBrush& brush, Rect* dirty) {
+  if (brush.empty()) {
+    return;
+  }
+  const int reach = std::max(brush.width, brush.height) / 2 + 1;
+  const int left = -(brush.width / 2);
+  const int top = -(brush.height / 2);
+  smear_steps(rgba, width, height, stride, x0, y0, x1, y1, reach,
+              [&](int dx, int dy) {
+                const int bx = dx - left;
+                const int by = dy - top;
+                if (bx < 0 || by < 0 || bx >= brush.width || by >= brush.height) {
+                  return false;
+                }
+                const std::uint8_t* p =
+                    brush.rgba.data() + (static_cast<std::size_t>(by) * brush.width + bx) * 4;
+                return p[3] != 0;
+              },
+              dirty);
 }
 
 }  // namespace lundukepaint

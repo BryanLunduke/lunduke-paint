@@ -29,8 +29,19 @@
 #include "ui/dialogs_new.hpp"
 #include "ui/dialogs_prefs.hpp"
 #include "ui/intro_howdy.hpp"
+#include "ui/rail_sizes.hpp"
 #include "ui/toolbox_catalog.hpp"
 #include "tools/tools.hpp"
+
+#include <cstdio>
+#include <cstring>
+#include <cmath>
+#include <memory>
+
+#include <gtkmm/button.h>
+#include <gtkmm/filechooserdialog.h>
+#include <gtkmm/grid.h>
+#include <gtkmm/spinbutton.h>
 
 #include <unistd.h>
 
@@ -179,6 +190,19 @@ MainWindow::MainWindow() {
   add_action(actions::kEffectSharpen, sigc::mem_fun(*this, &MainWindow::action_effect_sharpen));
   add_action(actions::kEffectEmboss, sigc::mem_fun(*this, &MainWindow::action_effect_emboss));
   add_action(actions::kEffectTrace, sigc::mem_fun(*this, &MainWindow::action_effect_trace));
+  add_action(actions::kEffectHalftone, sigc::mem_fun(*this, &MainWindow::action_effect_halftone));
+  add_action(actions::kEffectDiffuse, sigc::mem_fun(*this, &MainWindow::action_effect_diffuse));
+  add_action(actions::kEffectShadow, sigc::mem_fun(*this, &MainWindow::action_effect_shadow));
+  add_action(actions::kEffectWind, sigc::mem_fun(*this, &MainWindow::action_effect_wind));
+  add_action(actions::kEffectScanlines, sigc::mem_fun(*this, &MainWindow::action_effect_scanlines));
+  add_action(actions::kRepeatEffect, sigc::mem_fun(*this, &MainWindow::action_repeat_effect));
+  add_action(actions::kViewScanlines, sigc::mem_fun(*this, &MainWindow::action_view_scanlines));
+  add_action(actions::kSaveGif, sigc::mem_fun(*this, &MainWindow::action_save_gif));
+  add_action(actions::kBrushWorkshop, sigc::mem_fun(*this, &MainWindow::action_brush_workshop));
+  add_action(actions::kSelectionExpand, sigc::mem_fun(*this, &MainWindow::action_selection_expand));
+  add_action(actions::kSelectionShrink, sigc::mem_fun(*this, &MainWindow::action_selection_shrink));
+  add_action(actions::kSelectionBorder, sigc::mem_fun(*this, &MainWindow::action_selection_border));
+  add_action(actions::kFreeRotate, sigc::mem_fun(*this, &MainWindow::action_free_rotate));
   add_action(actions::kSelectionBrush, sigc::mem_fun(*this, &MainWindow::action_selection_brush));
   add_action(actions::kClearBrush, sigc::mem_fun(*this, &MainWindow::action_clear_brush));
   add_action(actions::kPatternFromSelection,
@@ -438,8 +462,26 @@ void MainWindow::build_ui() {
   root_.pack_start(work_area_, Gtk::PACK_EXPAND_WIDGET);
   root_.pack_start(status_bar_, Gtk::PACK_SHRINK);
 
-  canvas_.signal_pointer_moved().connect(
-      sigc::mem_fun(status_bar_, &StatusBar::show_coordinates));
+  canvas_.signal_pointer_moved().connect([this](double x, double y) {
+    const int ix = static_cast<int>(std::floor(x));
+    const int iy = static_cast<int>(std::floor(y));
+    const Color color = canvas_.sample_pixel(ix, iy);
+    char buffer[80];
+    std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X", color.r, color.g, color.b);
+    Glib::ustring text = buffer;
+    if (color.a < 255) {
+      char alpha[16];
+      std::snprintf(alpha, sizeof(alpha), " a%d", color.a);
+      text += alpha;
+    }
+    const int swatch = ColorsPanel::swatch_index(color);
+    if (swatch >= 0) {
+      char hint[16];
+      std::snprintf(hint, sizeof(hint), " p%d", swatch);
+      text += hint;
+    }
+    status_bar_.show_pointer_readout(x, y, text);
+  });
   canvas_.signal_pointer_left().connect(
       sigc::mem_fun(status_bar_, &StatusBar::clear_coordinates));
   canvas_.signal_view_changed().connect([this]() {
@@ -977,6 +1019,10 @@ bool MainWindow::on_key_press(GdkEventKey* event) {
     if (!ctrl && !alt) {
       return false;
     }
+  }
+  if (event->keyval == GDK_KEY_bracketleft || event->keyval == GDK_KEY_bracketright) {
+    step_tool_size(event->keyval == GDK_KEY_bracketright ? 1 : -1);
+    return true;
   }
   if ((event->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK)) != 0) {
     return false;
@@ -1557,13 +1603,6 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool 
   }
   // Reject and warn before any stamp. Cancelling a chooser never reaches
   // here; cancelling one of these dialogs must leave the live edit up too.
-  if (format == ImageFormat::Gif) {
-    Gtk::MessageDialog err(*this, "GIF save is not supported.", false, Gtk::MESSAGE_ERROR,
-                           Gtk::BUTTONS_OK, true);
-    err.set_secondary_text("Use Save As and choose PNG, JPEG, BMP or OpenRaster.");
-    err.run();
-    return false;
-  }
   if (format != ImageFormat::Ora) {
     const bool multi = document().layers().count() > 1;
     const bool transparent = flat_export_transparent();
@@ -2502,7 +2541,31 @@ void MainWindow::apply_layer_effect(const char* name,
   if (!effect.valid()) {
     return;
   }
-  effect.commit(name != nullptr ? name : "Adjust", fn);
+  if (effect.commit(name != nullptr ? name : "Adjust", fn)) {
+    remember_effect(name, fn);
+    canvas_.invalidate_all();
+    update_chrome();
+  }
+}
+
+void MainWindow::remember_effect(const char* name, const EffectPreview::EffectFn& fn) {
+  if (!fn) {
+    return;
+  }
+  last_effect_name_ = name != nullptr ? name : "Effect";
+  last_effect_ = fn;
+}
+
+void MainWindow::step_tool_size(int delta) {
+  const char* id = active_tool_ != nullptr && active_tool_->id() != nullptr ? active_tool_->id() : "";
+  if (std::strcmp(id, "spray") == 0) {
+    set_spray_radius(step_choice(spray_radius_, kSprayRadiusChoices, kSprayRadiusChoiceCount, delta));
+  } else if (std::strcmp(id, "brush") == 0) {
+    set_brush_tip(brush_tip_ + delta);
+  } else {
+    set_stroke_size(step_choice(stroke_size_, kLineWidthChoices, kLineWidthChoiceCount, delta));
+  }
+  canvas_.queue_draw();
 }
 
 bool MainWindow::run_adjust_dialog(LivePreviewDialog& dialog, const char* name,
@@ -2556,6 +2619,9 @@ bool MainWindow::run_adjust_dialog(LivePreviewDialog& dialog, const char* name,
   }
   // OK: discard the preview pixels and apply once, as a single undo step.
   const bool committed = effect.commit(name != nullptr ? name : "Adjust", fn);
+  if (committed) {
+    remember_effect(name, fn);
+  }
   canvas_.invalidate_all();
   update_chrome();
   return committed;
@@ -2715,6 +2781,197 @@ void MainWindow::action_clear_brush() {
   show_status("Custom brush cleared");
 }
 
+void MainWindow::action_save_gif() {
+  const SaveBinding binding(*this);
+  Gtk::FileChooserDialog dialog(*this, "Save as GIF", Gtk::FILE_CHOOSER_ACTION_SAVE);
+  dialog.set_do_overwrite_confirmation(true);
+  dialog.add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+  dialog.add_button("_Save", Gtk::RESPONSE_ACCEPT);
+  dialog.set_default_response(Gtk::RESPONSE_ACCEPT);
+  auto filter = Gtk::FileFilter::create();
+  filter->set_name("GIF image (*.gif)");
+  filter->add_pattern("*.gif");
+  dialog.add_filter(filter);
+  dialog.set_filter(filter);
+  std::string stem = "untitled";
+  if (!document().path().empty()) {
+    stem = Glib::path_get_basename(document().path());
+    const auto dot = stem.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) {
+      stem = stem.substr(0, dot);
+    }
+  }
+  dialog.set_current_name(stem + ".gif");
+  if (dialog.run() != Gtk::RESPONSE_ACCEPT) {
+    return;
+  }
+  std::string path = dialog.get_filename();
+  if (path.empty()) {
+    return;
+  }
+  if (format_from_path(path) != ImageFormat::Gif) {
+    path += ".gif";
+  }
+  if (!rebind_save_target()) {
+    return;
+  }
+  if (!save_to_path(path, ImageFormat::Gif, false)) {
+    return;
+  }
+  if (!rebind_save_target()) {
+    return;
+  }
+  document().set_path(path);
+  document().mark_clean();
+  remember_recent(document().path());
+  clear_document_recovery(document());
+  update_chrome();
+  show_status("Saved static GIF");
+}
+
+void MainWindow::action_brush_workshop() {
+  if (brush_image_.empty()) {
+    show_status("Pick up a selection as a brush first");
+    return;
+  }
+  Gtk::Dialog dialog("Brush Workshop", *this, true);
+  dialog.add_button("_Close", Gtk::RESPONSE_CLOSE);
+  auto* grid = Gtk::manage(new Gtk::Grid());
+  grid->set_row_spacing(6);
+  grid->set_column_spacing(6);
+  grid->set_border_width(8);
+  auto add = [&](const char* label, int col, int row, const std::function<void()>& fn) {
+    auto* button = Gtk::manage(new Gtk::Button(label));
+    button->signal_clicked().connect(fn);
+    grid->attach(*button, col, row, 1, 1);
+  };
+  add("Flip H", 0, 0, [this]() { custom_brush_flip_h(brush_image_); });
+  add("Flip V", 1, 0, [this]() { custom_brush_flip_v(brush_image_); });
+  add("Rotate 90", 2, 0, [this]() { custom_brush_rotate_90(brush_image_); });
+  add("Double", 0, 1, [this]() { custom_brush_scale(brush_image_, 2, 1); });
+  add("Halve", 1, 1, [this]() { custom_brush_scale(brush_image_, 1, 2); });
+  add("Remap FG", 2, 1, [this]() { custom_brush_remap(brush_image_, document().foreground()); });
+  auto* spacing = Gtk::manage(new Gtk::SpinButton());
+  spacing->set_range(0, 64);
+  spacing->set_increments(1, 4);
+  spacing->set_digits(0);
+  spacing->set_value(brush_image_.spacing);
+  spacing->set_tooltip_text("Stamp gap in pixels. 0 keeps the automatic step.");
+  spacing->signal_value_changed().connect([this, spacing]() {
+    brush_image_.spacing = spacing->get_value_as_int();
+  });
+  grid->attach(*Gtk::manage(new Gtk::Label("Spacing")), 0, 2, 1, 1);
+  grid->attach(*spacing, 1, 2, 2, 1);
+  dialog.get_content_area()->pack_start(*grid, Gtk::PACK_SHRINK);
+  dialog.show_all();
+  dialog.run();
+  show_status(Glib::ustring::compose("Custom brush %1×%2", brush_image_.width, brush_image_.height));
+  canvas_.queue_draw();
+}
+
+void MainWindow::morph_active_selection(SelectionMorph kind, const char* title) {
+  if (document_ptr() == nullptr || document().selection().empty()) {
+    show_status("Nothing is selected");
+    return;
+  }
+  if (!commit_live_edits()) {
+    return;
+  }
+  PixelCountDialog dialog(*this, title, 1);
+  if (dialog.run() != Gtk::RESPONSE_OK) {
+    return;
+  }
+  if (!document().try_commit_floating(title)) {
+    report_blocked("Unlock the layer to place the selection");
+    return;
+  }
+  Selection& sel = document().selection();
+  const SelectionState before = sel.capture();
+  if (!morph_selection(sel, document().width(), document().height(), kind, dialog.pixels())) {
+    show_status("Nothing is selected");
+    return;
+  }
+  document().commit(std::make_unique<SelectionCommand>(title, before, sel.capture()));
+  canvas_.invalidate_all();
+  update_chrome();
+}
+
+void MainWindow::action_selection_expand() {
+  morph_active_selection(SelectionMorph::Expand, "Expand selection");
+}
+
+void MainWindow::action_selection_shrink() {
+  morph_active_selection(SelectionMorph::Contract, "Shrink selection");
+}
+
+void MainWindow::action_selection_border() {
+  morph_active_selection(SelectionMorph::Border, "Border selection");
+}
+
+bool MainWindow::prepare_float_for_transform() {
+  if (document_ptr() == nullptr || document().selection().empty()) {
+    show_status("Select an area to rotate");
+    return false;
+  }
+  if (document().selection().inverted()) {
+    show_status("Free rotate needs a normal selection");
+    return false;
+  }
+  if (!commit_live_edits()) {
+    return false;
+  }
+  if (document().selection().floating()) {
+    return true;
+  }
+  if (!document().selection().lift(document().layers().active_layer(), document().layers().active_index())) {
+    show_status("Could not lift the selection");
+    return false;
+  }
+  return true;
+}
+
+void MainWindow::action_free_rotate() {
+  const SelectionState before = document_ptr() != nullptr ? document().selection().capture() : SelectionState{};
+  if (!prepare_float_for_transform()) {
+    return;
+  }
+  RotateShearDialog dialog(*this);
+  if (dialog.run() != Gtk::RESPONSE_OK) {
+    if (!before.floating && document().selection().floating() && !before.empty) {
+      document().selection().restore(before);
+      canvas_.invalidate_all();
+    }
+    return;
+  }
+  Selection& sel = document().selection();
+  const std::uint8_t* coverage = sel.float_coverage();
+  SampledPixels sampled = rotate_nearest_angle(sel.float_pixels(), sel.float_w(), sel.float_h(),
+                                               sel.float_w() * 4, coverage, dialog.degrees());
+  if (dialog.shear_x() != 0) {
+    sampled = shear_horizontal_nearest(sampled.rgba.data(), sampled.width, sampled.height, sampled.width * 4,
+                                       sampled.coverage.empty() ? nullptr : sampled.coverage.data(),
+                                       dialog.shear_x());
+  }
+  if (dialog.shear_y() != 0) {
+    sampled = shear_vertical_nearest(sampled.rgba.data(), sampled.width, sampled.height, sampled.width * 4,
+                                     sampled.coverage.empty() ? nullptr : sampled.coverage.data(),
+                                     dialog.shear_y());
+  }
+  if (sampled.width < 1 || sampled.height < 1) {
+    document().selection().restore(before);
+    return;
+  }
+  const double cx = sel.float_x() + sel.float_w() * 0.5;
+  const double cy = sel.float_y() + sel.float_h() * 0.5;
+  const int nx = static_cast<int>(std::lround(cx - sampled.width * 0.5));
+  const int ny = static_cast<int>(std::lround(cy - sampled.height * 0.5));
+  sel.transform_float(nx, ny, sampled.width, sampled.height, std::move(sampled.rgba),
+                      std::move(sampled.coverage));
+  document().commit(std::make_unique<SelectionCommand>("Free rotate", before, sel.capture()));
+  canvas_.invalidate_all();
+  update_chrome();
+}
+
 void MainWindow::action_selection_brush() {
   if (document_ptr() == nullptr) {
     return;
@@ -2779,6 +3036,84 @@ void MainWindow::action_selection_brush() {
   }
   show_status(Glib::ustring::compose("Custom brush %1×%2 — background color is transparent",
                                      brush_image_.width, brush_image_.height));
+}
+
+void MainWindow::action_effect_halftone() {
+  HalftoneDialog dialog(*this);
+  run_adjust_dialog(dialog, "Halftone", [&dialog, this]() -> EffectPreview::EffectFn {
+    const Color ink = document().foreground().a == 0 ? Color::black() : document().foreground();
+    const Color paper = document().background();
+    const int cell = dialog.cell();
+    const HalftoneScreen screen =
+        dialog.screen() == 0 ? HalftoneScreen::Bayer : HalftoneScreen::Clustered;
+    return [ink, paper, cell, screen](std::uint8_t* px, int w, int h, int stride) {
+      halftone_rgba(px, w, h, stride, ink, paper, cell, screen);
+    };
+  });
+}
+
+void MainWindow::action_effect_diffuse() {
+  DiffuseDialog dialog(*this);
+  run_adjust_dialog(dialog, "Diffuse", [&dialog]() -> EffectPreview::EffectFn {
+    const int radius = dialog.radius();
+    return [radius](std::uint8_t* px, int w, int h, int stride) {
+      diffuse_rgba(px, w, h, stride, radius, 0xC0FFEEu);
+    };
+  });
+}
+
+void MainWindow::action_effect_shadow() {
+  DropShadowDialog dialog(*this);
+  run_adjust_dialog(dialog, "Drop shadow", [&dialog, this]() -> EffectPreview::EffectFn {
+    const int dx = dialog.offset_x();
+    const int dy = dialog.offset_y();
+    const Color shadow = document().background();
+    const Color paper = document().background();
+    if (dx == 0 && dy == 0) {
+      return nullptr;
+    }
+    return [dx, dy, shadow, paper](std::uint8_t* px, int w, int h, int stride) {
+      drop_shadow_rgba(px, w, h, stride, dx, dy, shadow, paper);
+    };
+  });
+}
+
+void MainWindow::action_effect_wind() {
+  WindDialog dialog(*this);
+  run_adjust_dialog(dialog, "Wind", [&dialog]() -> EffectPreview::EffectFn {
+    const int which = dialog.direction();
+    const WindDirection direction = which == 1   ? WindDirection::Left
+                                    : which == 2 ? WindDirection::Down
+                                    : which == 3 ? WindDirection::Up
+                                                 : WindDirection::Right;
+    const int strength = dialog.strength();
+    return [direction, strength](std::uint8_t* px, int w, int h, int stride) {
+      wind_rgba(px, w, h, stride, direction, strength, 0xA11CEu);
+    };
+  });
+}
+
+void MainWindow::action_effect_scanlines() {
+  ScanlineDialog dialog(*this);
+  run_adjust_dialog(dialog, "CRT scanlines", [&dialog]() -> EffectPreview::EffectFn {
+    const int percent = dialog.percent();
+    return [percent](std::uint8_t* px, int w, int h, int stride) {
+      crt_scanlines_rgba(px, w, h, stride, percent);
+    };
+  });
+}
+
+void MainWindow::action_repeat_effect() {
+  if (!last_effect_) {
+    show_status("No effect to repeat");
+    return;
+  }
+  apply_layer_effect(last_effect_name_.c_str(), last_effect_);
+}
+
+void MainWindow::action_view_scanlines() {
+  canvas_.set_scanlines(!canvas_.scanlines());
+  show_status(canvas_.scanlines() ? "CRT scanlines on" : "CRT scanlines off");
 }
 
 void MainWindow::action_effect_trace() {
