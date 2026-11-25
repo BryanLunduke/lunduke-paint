@@ -151,6 +151,7 @@ public:
   void action_effect_trace();
   void action_selection_brush();
   void action_clear_brush();
+  void action_pattern_from_selection();
   void action_preferences();
   void action_shortcuts();
   void action_about();

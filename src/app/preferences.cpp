@@ -104,6 +104,32 @@ void Preferences::load() {
   }
 
   try {
+    if (key.has_key("patterns", "custom")) {
+      custom_patterns.clear();
+      for (const auto& item : key.get_string_list("patterns", "custom")) {
+        if (item.size() != 16) {
+          continue;
+        }
+        Pattern pattern{};
+        bool ok = true;
+        for (int i = 0; i < 8; ++i) {
+          unsigned value = 0;
+          if (std::sscanf(item.substr(static_cast<std::size_t>(i) * 2, 2).c_str(), "%02x",
+                          &value) != 1) {
+            ok = false;
+            break;
+          }
+          pattern.rows[i] = static_cast<std::uint8_t>(value);
+        }
+        if (ok) {
+          custom_patterns.push_back(pattern);
+        }
+      }
+    }
+  } catch (const Glib::KeyFileError&) {
+  }
+
+  try {
     if (key.has_key("recent", "files")) {
       recent_files.clear();
       for (const auto& item : key.get_string_list("recent", "files")) {
@@ -141,6 +167,20 @@ bool Preferences::save() const {
   key.set_string("view", "checker_light", color_to_hex(checker_light));
   key.set_string("view", "checker_dark", color_to_hex(checker_dark));
   key.set_integer("view", "grid_threshold", grid_threshold);
+  if (!custom_patterns.empty()) {
+    std::vector<Glib::ustring> encoded;
+    encoded.reserve(custom_patterns.size());
+    for (const Pattern& pattern : custom_patterns) {
+      char buf[17];
+      std::snprintf(buf, sizeof(buf), "%02x%02x%02x%02x%02x%02x%02x%02x", pattern.rows[0],
+                    pattern.rows[1], pattern.rows[2], pattern.rows[3], pattern.rows[4],
+                    pattern.rows[5], pattern.rows[6], pattern.rows[7]);
+      encoded.emplace_back(buf);
+    }
+    key.set_string_list("patterns", "custom", encoded);
+  } else if (key.has_group("patterns")) {
+    key.remove_group("patterns");
+  }
   if (!recent_files.empty()) {
     std::vector<Glib::ustring> list;
     list.reserve(recent_files.size());

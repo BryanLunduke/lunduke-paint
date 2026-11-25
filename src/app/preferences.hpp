@@ -2,6 +2,7 @@
 #ifndef LUNDUKEPAINT_APP_PREFERENCES_HPP
 #define LUNDUKEPAINT_APP_PREFERENCES_HPP
 
+#include "raster/pattern.hpp"
 #include "raster/types.hpp"
 
 #include <string>
@@ -18,6 +19,7 @@ public:
   Color checker_dark{158, 158, 158, 255};
   int grid_threshold = 400;
   std::vector<std::string> recent_files;
+  std::vector<Pattern> custom_patterns;
 
   void load();
   bool save() const;

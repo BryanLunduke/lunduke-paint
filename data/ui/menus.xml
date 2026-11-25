@@ -98,6 +98,10 @@
           <attribute name="label" translatable="yes">Clear Custom Brush</attribute>
           <attribute name="action">win.clear-brush</attribute>
         </item>
+        <item>
+          <attribute name="label" translatable="yes">Pattern from _Selection</attribute>
+          <attribute name="action">win.pattern-from-selection</attribute>
+        </item>
       </section>
       <section>
         <item>

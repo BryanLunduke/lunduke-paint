@@ -111,6 +111,7 @@ MainWindow::MainWindow() {
   Glib::add_exception_handler(sigc::mem_fun(*this, &MainWindow::on_unhandled_exception));
   last_edit_us_ = g_get_monotonic_time();
   prefs_.load();
+  set_custom_patterns(prefs_.custom_patterns);
   auto startup = Document::create(prefs_.default_width, prefs_.default_height, Color::white());
   startup->history().set_depth(prefs_.undo_limit);
   startup->history().set_byte_cap(suggested_undo_bytes());
@@ -179,6 +180,8 @@ MainWindow::MainWindow() {
   add_action(actions::kEffectTrace, sigc::mem_fun(*this, &MainWindow::action_effect_trace));
   add_action(actions::kSelectionBrush, sigc::mem_fun(*this, &MainWindow::action_selection_brush));
   add_action(actions::kClearBrush, sigc::mem_fun(*this, &MainWindow::action_clear_brush));
+  add_action(actions::kPatternFromSelection,
+             sigc::mem_fun(*this, &MainWindow::action_pattern_from_selection));
   add_action(actions::kPreferences, sigc::mem_fun(*this, &MainWindow::action_preferences));
   add_action(actions::kShortcuts, sigc::mem_fun(*this, &MainWindow::action_shortcuts));
   add_action(actions::kAbout, sigc::mem_fun(*this, &MainWindow::action_about));
@@ -337,6 +340,7 @@ void MainWindow::build_ui() {
   toolbox_.on_edit_color = [this](bool background) { choose_color(background); };
 
   pattern_strip_.on_pattern_chosen = [this](int index) { set_pattern_index(index); };
+  pattern_strip_.ensure_count(pattern_count());
   colors_panel_.on_swatch = [this](Color color, bool background) {
     if (background) {
       document().set_background(color);
@@ -2633,6 +2637,71 @@ void MainWindow::action_effect_sharpen() {
     std::memcpy(src.data(), px, src.size());
     sharpen_rgba(src.data(), w, h, stride, px, stride);
   });
+}
+
+void MainWindow::action_pattern_from_selection() {
+  if (document_ptr() == nullptr) {
+    return;
+  }
+  const Selection& sel = document().selection();
+  if (sel.empty() || sel.inverted()) {
+    show_status("Select an area to turn into a pattern");
+    return;
+  }
+  int bw = 0;
+  int bh = 0;
+  std::vector<std::uint8_t> pixels;
+  if (sel.floating()) {
+    bw = sel.float_w();
+    bh = sel.float_h();
+    pixels.assign(static_cast<std::size_t>(bw) * bh * 4, 0);
+    for (int y = 0; y < bh; ++y) {
+      for (int x = 0; x < bw; ++x) {
+        const Color c = sel.float_covers(x, y) ? sel.float_pixel(x, y) : Color::transparent();
+        std::uint8_t* p = pixels.data() + (static_cast<std::size_t>(y) * bw + x) * 4;
+        p[0] = c.r;
+        p[1] = c.g;
+        p[2] = c.b;
+        p[3] = c.a;
+      }
+    }
+  } else {
+    const Rect bounds = rect_intersect(sel.bounds(), Rect{0, 0, document().width(), document().height()});
+    if (bounds.empty()) {
+      show_status("Select an area to turn into a pattern");
+      return;
+    }
+    bw = bounds.w;
+    bh = bounds.h;
+    pixels.assign(static_cast<std::size_t>(bw) * bh * 4, 0);
+    const Layer& layer = document().layers().active_layer();
+    for (int y = 0; y < bh; ++y) {
+      for (int x = 0; x < bw; ++x) {
+        const int cx = bounds.x + x;
+        const int cy = bounds.y + y;
+        Color c = Color::transparent();
+        if (sel.contains(cx, cy)) {
+          const int lx = cx - layer.offset_x();
+          const int ly = cy - layer.offset_y();
+          if (lx >= 0 && ly >= 0 && lx < layer.width() && ly < layer.height()) {
+            c = layer.pixel(lx, ly);
+          }
+        }
+        std::uint8_t* p = pixels.data() + (static_cast<std::size_t>(y) * bw + x) * 4;
+        p[0] = c.r;
+        p[1] = c.g;
+        p[2] = c.b;
+        p[3] = c.a;
+      }
+    }
+  }
+  const Pattern made = pattern_from_rgba(pixels.data(), bw, bh, bw * 4, document().background());
+  const int index = add_custom_pattern(made);
+  prefs_.custom_patterns = custom_patterns();
+  prefs_.save();
+  pattern_strip_.ensure_count(pattern_count());
+  set_pattern_index(index);
+  show_status("Added an 8×8 pattern");
 }
 
 void MainWindow::action_clear_brush() {

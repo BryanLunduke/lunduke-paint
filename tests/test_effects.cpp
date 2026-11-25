@@ -4,6 +4,7 @@
 #include "doc/document.hpp"
 #include "raster/custom_brush.hpp"
 #include "raster/effects.hpp"
+#include "raster/pattern.hpp"
 #include "raster/grid_snap.hpp"
 
 #include <cstdio>
@@ -206,6 +207,25 @@ int main() {
     errors += expect(stamped.r == 200 && stamped.a == 255, "brush stamps the opaque pixel");
     const Color skipped = get(canvas.data(), 32, 2, 2);
     errors += expect(skipped.r == 1, "transparent brush pixel does not cover the canvas");
+  }
+
+  {
+    std::uint8_t src[8 * 4];
+    for (int x = 0; x < 8; ++x) {
+      src[x * 4 + 0] = x < 4 ? 0 : 255;
+      src[x * 4 + 1] = x < 4 ? 0 : 255;
+      src[x * 4 + 2] = x < 4 ? 0 : 255;
+      src[x * 4 + 3] = 255;
+    }
+    const lundukepaint::Pattern made =
+        lundukepaint::pattern_from_rgba(src, 8, 1, 32, Color::white());
+    errors += expect(made.bit_at(0, 0) && made.bit_at(3, 0), "dark samples set pattern bits");
+    errors += expect(!made.bit_at(4, 0) && !made.bit_at(7, 0), "paper samples stay clear");
+    const int before = lundukepaint::pattern_count();
+    const int index = lundukepaint::add_custom_pattern(made);
+    errors += expect(index == before, "custom pattern is appended");
+    errors += expect(lundukepaint::pattern_at(index).rows[0] == made.rows[0], "lookup finds the new pattern");
+    lundukepaint::set_custom_patterns({});
   }
 
   if (errors != 0) {

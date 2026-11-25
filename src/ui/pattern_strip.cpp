@@ -57,6 +57,31 @@ void PatternStrip::set_colors(Color fg, Color bg) {
   }
 }
 
+void PatternStrip::ensure_count(int count) {
+  if (count < kPatternCount) {
+    count = kPatternCount;
+  }
+  while (static_cast<int>(areas_.size()) < count) {
+    const int index = static_cast<int>(areas_.size());
+    auto* area = Gtk::manage(new Gtk::DrawingArea());
+    area->set_size_request(kSwatch, kSwatch);
+    area->set_tooltip_text("Custom pattern from a selection");
+    area->add_events(Gdk::BUTTON_PRESS_MASK);
+    area->signal_draw().connect(
+        [this, area, index](const Cairo::RefPtr<Cairo::Context>& cr) {
+          return on_swatch_draw(area, cr, index);
+        });
+    area->signal_button_press_event().connect(
+        [this, index](GdkEventButton* event) { return on_swatch_press(event, index); });
+    const int extra = index - kPatternCount;
+    const int col = kCols + extra / 2;
+    const int row = extra % 2;
+    swatches_.attach(*area, col, row, 1, 1);
+    areas_.push_back(area);
+    area->show();
+  }
+}
+
 void PatternStrip::set_pattern_index(int index) {
   pattern_index_ = clamp_pattern_index(index);
   for (auto* area : areas_) {
