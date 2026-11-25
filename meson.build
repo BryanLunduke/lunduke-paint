@@ -172,6 +172,18 @@ test_blend = executable(
 )
 test('blend', test_blend)
 
+# Not part of meson test: timings for the viewport expose, Normal blend, and
+# zoomed-out OpenRaster composite. Run build/bench_viewport by hand.
+bench_viewport = executable(
+  'bench_viewport',
+  files('tests/bench_viewport.cpp', 'src/ui/canvas_view.cpp', 'src/ui/intro_howdy.cpp',
+        'src/tools/selection_xform.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
+
 test_ora = executable(
   'test_ora',
   files('tests/test_ora.cpp'),

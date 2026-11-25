@@ -735,67 +735,7 @@ bool CanvasView::on_area_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
   const int out_w = downscale ? std::max(1, static_cast<int>(std::ceil(view.w * zoom_))) : view.w;
   const int out_h = downscale ? std::max(1, static_cast<int>(std::ceil(view.h * zoom_))) : view.h;
   ensure_composite(view, out_w, out_h, downscale, tool_override, tool_index);
-
-  if (!blit_surface_ || blit_w_ != out_w || blit_h_ != out_h) {
-    blit_surface_ = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, out_w, out_h);
-    blit_w_ = out_w;
-    blit_h_ = out_h;
-  }
-  blit_surface_->flush();
-  std::uint8_t* dst = blit_surface_->get_data();
-  const int dst_stride = blit_surface_->get_stride();
-  const int cache_stride = out_w * 4;
-  for (int y = 0; y < out_h; ++y) {
-    std::memcpy(dst + static_cast<std::size_t>(y) * static_cast<std::size_t>(dst_stride),
-                composite_cache_.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(cache_stride),
-                static_cast<std::size_t>(cache_stride));
-  }
-  if (document_->selection().floating()) {
-    const Color canvas_bg = document_->canvas_background();
-    const Color well = document_->background();
-    const Color hole_clear = canvas_bg.a != 0 ? canvas_bg : Color::white();
-    const Color float_clear =
-        canvas_bg.a != 0 ? canvas_bg : (well.a != 0 ? well : Color::white());
-    if (downscale) {
-      paint_scaled_float(dst, dst_stride, view, out_w, out_h);
-    } else {
-      const Selection& sel = document_->selection();
-      const std::uint8_t* hole_rgba = nullptr;
-      int hole_stride = 0;
-      if (!sel.copy_mode()) {
-        int skip = sel.source_layer();
-        if (skip < 0 || skip >= document_->layers().count()) {
-          skip = document_->layers().active_index();
-        }
-        const Rect origin = sel.origin_rect();
-        const std::uint64_t fp = hole_fingerprint(*document_, skip);
-        const std::size_t bytes =
-            static_cast<std::size_t>(origin.w) * static_cast<std::size_t>(origin.h) * 4;
-        if (!hole_cache_valid_ || hole_cache_origin_.x != origin.x ||
-            hole_cache_origin_.y != origin.y || hole_cache_origin_.w != origin.w ||
-            hole_cache_origin_.h != origin.h || hole_cache_skip_ != skip || hole_cache_fp_ != fp ||
-            hole_cache_.size() != bytes) {
-          hole_cache_.assign(bytes, 0);
-          if (!origin.empty()) {
-            document_->layers().composite_rect(hole_cache_.data(), origin.w * 4, origin, nullptr, -1,
-                                                skip);
-          }
-          hole_cache_origin_ = origin;
-          hole_cache_skip_ = skip;
-          hole_cache_fp_ = fp;
-          hole_cache_valid_ = true;
-        }
-        hole_rgba = hole_cache_.data();
-        hole_stride = origin.w * 4;
-      }
-      paint_floating_selection(document_->layers(), sel, dst, dst_stride, view, true, hole_clear,
-                               float_clear, hole_rgba, hole_stride);
-    }
-  } else {
-    hole_cache_valid_ = false;
-  }
-  premultiply_rows(dst, out_w, out_h, dst_stride);
-  blit_surface_->mark_dirty();
+  refresh_display_surface(out_w, out_h, view, downscale);
   cr->save();
   cr->translate(ox + view.x * zoom_, oy + view.y * zoom_);
   if (downscale) {
@@ -1015,7 +955,107 @@ Rect CanvasView::viewport_canvas_rect(int clip_x0, int clip_y0, int clip_x1, int
   return view;
 }
 
-void CanvasView::ensure_composite(Rect view, int out_w, int out_h, bool downscale,
+std::uint64_t CanvasView::float_display_key() const {
+  if (document_ == nullptr || !document_->selection().floating()) {
+    return 0;
+  }
+  const Selection& sel = document_->selection();
+  std::uint64_t h = 0x6f6c6f61ull;
+  mix_u64(h, sel.generation());
+  mix_u64(h, sel.copy_mode() ? 1 : 0);
+  mix_u64(h, static_cast<std::uint64_t>(sel.source_layer()));
+  mix_u64(h, static_cast<std::uint32_t>(sel.float_x()));
+  mix_u64(h, static_cast<std::uint32_t>(sel.float_y()));
+  mix_u64(h, static_cast<std::uint32_t>(sel.float_w()));
+  mix_u64(h, static_cast<std::uint32_t>(sel.float_h()));
+  mix_u64(h, static_cast<std::uint32_t>(sel.origin_x()));
+  mix_u64(h, static_cast<std::uint32_t>(sel.origin_y()));
+  mix_u64(h, static_cast<std::uint32_t>(sel.origin_w()));
+  mix_u64(h, static_cast<std::uint32_t>(sel.origin_h()));
+  const Color canvas_bg = document_->canvas_background();
+  const Color well = document_->background();
+  mix_u64(h, (static_cast<std::uint64_t>(canvas_bg.r) << 24) |
+                 (static_cast<std::uint64_t>(canvas_bg.g) << 16) |
+                 (static_cast<std::uint64_t>(canvas_bg.b) << 8) | canvas_bg.a);
+  mix_u64(h, (static_cast<std::uint64_t>(well.r) << 24) | (static_cast<std::uint64_t>(well.g) << 16) |
+                 (static_cast<std::uint64_t>(well.b) << 8) | well.a);
+  return h == 0 ? 1 : h;
+}
+
+void CanvasView::refresh_display_surface(int out_w, int out_h, Rect view, bool downscale) {
+  if (out_w < 1 || out_h < 1 || composite_cache_.empty()) {
+    return;
+  }
+  const std::uint64_t float_key = float_display_key();
+  if (blit_surface_ && blit_w_ == out_w && blit_h_ == out_h && blit_serial_ == composite_serial_ &&
+      blit_float_key_ == float_key) {
+    return;
+  }
+  if (!blit_surface_ || blit_w_ != out_w || blit_h_ != out_h) {
+    blit_surface_ = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, out_w, out_h);
+    blit_w_ = out_w;
+    blit_h_ = out_h;
+  }
+  blit_surface_->flush();
+  std::uint8_t* dst = blit_surface_->get_data();
+  const int dst_stride = blit_surface_->get_stride();
+  const int cache_stride = out_w * 4;
+  for (int y = 0; y < out_h; ++y) {
+    std::memcpy(dst + static_cast<std::size_t>(y) * static_cast<std::size_t>(dst_stride),
+                composite_cache_.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(cache_stride),
+                static_cast<std::size_t>(cache_stride));
+  }
+  if (document_->selection().floating()) {
+    const Color canvas_bg = document_->canvas_background();
+    const Color well = document_->background();
+    const Color hole_clear = canvas_bg.a != 0 ? canvas_bg : Color::white();
+    const Color float_clear =
+        canvas_bg.a != 0 ? canvas_bg : (well.a != 0 ? well : Color::white());
+    if (downscale) {
+      paint_scaled_float(dst, dst_stride, view, out_w, out_h);
+    } else {
+      const Selection& sel = document_->selection();
+      const std::uint8_t* hole_rgba = nullptr;
+      int hole_stride = 0;
+      if (!sel.copy_mode()) {
+        int skip = sel.source_layer();
+        if (skip < 0 || skip >= document_->layers().count()) {
+          skip = document_->layers().active_index();
+        }
+        const Rect origin = sel.origin_rect();
+        const std::uint64_t fp = hole_fingerprint(*document_, skip);
+        const std::size_t bytes =
+            static_cast<std::size_t>(origin.w) * static_cast<std::size_t>(origin.h) * 4;
+        if (!hole_cache_valid_ || hole_cache_origin_.x != origin.x ||
+            hole_cache_origin_.y != origin.y || hole_cache_origin_.w != origin.w ||
+            hole_cache_origin_.h != origin.h || hole_cache_skip_ != skip || hole_cache_fp_ != fp ||
+            hole_cache_.size() != bytes) {
+          hole_cache_.assign(bytes, 0);
+          if (!origin.empty()) {
+            document_->layers().composite_rect(hole_cache_.data(), origin.w * 4, origin, nullptr, -1,
+                                                skip);
+          }
+          hole_cache_origin_ = origin;
+          hole_cache_skip_ = skip;
+          hole_cache_fp_ = fp;
+          hole_cache_valid_ = true;
+        }
+        hole_rgba = hole_cache_.data();
+        hole_stride = origin.w * 4;
+      }
+      paint_floating_selection(document_->layers(), sel, dst, dst_stride, view, true, hole_clear,
+                               float_clear, hole_rgba, hole_stride);
+    }
+  } else {
+    hole_cache_valid_ = false;
+  }
+  premultiply_rows(dst, out_w, out_h, dst_stride);
+  blit_surface_->mark_dirty();
+  blit_serial_ = composite_serial_;
+  blit_float_key_ = float_key;
+}
+
+bool CanvasView::ensure_composite(Rect view, int out_w, int out_h, bool downscale,
                                   const Layer* tool_override, int tool_index) {
   const bool tool_on = tool_override != nullptr;
   const bool same = composite_valid_ && !composite_dirty_all_ && composite_view_.x == view.x &&
@@ -1049,15 +1089,16 @@ void CanvasView::ensure_composite(Rect view, int out_w, int out_h, bool downscal
                                          tool_index);
     }
     remember();
-    return;
+    ++composite_serial_;
+    return true;
   }
   if (composite_dirty_.empty()) {
-    return;
+    return false;
   }
   const Rect dirty = rect_intersect(composite_dirty_, view);
   composite_dirty_ = {};
   if (dirty.empty()) {
-    return;
+    return false;
   }
   if (downscale) {
     const int x0 = std::clamp(
@@ -1075,16 +1116,19 @@ void CanvasView::ensure_composite(Rect view, int out_w, int out_h, bool downscal
                                                std::max(1, view.h)),
                               0, out_h);
     if (x1 <= x0 || y1 <= y0) {
-      return;
+      return false;
     }
     document_->layers().composite_scaled(composite_cache_.data(), stride, view, out_w, out_h,
                                          tool_override, tool_index, -1, Rect{x0, y0, x1 - x0, y1 - y0});
-    return;
+    ++composite_serial_;
+    return true;
   }
   std::uint8_t* dest = composite_cache_.data() +
                        static_cast<std::size_t>(dirty.y - view.y) * static_cast<std::size_t>(stride) +
                        static_cast<std::size_t>(dirty.x - view.x) * 4;
   document_->layers().composite_rect(dest, stride, dirty, tool_override, tool_index);
+  ++composite_serial_;
+  return true;
 }
 
 void CanvasView::paint_scaled_float(std::uint8_t* dest, int dest_stride, Rect view, int out_w,
@@ -1435,6 +1479,7 @@ void CanvasView::invalidate_ants() {
   if (ants_halos_.empty() || ants_generation_ != document_->selection().generation()) {
     rebuild_ants();
   }
+  // Ant phase only. The viewport composite and its premultiplied surface stay.
   for (const Rect& halo : ants_halos_) {
     queue_canvas_area(halo);
   }

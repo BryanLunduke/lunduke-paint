@@ -125,8 +125,14 @@ private:
   void drop_composite_cache();
   void queue_canvas_area(Rect rect);
   Rect viewport_canvas_rect(int clip_x0, int clip_y0, int clip_x1, int clip_y1) const;
-  void ensure_composite(Rect view, int out_w, int out_h, bool downscale, const Layer* tool_override,
+  // True when straight-RGBA cache pixels were rewritten. Marching-ant ticks
+  // do not call this with a dirty rect; they only repaint the ants on top.
+  bool ensure_composite(Rect view, int out_w, int out_h, bool downscale, const Layer* tool_override,
                         int tool_index);
+  // Copies the straight cache into the cairo surface and premultiplies there.
+  // Skipped when neither the cache nor the floating selection has changed.
+  void refresh_display_surface(int out_w, int out_h, Rect view, bool downscale);
+  std::uint64_t float_display_key() const;
   void paint_scaled_float(std::uint8_t* dest, int dest_stride, Rect view, int out_w, int out_h);
   void draw_intro(const Cairo::RefPtr<Cairo::Context>& cr);
   bool on_intro_tick();
@@ -151,6 +157,8 @@ private:
   Cairo::RefPtr<Cairo::ImageSurface> blit_surface_;
   int blit_w_{0};
   int blit_h_{0};
+  std::uint64_t blit_serial_{0};
+  std::uint64_t blit_float_key_{0};
   // Straight composite of the floating selection's origin rect with the
   // source layer omitted. Reused across ant ticks while that hole is unchanged.
   std::vector<std::uint8_t> hole_cache_;
@@ -159,8 +167,11 @@ private:
   std::uint64_t hole_cache_fp_{0};
   bool hole_cache_valid_{false};
   // Straight RGBA of the visible canvas region. Zoomed-out views store one
-  // sample per screen pixel. Ant ticks do not dirty this cache.
+  // sample per screen pixel. Ant ticks do not dirty this cache. The cairo
+  // surface below is the premultiplied copy, rebuilt only when this serial
+  // or the floating selection changes — not on every expose.
   std::vector<std::uint8_t> composite_cache_;
+  std::uint64_t composite_serial_{0};
   Rect composite_view_{};
   int composite_out_w_{0};
   int composite_out_h_{0};
