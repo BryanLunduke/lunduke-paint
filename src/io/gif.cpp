@@ -129,6 +129,10 @@ void median_cut(std::vector<Counted>& colors, int limit) {
   colors.swap(reduced);
 }
 
+bool gif_continue(const GifProgress& progress, int done, int total) {
+  return !progress || progress(done, total);
+}
+
 int nearest_rgb(Rgb color, const std::vector<Rgb>& palette, int first, int last) {
   int best = first;
   int best_d = 1 << 30;
@@ -196,6 +200,57 @@ struct ExactColors {
   }
 };
 
+// 256 opaque colors plus a transparent index only have 255 slots. Map the
+// rarer color of the closest pair onto the other so every remaining color
+// stays exact.
+bool merge_nearest_pair(const ExactColors& exact, std::uint32_t& drop_key, std::uint32_t& keep_key) {
+  struct Item {
+    std::uint32_t key = 0;
+    int count = 0;
+    Rgb color;
+  };
+  std::vector<Item> items;
+  items.reserve(static_cast<std::size_t>(exact.distinct));
+  for (int i = 0; i < ExactColors::kSlots; ++i) {
+    if (exact.used[i] == 0) {
+      continue;
+    }
+    Item item;
+    item.key = exact.key[i];
+    item.count = exact.count[i];
+    item.color = Rgb{static_cast<std::uint8_t>((item.key >> 16) & 0xff),
+                     static_cast<std::uint8_t>((item.key >> 8) & 0xff),
+                     static_cast<std::uint8_t>(item.key & 0xff)};
+    items.push_back(item);
+  }
+  if (items.size() < 2) {
+    return false;
+  }
+  int best_d = 1 << 30;
+  int best_drop = 0;
+  int best_keep = 1;
+  for (int i = 0; i < static_cast<int>(items.size()); ++i) {
+    for (int j = i + 1; j < static_cast<int>(items.size()); ++j) {
+      const int dr = static_cast<int>(items[i].color.r) - items[j].color.r;
+      const int dg = static_cast<int>(items[i].color.g) - items[j].color.g;
+      const int db = static_cast<int>(items[i].color.b) - items[j].color.b;
+      const int d = dr * dr + dg * dg + db * db;
+      const int drop = items[i].count <= items[j].count ? i : j;
+      const int keep = drop == i ? j : i;
+      const bool closer = d < best_d;
+      const bool tie = d == best_d && items[drop].count < items[best_drop].count;
+      if (closer || tie) {
+        best_d = d;
+        best_drop = drop;
+        best_keep = keep;
+      }
+    }
+  }
+  drop_key = items[best_drop].key;
+  keep_key = items[best_keep].key;
+  return true;
+}
+
 struct BitPacker {
   int acc = 0;
   int bits = 0;
@@ -256,7 +311,7 @@ struct LzwDict {
   }
 };
 
-void lzw_gif(const std::uint8_t* indices, int count, int width, int min_code_size,
+bool lzw_gif(const std::uint8_t* indices, int count, int width, int min_code_size,
              std::vector<std::uint8_t>& out, const GifProgress& progress, int row_base, int row_span) {
   const int clear_code = 1 << min_code_size;
   const int eoi = clear_code + 1;
@@ -276,8 +331,9 @@ void lzw_gif(const std::uint8_t* indices, int count, int width, int min_code_siz
   } else {
     int prefix = indices[0];
     for (int i = 1; i < count; ++i) {
-      if (progress && width > 0 && (i & 65535) == 0) {
-        progress(row_base + i / width, row_span);
+      if (progress && width > 0 && (i & 65535) == 0 &&
+          !gif_continue(progress, row_base + i / width, row_span)) {
+        return false;
       }
       const int k = indices[i];
       const std::uint32_t key = (static_cast<std::uint32_t>(prefix) << 8) | static_cast<std::uint32_t>(k);
@@ -315,6 +371,7 @@ void lzw_gif(const std::uint8_t* indices, int count, int width, int min_code_siz
     left -= n;
   }
   out.push_back(0);
+  return true;
 }
 
 void append_u16(std::vector<std::uint8_t>& out, int value) {
@@ -335,8 +392,10 @@ bool encode_gif_memory(const std::uint8_t* rgba, int width, int height, int stri
   ExactColors exact;
   bool any_clear = false;
   for (int y = 0; y < height; ++y) {
-    if (progress && (y & 31) == 0) {
-      progress(y, height * 2);
+    if ((y & 31) == 0 && !gif_continue(progress, y, height * 2)) {
+      out.clear();
+      error = "cancelled";
+      return false;
     }
     const std::uint8_t* row = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
     for (int x = 0; x < width; ++x) {
@@ -351,13 +410,21 @@ bool encode_gif_memory(const std::uint8_t* rgba, int width, int height, int stri
       exact.add(key);
     }
   }
+  std::uint32_t drop_key = 0;
+  std::uint32_t keep_key = 0;
+  const bool merged = any_clear && !exact.overflow && exact.distinct == 256 &&
+                      merge_nearest_pair(exact, drop_key, keep_key);
   const int color_limit = any_clear ? 255 : 256;
-  const bool use_exact = !exact.overflow && exact.distinct > 0 && exact.distinct <= color_limit;
+  const bool use_exact =
+      merged || (!exact.overflow && exact.distinct > 0 && exact.distinct <= color_limit);
   std::vector<Counted> counted;
   if (use_exact) {
     counted.reserve(static_cast<std::size_t>(exact.distinct));
     for (int i = 0; i < ExactColors::kSlots; ++i) {
       if (exact.used[i] == 0) {
+        continue;
+      }
+      if (merged && exact.key[i] == drop_key) {
         continue;
       }
       Rgb color{static_cast<std::uint8_t>((exact.key[i] >> 16) & 0xff),
@@ -432,8 +499,10 @@ bool encode_gif_memory(const std::uint8_t* rgba, int width, int height, int stri
     }
   }
   for (int y = 0; y < height; ++y) {
-    if (progress && (y & 31) == 0) {
-      progress(height + y, height * 2);
+    if ((y & 31) == 0 && !gif_continue(progress, height + y, height * 2)) {
+      out.clear();
+      error = "cancelled";
+      return false;
     }
     const std::uint8_t* row = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
     for (int x = 0; x < width; ++x) {
@@ -444,8 +513,11 @@ bool encode_gif_memory(const std::uint8_t* rgba, int width, int height, int stri
         continue;
       }
       if (use_exact) {
-        const std::uint32_t key = (static_cast<std::uint32_t>(p[0]) << 16) |
-                                  (static_cast<std::uint32_t>(p[1]) << 8) | p[2];
+        std::uint32_t key = (static_cast<std::uint32_t>(p[0]) << 16) |
+                            (static_cast<std::uint32_t>(p[1]) << 8) | p[2];
+        if (merged && key == drop_key) {
+          key = keep_key;
+        }
         const int slot = exact.find(key);
         indices[i] = slot < 0 ? static_cast<std::uint8_t>(first)
                               : static_cast<std::uint8_t>(exact_index[slot]);
@@ -483,10 +555,16 @@ bool encode_gif_memory(const std::uint8_t* rgba, int width, int height, int stri
   append_u16(out, height);
   out.push_back(0);
   out.push_back(static_cast<std::uint8_t>(bits));
-  lzw_gif(indices.data(), width * height, width, bits, out, progress, height, height * 2);
+  if (!lzw_gif(indices.data(), width * height, width, bits, out, progress, height, height * 2)) {
+    out.clear();
+    error = "cancelled";
+    return false;
+  }
   out.push_back(0x3b);
-  if (progress) {
-    progress(height * 2, height * 2);
+  if (!gif_continue(progress, height * 2, height * 2)) {
+    out.clear();
+    error = "cancelled";
+    return false;
   }
   return true;
 }

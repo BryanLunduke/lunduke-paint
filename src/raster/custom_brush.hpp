@@ -38,6 +38,7 @@ void custom_brush_flip_v(CustomBrush& brush);
 void custom_brush_rotate_90(CustomBrush& brush);
 void custom_brush_scale(CustomBrush& brush, int numerator, int denominator);
 // Opaque pixels take `ink`. Transparent pixels stay the background key.
+// A transparent `ink` is ignored so Remap FG cannot wipe the brush.
 void custom_brush_remap(CustomBrush& brush, Color ink);
 
 }  // namespace lundukepaint

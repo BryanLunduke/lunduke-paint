@@ -61,6 +61,17 @@ void emboss_rgba(const std::uint8_t* src, int width, int height, int src_stride,
 // interior marks and the paper itself become `paper`. A mark differs from paper.
 void trace_edges_rgba(std::uint8_t* rgba, int width, int height, int stride, Color ink, Color paper);
 
+// Paper for Wind, Trace Edges, and Drop Shadow. Transparency wins when most
+// samples are clear; otherwise the most common opaque color (a white sheet
+// stays white). Not the background swatch.
+Color infer_paper(const std::uint8_t* rgba, int width, int height, int stride);
+
+// Canvas origin of buffer pixel (0, 0) while a selection-bounded effect runs.
+// Zero for a direct call, so a full-canvas effect is unchanged.
+int pattern_phase_x();
+int pattern_phase_y();
+void set_pattern_phase(int x, int y);
+
 // Hard halftone. Each matrix cell is `cell` pixels (1..16). Output is only
 // `ink` or `paper` — a newspaper screen, not a blur.
 enum class HalftoneScreen { Bayer, Clustered };

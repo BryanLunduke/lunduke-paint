@@ -2,6 +2,8 @@
 
 #include "raster/palette.hpp"
 
+#include "raster/effects.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -138,7 +140,7 @@ void quantize_palette(std::uint8_t* rgba, int width, int height, int stride, con
       int g = p[1];
       int b = p[2];
       if (kind == DitherKind::Ordered) {
-        const int bayer = kBayer[y & 7][x & 7];
+        const int bayer = kBayer[(y + pattern_phase_y()) & 7][(x + pattern_phase_x()) & 7];
         if (count == 2) {
           const int luma = (r * 30 + g * 59 + b * 11) / 100;
           const int threshold = (bayer * 256) / 64;

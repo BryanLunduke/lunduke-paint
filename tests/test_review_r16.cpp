@@ -252,6 +252,11 @@ void test_brush_size_keys() {
          "] then [ walks round sizes");
 }
 
+bool pillow_available() {
+  const int rc = std::system("python3 -c 'import PIL.Image' >/dev/null 2>&1");
+  return rc == 0;
+}
+
 bool pillow_loads(const std::string& path, int expect_w, int expect_h) {
   const std::string script =
       "from PIL import Image\n"
@@ -292,6 +297,10 @@ void test_gif_roundtrip() {
   std::vector<std::uint8_t> encoded;
   std::string error;
   expect(lundukepaint::encode_gif_memory(rgba.data(), w, h, w * 4, encoded, error), "encode varied gif");
+  if (!pillow_available()) {
+    std::printf("SKIP Pillow is not installed; GIF round-trip decode not checked\n");
+    return;
+  }
   const std::string path = std::string("/tmp/lunduke-r16-") + std::to_string(getpid()) + ".gif";
   FILE* f = std::fopen(path.c_str(), "wb");
   expect(f != nullptr, "open gif");

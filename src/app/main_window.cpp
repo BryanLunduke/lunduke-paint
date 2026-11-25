@@ -752,6 +752,10 @@ void MainWindow::set_brush_tip(int index) {
   brush_tip_ = clamp_brush_tip_index(index);
   brush_tip_px_ = brush_tip_at(brush_tip_).size;
   toolbox_.set_brush_tip(brush_tip_);
+  toolbox_.set_brush_px(brush_tip_px_);
+  if (active_tool_ != nullptr) {
+    active_tool_->set_size_readout(brush_tip_px_);
+  }
   // The tip picker is its own control. It must not move the line-width mark
   // onto a size that stack cannot show.
   const BrushTip tip = brush_tip_at(brush_tip_);
@@ -942,6 +946,9 @@ bool MainWindow::focus_is_editable() const {
 }
 
 bool MainWindow::on_key_press(GdkEventKey* event) {
+  if (save_blocks_input_) {
+    return true;
+  }
   if (event == nullptr) {
     return false;
   }
@@ -1292,7 +1299,12 @@ bool MainWindow::drain_deferred_opens() {
   return !deferred_opens_.empty();
 }
 
-bool MainWindow::rebind_save_target() {
+bool MainWindow::snapshot_still_current() {
+  return save_snapshot_valid_ && document_ptr() != nullptr &&
+         document().edit_serial() == save_snapshot_serial_;
+}
+
+bool MainWindow::rebind_save_target(bool file_written) {
   if (save_bound_ == nullptr || save_bound_ == document_ptr()) {
     return true;
   }
@@ -1300,7 +1312,7 @@ bool MainWindow::rebind_save_target() {
   if (index < 0) {
     Gtk::MessageDialog err(*this, "The picture being saved was closed.", false, Gtk::MESSAGE_ERROR,
                            Gtk::BUTTONS_OK, true);
-    err.set_secondary_text("Nothing was written.");
+    err.set_secondary_text(closed_during_save_detail(file_written));
     err.run();
     return false;
   }
@@ -1327,22 +1339,24 @@ void MainWindow::action_save() {
     document().clear_companion_ora_path();
   }
   if (save_to_path(target.path, target.format)) {
-    if (!rebind_save_target()) {
+    if (!rebind_save_target(true)) {
       return;
     }
     if (!save_companion_ora()) {
       update_chrome();
       return;
     }
-    if (!rebind_save_target()) {
+    if (!rebind_save_target(true)) {
       return;
     }
     if (target.path != document().path()) {
       document().set_path(target.path);
     }
-    document().mark_clean();
+    if (flat_save_marks_clean(target.format, snapshot_still_current())) {
+      document().mark_clean();
+      clear_document_recovery(document());
+    }
     remember_recent(document().path());
-    clear_document_recovery(document());
     update_chrome();
     show_status("Saved");
   }
@@ -1414,7 +1428,13 @@ void MainWindow::action_save_as() {
     document().clear_companion_ora_path();
   }
   if (save_to_path(path, format, true)) {
-    if (!rebind_save_target()) {
+    if (!rebind_save_target(true)) {
+      return;
+    }
+    // Save as GIF is an export. The document path and the unsaved marker stay.
+    if (format == ImageFormat::Gif && !also_ora) {
+      show_status("Exported GIF");
+      update_chrome();
       return;
     }
     bool ora_ok = true;
@@ -1427,7 +1447,7 @@ void MainWindow::action_save_as() {
                                false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
         err.set_secondary_text(error);
         err.run();
-        if (!rebind_save_target()) {
+        if (!rebind_save_target(true)) {
           return;
         }
       }
@@ -1438,13 +1458,13 @@ void MainWindow::action_save_as() {
       return;
     }
     document().set_path(path);
-    if (kept.mark_clean) {
+    if (kept.mark_clean && flat_save_marks_clean(format, snapshot_still_current())) {
       document().mark_clean();
+      if (kept.clear_recovery) {
+        clear_document_recovery(document());
+      }
     }
     remember_recent(path);
-    if (kept.clear_recovery) {
-      clear_document_recovery(document());
-    }
     update_chrome();
     show_status("Saved");
   }
@@ -1641,6 +1661,8 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool 
     return false;
   }
   if (format == ImageFormat::Ora) {
+    save_snapshot_serial_ = document().edit_serial();
+    save_snapshot_valid_ = true;
     std::string error;
     if (!save_ora(path, document(), error)) {
       Gtk::MessageDialog err(*this, save_error_title(path), false, Gtk::MESSAGE_ERROR,
@@ -1654,13 +1676,28 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool 
 
   std::vector<std::uint8_t> flat;
   composite_visible(flat);
+  // Captured with the bytes above, before the progress dialog can pump edits.
+  save_snapshot_serial_ = document().edit_serial();
+  save_snapshot_valid_ = true;
   std::string error;
   const int pixels = document().width() * document().height();
   std::unique_ptr<Gtk::Dialog> exporting;
   Gtk::ProgressBar* bar = nullptr;
-  if (format == ImageFormat::Gif && pixels >= 512 * 512) {
+  bool cancel = false;
+  const bool show_progress = format == ImageFormat::Gif && pixels >= 512 * 512;
+  if (show_progress) {
     exporting = std::make_unique<Gtk::Dialog>("Exporting GIF", *this, true);
+    exporting->set_modal(true);
     exporting->set_deletable(false);
+    exporting->add_button("_Cancel", Gtk::RESPONSE_CANCEL);
+    exporting->signal_response().connect([&cancel](int) { cancel = true; });
+    exporting->signal_key_press_event().connect([&cancel](GdkEventKey* event) {
+      if (event != nullptr && event->keyval == GDK_KEY_Escape) {
+        cancel = true;
+        return true;
+      }
+      return false;
+    });
     bar = Gtk::manage(new Gtk::ProgressBar());
     bar->set_show_text(true);
     bar->set_text("Writing GIF…");
@@ -1671,27 +1708,43 @@ bool MainWindow::save_to_path(const std::string& path, ImageFormat format, bool 
     bar->set_size_request(260, -1);
     exporting->get_content_area()->pack_start(*bar, Gtk::PACK_SHRINK);
     exporting->show_all();
+    canvas_.set_sensitive(false);
+    toolbox_.set_sensitive(false);
+    save_blocks_input_ = true;
     while (Glib::MainContext::get_default()->pending()) {
       Glib::MainContext::get_default()->iteration(false);
     }
   }
   GifProgress gif_progress;
   if (bar != nullptr) {
-    gif_progress = [bar](int done, int total) {
+    gif_progress = [bar, &cancel](int done, int total) {
+      if (cancel) {
+        return false;
+      }
       if (total > 0) {
         bar->set_fraction(std::min(1.0, static_cast<double>(done) / static_cast<double>(total)));
       }
       while (Glib::MainContext::get_default()->pending()) {
         Glib::MainContext::get_default()->iteration(false);
       }
+      return !cancel;
     };
   }
   const bool saved = save_flat_image(path, format, flat.data(), document().width(), document().height(),
                                      document().width() * 4, jpeg_quality_, error, gif_progress);
+  if (show_progress) {
+    save_blocks_input_ = false;
+    canvas_.set_sensitive(true);
+    toolbox_.set_sensitive(true);
+  }
   if (exporting) {
     exporting->hide();
   }
   if (!saved) {
+    if (error == "cancelled") {
+      show_status("Save cancelled");
+      return false;
+    }
     Gtk::MessageDialog err(*this, save_error_title(path), false, Gtk::MESSAGE_ERROR,
                            Gtk::BUTTONS_OK, true);
     err.set_secondary_text(save_error_detail(path, error));
@@ -2660,6 +2713,10 @@ void MainWindow::step_tool_size(int delta) {
     brush_tip_ = stepped.index;
     brush_tip_px_ = stepped.size;
     toolbox_.set_brush_tip(brush_tip_);
+    toolbox_.set_brush_px(brush_tip_px_);
+    if (active_tool_ != nullptr) {
+      active_tool_->set_size_readout(brush_tip_px_);
+    }
     show_status(Glib::ustring::compose("Brush %1 px", brush_tip_px_));
   } else {
     set_stroke_size(step_choice(stroke_size_, kLineWidthChoices, kLineWidthChoiceCount, delta));
@@ -2905,7 +2962,7 @@ void MainWindow::action_save_gif() {
   if (!save_to_path(path, ImageFormat::Gif, false)) {
     return;
   }
-  if (!rebind_save_target()) {
+  if (!rebind_save_target(true)) {
     return;
   }
   // GIF is an export. The document title and the unsaved marker stay put.
@@ -2925,6 +2982,7 @@ void MainWindow::action_brush_workshop() {
   dialog.add_button("_OK", Gtk::RESPONSE_OK);
   dialog.set_default_response(Gtk::RESPONSE_OK);
   auto* undo_button = Gtk::manage(new Gtk::Button("_Undo"));
+  undo_button->set_use_underline(true);
   auto* preview = Gtk::manage(new Gtk::DrawingArea());
   preview->set_size_request(160, 120);
   preview->signal_draw().connect([&working](const Cairo::RefPtr<Cairo::Context>& cr) {
@@ -2941,21 +2999,38 @@ void MainWindow::action_brush_workshop() {
     if (working.empty()) {
       return true;
     }
-    const double scale = std::min(140.0 / working.width, 100.0 / working.height);
-    const double ox = (pw - working.width * scale) * 0.5;
-    const double oy = (ph - working.height * scale) * 0.5;
+    // One nearest-neighbor image. Per-pixel fills antialias and leave seams.
+    auto surface = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, working.width, working.height);
+    unsigned char* data = surface->get_data();
+    const int row_stride = surface->get_stride();
+    std::memset(data, 0, static_cast<std::size_t>(row_stride) * static_cast<std::size_t>(working.height));
     for (int y = 0; y < working.height; ++y) {
+      unsigned char* row = data + static_cast<std::size_t>(y) * static_cast<std::size_t>(row_stride);
       for (int x = 0; x < working.width; ++x) {
         const std::uint8_t* p =
             working.rgba.data() + (static_cast<std::size_t>(y) * working.width + x) * 4;
-        if (p[3] == 0) {
-          continue;
-        }
-        cr->set_source_rgba(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3] / 255.0);
-        cr->rectangle(ox + x * scale, oy + y * scale, std::max(1.0, scale), std::max(1.0, scale));
-        cr->fill();
+        const int a = p[3];
+        unsigned char* dst = row + static_cast<std::size_t>(x) * 4;
+        dst[0] = static_cast<unsigned char>(p[2] * a / 255);
+        dst[1] = static_cast<unsigned char>(p[1] * a / 255);
+        dst[2] = static_cast<unsigned char>(p[0] * a / 255);
+        dst[3] = static_cast<unsigned char>(a);
       }
     }
+    surface->mark_dirty();
+    const int scale = std::max(1, static_cast<int>(std::floor(std::min(140.0 / working.width, 100.0 / working.height))));
+    const double ox = (pw - working.width * scale) * 0.5;
+    const double oy = (ph - working.height * scale) * 0.5;
+    auto pattern = Cairo::SurfacePattern::create(surface);
+    cairo_pattern_set_filter(pattern->cobj(), CAIRO_FILTER_NEAREST);
+    cairo_pattern_set_extend(pattern->cobj(), CAIRO_EXTEND_NONE);
+    cr->save();
+    cr->set_antialias(Cairo::ANTIALIAS_NONE);
+    cr->translate(ox, oy);
+    cr->scale(scale, scale);
+    cr->set_source(pattern);
+    cr->paint();
+    cr->restore();
     return true;
   });
   auto* grid = Gtk::manage(new Gtk::Grid());
@@ -2978,7 +3053,18 @@ void MainWindow::action_brush_workshop() {
   add("Rotate 90", 2, 0, [&working]() { custom_brush_rotate_90(working); });
   add("Double", 0, 1, [&working]() { custom_brush_scale(working, 2, 1); });
   add("Halve", 1, 1, [&working]() { custom_brush_scale(working, 1, 2); });
-  add("Remap FG", 2, 1, [this, &working]() { custom_brush_remap(working, document().foreground()); });
+  add("Remap FG", 2, 1, [this, &working, &undo_stack, undo_button]() {
+    const Color ink = document().foreground();
+    if (ink.a == 0) {
+      if (!undo_stack.empty()) {
+        undo_stack.pop_back();
+      }
+      undo_button->set_sensitive(!undo_stack.empty());
+      show_status("Pick an opaque foreground color to remap");
+      return;
+    }
+    custom_brush_remap(working, ink);
+  });
   auto* spacing = Gtk::manage(new Gtk::SpinButton());
   spacing->set_range(0, 64);
   spacing->set_increments(1, 4);
@@ -3228,32 +3314,30 @@ void MainWindow::action_effect_diffuse() {
 
 void MainWindow::action_effect_shadow() {
   DropShadowDialog dialog(*this);
-  run_adjust_dialog(dialog, "Drop shadow", [&dialog, this]() -> EffectPreview::EffectFn {
+  run_adjust_dialog(dialog, "Drop shadow", [&dialog]() -> EffectPreview::EffectFn {
     const int dx = dialog.offset_x();
     const int dy = dialog.offset_y();
     const Color shadow = dialog.shadow_color();
-    const Color paper = document().background();
     if (dx == 0 && dy == 0) {
       return nullptr;
     }
-    return [dx, dy, shadow, paper](std::uint8_t* px, int w, int h, int stride) {
-      drop_shadow_rgba(px, w, h, stride, dx, dy, shadow, paper);
+    return [dx, dy, shadow](std::uint8_t* px, int w, int h, int stride) {
+      drop_shadow_rgba(px, w, h, stride, dx, dy, shadow, infer_paper(px, w, h, stride));
     };
   });
 }
 
 void MainWindow::action_effect_wind() {
   WindDialog dialog(*this);
-  run_adjust_dialog(dialog, "Wind", [&dialog, this]() -> EffectPreview::EffectFn {
+  run_adjust_dialog(dialog, "Wind", [&dialog]() -> EffectPreview::EffectFn {
     const int which = dialog.direction();
     const WindDirection direction = which == 1   ? WindDirection::Left
                                     : which == 2 ? WindDirection::Down
                                     : which == 3 ? WindDirection::Up
                                                  : WindDirection::Right;
     const int strength = dialog.strength();
-    const Color paper = document().background();
-    return [direction, strength, paper](std::uint8_t* px, int w, int h, int stride) {
-      wind_rgba(px, w, h, stride, direction, strength, 0xA11CEu, paper);
+    return [direction, strength](std::uint8_t* px, int w, int h, int stride) {
+      wind_rgba(px, w, h, stride, direction, strength, 0xA11CEu, infer_paper(px, w, h, stride));
     };
   });
 }
@@ -3283,9 +3367,8 @@ void MainWindow::action_view_scanlines() {
 
 void MainWindow::action_effect_trace() {
   const Color ink = document().foreground().a == 0 ? Color::black() : document().foreground();
-  const Color paper = document().background();
-  apply_layer_effect("Trace edges", [ink, paper](std::uint8_t* px, int w, int h, int stride) {
-    trace_edges_rgba(px, w, h, stride, ink, paper);
+  apply_layer_effect("Trace edges", [ink](std::uint8_t* px, int w, int h, int stride) {
+    trace_edges_rgba(px, w, h, stride, ink, infer_paper(px, w, h, stride));
   });
 }
 

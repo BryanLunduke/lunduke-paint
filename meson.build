@@ -241,6 +241,28 @@ test_review_r16 = executable(
 )
 test('review_r16', test_review_r16, timeout: 120)
 
+test_review_r17 = executable(
+  'test_review_r17',
+  files('tests/test_review_r17.cpp'),
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gdkpixbuf_dep, glib_dep, libarchive_dep, pugixml_dep],
+  install: false,
+)
+test('review_r17', test_review_r17, timeout: 120)
+
+test_review_r17_ui = executable(
+  'test_review_r17_ui',
+  files('tests/test_review_r17_ui.cpp'),
+  lunduke_paint_app_sources,
+  lunduke_paint_resources,
+  include_directories: lunduke_paint_inc,
+  link_with: lunduke_paint_core,
+  dependencies: [gtkmm_dep, cairomm_dep, gdkpixbuf_dep, pangocairo_dep, glib_dep],
+  install: false,
+)
+test('review_r17_ui', test_review_r17_ui, timeout: 120)
+
 test_crash_recovery = executable(
   'test_crash_recovery',
   files('tests/test_crash_recovery.cpp', 'src/app/preferences.cpp'),

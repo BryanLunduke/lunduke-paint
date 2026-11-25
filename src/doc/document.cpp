@@ -249,6 +249,7 @@ Rect Document::jump_history(int target) {
 }
 
 void Document::notify_invalidated(Rect rect) {
+  ++edit_serial_;
   if (on_invalidated_) {
     on_invalidated_(rect);
   }
@@ -429,7 +430,16 @@ void Document::delete_selection() {
     notify_blocked("Layer is locked");
     return;
   }
-  const SelectionState selection_before = selection_.capture();
+  SelectionState selection_before = selection_.capture();
+  // A pending free-rotate is not a history step. Delete discards that float
+  // and records the pre-rotate selection, so one undo restores the picture
+  // instead of cancelling into an empty step and then resurrecting the float.
+  if (pending_transform_) {
+    selection_before = pending_before_;
+    pending_transform_ = false;
+    pending_name_.clear();
+    pending_before_ = {};
+  }
   Layer& layer = layers_.at(index);
   const int ox = layer.offset_x();
   const int oy = layer.offset_y();
@@ -518,8 +528,17 @@ void Document::paste_floating(int x, int y, int w, int h, std::vector<std::uint8
 }
 
 void Document::arm_pending_transform(const char* name, SelectionState before) {
+  if (name != nullptr && name[0] != '\0') {
+    pending_name_ = name;
+  } else if (pending_name_.empty()) {
+    pending_name_ = "Free rotate";
+  }
+  // A second Free Rotate must not replace the pre-rotate snapshot. Undo after
+  // placing would otherwise land in the first rotate's live float.
+  if (pending_transform_) {
+    return;
+  }
   pending_transform_ = true;
-  pending_name_ = name != nullptr ? name : "Free rotate";
   pending_before_ = std::move(before);
 }
 

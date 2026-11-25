@@ -10,6 +10,9 @@ lunduke-paint (1.1.0-1) unstable; urgency=medium
   * Review fixes, same 1.1.0-1 package: GIF LZW and export, smear direction,
     wind on solid shapes, repeat-effect selection, free-rotate undo, and the
     smaller UI and speed items from that review.
+  * Second review, same 1.1.0-1 package: modal GIF save with Cancel, exact
+    256-color GIF transparency, free-rotate and delete undo, selection
+    effects, rail labels and brush size, CRT overlay, and the brush workshop.
 
  -- Ted <ted@brushpad.local>  Thu, 12 Nov 2026 03:03:18 +0000
 

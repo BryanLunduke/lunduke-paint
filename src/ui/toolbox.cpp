@@ -627,7 +627,35 @@ bool Toolbox::on_brush_tips_draw(const Cairo::RefPtr<Cairo::Context>& cr) {
     cr->set_line_width(1.0);
     cr->stroke();
   }
+  if (brush_px_ > 0) {
+    auto layout = brush_tips_.create_pango_layout(std::to_string(brush_px_));
+    Pango::FontDescription font;
+    font.set_size(8 * PANGO_SCALE);
+    layout->set_font_description(font);
+    int tw = 0;
+    int th = 0;
+    layout->get_pixel_size(tw, th);
+    const double bx = w - tw - 3.0;
+    const double by = 1.0;
+    cr->set_source_rgba(1.0, 1.0, 1.0, 0.92);
+    cr->rectangle(bx - 1.0, by, tw + 2.0, th);
+    cr->fill();
+    cr->set_source_rgb(0.1, 0.1, 0.1);
+    cr->move_to(bx, by);
+    layout->show_in_cairo_context(cr);
+  }
   return true;
+}
+
+void Toolbox::set_brush_px(int px) {
+  if (px < 1) {
+    px = 1;
+  }
+  if (brush_px_ == px) {
+    return;
+  }
+  brush_px_ = px;
+  brush_tips_.queue_draw();
 }
 
 bool Toolbox::on_brush_tips_press(GdkEventButton* event) {

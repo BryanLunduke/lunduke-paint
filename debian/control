@@ -19,7 +19,9 @@ Build-Depends: debhelper-compat (= 13),
  zlib1g-dev,
  libpango1.0-dev,
  xvfb,
- xauth
+ xauth,
+ python3,
+ python3-pil
 
 Package: lunduke-paint
 Architecture: amd64

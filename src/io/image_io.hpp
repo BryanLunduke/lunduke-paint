@@ -53,6 +53,22 @@ inline KeepOraDecision decide_keep_ora(bool flat_ok, bool ora_requested, bool or
   return decision;
 }
 
+// GIF is an export of one frame. It must not clear the unsaved marker.
+// Any other successful save marks the document clean only when the bytes
+// written are still the document: an edit after the snapshot stays dirty.
+inline bool flat_save_marks_clean(ImageFormat format, bool snapshot_unchanged) {
+  if (format == ImageFormat::Gif) {
+    return false;
+  }
+  return snapshot_unchanged;
+}
+
+// The picture tab can close while a save is in its nested main loop. The
+// secondary text has to match whether the file was actually committed.
+inline const char* closed_during_save_detail(bool file_written) {
+  return file_written ? "The file was written." : "Nothing was written.";
+}
+
 // True when the loader reports more than one frame (animated GIF).
 bool image_has_multiple_frames(const std::string& path);
 
@@ -93,7 +109,8 @@ int flat_image_decode_count();
 bool load_image_preview(const std::string& path, int max_edge, LoadedImage& out);
 
 // `done` / `total` cover quantization and LZW. Empty means no callback.
-using GifProgress = std::function<void(int done, int total)>;
+// Return false to abort. The encoder then writes nothing.
+using GifProgress = std::function<bool(int done, int total)>;
 
 bool save_flat_image(const std::string& path, ImageFormat format, const std::uint8_t* rgba,
                      int width, int height, int stride, int jpeg_quality, std::string& error,
@@ -102,9 +119,11 @@ bool save_flat_image(const std::string& path, ImageFormat format, const std::uin
 bool encode_png_memory(const std::uint8_t* rgba, int width, int height, int stride,
                        std::vector<std::uint8_t>& out, std::string& error);
 
-// Static GIF89a. Colors already at or under 256 are kept. A larger image is
-// reduced to 256. One fully transparent index is used when any pixel has
-// alpha below 128.
+// Static GIF89a. Opaque colors at or under the palette limit are kept exactly.
+// One fully transparent index is reserved when any pixel has alpha below 128,
+// so 255 opaque colors stay exact. 256 opaque colors plus transparency merge
+// the nearest pair and keep every other color. More than that is reduced.
+// A progress callback that returns false aborts before any bytes are kept.
 bool encode_gif_memory(const std::uint8_t* rgba, int width, int height, int stride,
                        std::vector<std::uint8_t>& out, std::string& error,
                        const GifProgress& progress = {});
