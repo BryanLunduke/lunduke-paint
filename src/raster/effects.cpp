@@ -401,6 +401,94 @@ void emboss_rgba(const std::uint8_t* src, int width, int height, int src_stride,
   conv3(src, width, height, src_stride, dest, dest_stride, k, 128, true);
 }
 
+namespace {
+
+int g_pattern_phase_x = 0;
+int g_pattern_phase_y = 0;
+
+}  // namespace
+
+int pattern_phase_x() { return g_pattern_phase_x; }
+int pattern_phase_y() { return g_pattern_phase_y; }
+
+void set_pattern_phase(int x, int y) {
+  g_pattern_phase_x = x;
+  g_pattern_phase_y = y;
+}
+
+Color infer_paper(const std::uint8_t* rgba, int width, int height, int stride) {
+  if (rgba == nullptr || width < 1 || height < 1 || stride < width * 4) {
+    return Color::white();
+  }
+  constexpr int kSlots = 512;
+  std::uint32_t keys[kSlots]{};
+  int counts[kSlots]{};
+  std::uint8_t used[kSlots]{};
+  int clear = 0;
+  int samples = 0;
+  int best_count = 0;
+  std::uint32_t best_key = 0xffffffffu;
+  auto consider = [&](int x, int y) {
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return;
+    }
+    const std::uint8_t* p = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride) +
+                            static_cast<std::size_t>(x) * 4;
+    ++samples;
+    if (p[3] <= 16) {
+      ++clear;
+      return;
+    }
+    const std::uint32_t key = (static_cast<std::uint32_t>(p[0]) << 16) |
+                              (static_cast<std::uint32_t>(p[1]) << 8) | p[2];
+    std::uint32_t slot = (key * 2654435761u) & (kSlots - 1);
+    for (int n = 0; n < kSlots; ++n) {
+      if (used[slot] == 0) {
+        used[slot] = 1;
+        keys[slot] = key;
+        counts[slot] = 1;
+        if (best_count < 1) {
+          best_count = 1;
+          best_key = key;
+        }
+        return;
+      }
+      if (keys[slot] == key) {
+        ++counts[slot];
+        if (counts[slot] > best_count) {
+          best_count = counts[slot];
+          best_key = key;
+        }
+        return;
+      }
+      slot = (slot + 1) & (kSlots - 1);
+    }
+  };
+  consider(0, 0);
+  consider(width - 1, 0);
+  consider(0, height - 1);
+  consider(width - 1, height - 1);
+  int step = 1;
+  while (step < width && step < height &&
+         (static_cast<long>(width) / step) * (static_cast<long>(height) / step) > 4096) {
+    step *= 2;
+  }
+  for (int y = 0; y < height; y += step) {
+    for (int x = 0; x < width; x += step) {
+      consider(x, y);
+    }
+  }
+  if (samples > 0 && clear * 2 >= samples) {
+    return Color::transparent();
+  }
+  if (best_count < 1) {
+    return Color::white();
+  }
+  return Color{static_cast<std::uint8_t>((best_key >> 16) & 0xff),
+               static_cast<std::uint8_t>((best_key >> 8) & 0xff),
+               static_cast<std::uint8_t>(best_key & 0xff), 255};
+}
+
 void trace_edges_rgba(std::uint8_t* rgba, int width, int height, int stride, Color ink, Color paper) {
   if (rgba == nullptr || width < 1 || height < 1) {
     return;
@@ -493,12 +581,14 @@ void halftone_rgba(std::uint8_t* rgba, int width, int height, int stride, Color 
     return;
   }
   cell = clamp_cell(cell);
+  const int phase_x = pattern_phase_x();
+  const int phase_y = pattern_phase_y();
   for (int y = 0; y < height; ++y) {
     std::uint8_t* row = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
-    const int my = (y / cell) & 7;
+    const int my = ((y + phase_y) / cell) & 7;
     for (int x = 0; x < width; ++x) {
       std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
-      const int mx = (x / cell) & 7;
+      const int mx = ((x + phase_x) / cell) & 7;
       const int threshold = (screen == HalftoneScreen::Clustered ? kCluster8[my][mx] : kBayer8[my][mx]) * 4;
       const Color src = read_color(p);
       if (src.a == 0) {
@@ -640,7 +730,11 @@ void crt_scanlines_rgba(std::uint8_t* rgba, int width, int height, int stride, i
     percent = 100;
   }
   const int keep = 255 - (percent * 255) / 100;
-  for (int y = 1; y < height; y += 2) {
+  const int phase_y = pattern_phase_y();
+  for (int y = 0; y < height; ++y) {
+    if (((y + phase_y) & 1) == 0) {
+      continue;
+    }
     std::uint8_t* row = rgba + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
     for (int x = 0; x < width; ++x) {
       std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;

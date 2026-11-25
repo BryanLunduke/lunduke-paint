@@ -81,9 +81,9 @@ Gtk::Widget* RoundedRectTool::options_widget() {
       radius_ = rspin->get_value_as_int();
       shape_family_options(family_).corner_radius = radius_;
     });
-    auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
+    auto* aa = Gtk::manage(new Gtk::CheckButton("AA"));
     aa_button_ = aa;
-    aa->set_tooltip_text("Smooth the rounded corners");
+    aa->set_tooltip_text("Anti-alias: smooth the rounded corners");
     configure_rail_check(*aa);
     aa->signal_toggled().connect([this, aa]() {
       antialias_ = aa->get_active();

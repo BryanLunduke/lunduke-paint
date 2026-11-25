@@ -92,7 +92,7 @@ int main() {
     std::ofstream(real) << "old";
     chmod(real.c_str(), 0640);
     const std::string link = link_dir + "/link.png";
-    symlink("real.png", link.c_str());
+    check(::symlink("real.png", link.c_str()) == 0, "symlink real.png");
     AtomicFile f;
     std::string err;
     const bool ok = atomic_create(link, f, err);
@@ -116,7 +116,7 @@ int main() {
     const std::string real = real_dir + "/target.png";
     std::ofstream(real) << "x";
     const std::string link = link_dir + "/cross.png";
-    symlink(real.c_str(), link.c_str());
+    check(::symlink(real.c_str(), link.c_str()) == 0, "symlink cross-folder target");
     AtomicFile f;
     std::string err;
     const bool ok = atomic_create(link, f, err);
@@ -134,7 +134,7 @@ int main() {
     const std::string real = real_dir + "/api.png";
     std::ofstream(real) << "placeholder";
     const std::string link = link_dir + "/api-link.png";
-    symlink(real.c_str(), link.c_str());
+    check(::symlink(real.c_str(), link.c_str()) == 0, "symlink api target");
     std::vector<std::uint8_t> px(4 * 4 * 4, 200);
     std::string err;
     const bool ok = save_flat_image(link, ImageFormat::Png, px.data(), 4, 4, 16, 90, err);
@@ -147,7 +147,7 @@ int main() {
   // Dangling link: refused, with a Save As hint, nothing created.
   {
     const std::string link = link_dir + "/dangling.png";
-    symlink("missing/nowhere.png", link.c_str());
+    check(::symlink("missing/nowhere.png", link.c_str()) == 0, "symlink dangling target");
     AtomicFile f;
     std::string err;
     const bool ok = atomic_create(link, f, err);
@@ -159,7 +159,7 @@ int main() {
   // A link to a directory is still not a regular file.
   {
     const std::string link = link_dir + "/dirlink.png";
-    symlink(real_dir.c_str(), link.c_str());
+    check(::symlink(real_dir.c_str(), link.c_str()) == 0, "symlink directory target");
     AtomicFile f;
     std::string err;
     check(!atomic_create(link, f, err) && err.find("not a regular file") != std::string::npos,
@@ -201,7 +201,7 @@ int main() {
     // A stale-named symlink is never followed or removed.
     std::snprintf(name, sizeof(name), "/.pic.png.tmp.%d.00112233445566ee", static_cast<int>(gone));
     const std::string stale_link = d + name;
-    symlink(user_file.c_str(), stale_link.c_str());
+    check(::symlink(user_file.c_str(), stale_link.c_str()) == 0, "symlink stale temp name");
 
     const std::string pic = d + "/pic.png";
     std::vector<std::uint8_t> px(2 * 2 * 4, 9);

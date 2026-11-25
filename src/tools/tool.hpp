@@ -145,6 +145,8 @@ public:
   // Push shared document options (transparent move, shape family) into the
   // widgets that are about to be shown.
   virtual void sync_options_from_document() {}
+  // Brush size in the rail. Other tools ignore it.
+  virtual void set_size_readout(int px) { (void)px; }
   // Layer the tool-layer preview was copied from. -1 when there is none.
   int preview_layer() const { return preview_layer_; }
   // When is_stroking() is true, CanvasView may composite tool_layer in place of

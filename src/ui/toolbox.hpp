@@ -33,6 +33,9 @@ public:
   int line_width() const { return line_width_; }
   void set_brush_tip(int index);
   int brush_tip() const { return brush_tip_; }
+  // Pixel size of the current tip, including sizes past the 8px grid.
+  void set_brush_px(int px);
+  int brush_px() const { return brush_px_; }
   void set_spray_radius(int radius);
   int spray_radius() const { return spray_radius_; }
   // Show the matching left-rail options panel for this tool id.
@@ -110,6 +113,7 @@ private:
   int next_row_ = 0;
   int line_width_ = 1;
   int brush_tip_ = 3;  // Round 8 by default
+  int brush_px_ = 8;
   int spray_radius_ = 16;
 };
 

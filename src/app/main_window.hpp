@@ -201,7 +201,10 @@ private:
   };
   // Makes the bound document active again if anything switched away while a
   // save dialog was up. False (with a message) when it was closed.
-  bool rebind_save_target();
+  // `file_written` is true only after the destination was committed. The
+  // closed-tab message has to say so instead of "Nothing was written."
+  bool rebind_save_target(bool file_written = false);
+  bool snapshot_still_current();
   bool drain_deferred_opens();
   void build_ui();
   void build_toolbar();
@@ -303,6 +306,12 @@ private:
   int pattern_index_{0};
   int brush_tip_{3};
   int brush_tip_px_{0};
+  // Edit serial captured with the pixels a save is writing. Marking clean is
+  // refused when the document moves past it. save_blocks_input_ is set while
+  // a GIF progress dialog is pumping the main loop.
+  std::uint64_t save_snapshot_serial_{0};
+  bool save_snapshot_valid_{false};
+  bool save_blocks_input_{false};
   int spray_radius_{16};
   int jpeg_quality_{90};
   bool intro_played_{false};

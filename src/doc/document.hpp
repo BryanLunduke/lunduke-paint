@@ -157,6 +157,9 @@ public:
   void notify_invalidated(Rect rect);
   void notify_changed();
   void notify_blocked(const char* message);
+  // Bumps on every pixel invalidation. A save captures it with the snapshot
+  // and refuses to mark clean when a later edit moved it.
+  std::uint64_t edit_serial() const { return edit_serial_; }
   // Selection geometry during a drag: status bar only, not the layer/history panels.
   void notify_selection();
 
@@ -192,6 +195,7 @@ private:
   bool pending_transform_ = false;
   std::string pending_name_;
   SelectionState pending_before_{};
+  std::uint64_t edit_serial_ = 0;
 };
 
 }  // namespace lundukepaint

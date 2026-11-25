@@ -65,9 +65,9 @@ Gtk::Widget* CurveTool::options_widget() {
   if (!options_) {
     options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
     prepare_rail_box(*options_);
-    auto* aa = Gtk::manage(new Gtk::CheckButton("Anti-alias"));
+    auto* aa = Gtk::manage(new Gtk::CheckButton("AA"));
     aa_button_ = aa;
-    aa->set_tooltip_text("Smooth the curve");
+    aa->set_tooltip_text("Anti-alias: smooth the curve");
     configure_rail_check(*aa);
     aa->signal_toggled().connect([this, aa]() {
       antialias_ = aa->get_active();

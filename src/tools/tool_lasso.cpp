@@ -60,7 +60,8 @@ Gtk::Widget* LassoTool::options_widget() {
   if (!options_) {
     options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
     prepare_rail_box(*options_);
-    transparent_ = Gtk::manage(new Gtk::CheckButton("Transparent move"));
+    transparent_ = Gtk::manage(new Gtk::CheckButton("Trns"));
+    transparent_->set_tooltip_text("Transparent move");
     transparent_->set_active(false);
     configure_rail_check(*transparent_);
     transparent_->signal_toggled().connect([this]() { apply_transparent_option(); });

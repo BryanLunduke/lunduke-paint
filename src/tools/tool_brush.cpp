@@ -10,11 +10,15 @@
 #include "raster/grid_snap.hpp"
 #include "raster/stroke.hpp"
 
+#include "tools/rail_options.hpp"
+
 #include <gtkmm/box.h>
 #include <gtkmm/checkbutton.h>
+#include <gtkmm/label.h>
 
 #include <cstring>
 #include <cstdint>
+#include <string>
 #include <memory>
 #include <vector>
 
@@ -47,6 +51,7 @@ public:
     return info;
   }
   Gtk::Widget* options_widget() override;
+  void set_size_readout(int px) override;
   bool is_stroking() const override { return drawing_; }
 
   void on_press(CanvasEvent event) override;
@@ -75,16 +80,28 @@ private:
   Rect dirty_{};
   bool smear_ = false;
   Gtk::CheckButton* smear_button_ = nullptr;
+  Gtk::Label* size_label_ = nullptr;
   std::unique_ptr<Gtk::Box> options_;
 };
 
 Gtk::Widget* BrushTool::options_widget() {
   if (!options_) {
     options_ = std::make_unique<Gtk::Box>(Gtk::ORIENTATION_VERTICAL, 2);
-    auto* smear = Gtk::manage(new Gtk::CheckButton("Smear"));
+    prepare_rail_box(*options_);
+    auto* smear = Gtk::manage(new Gtk::CheckButton("Smr"));
     smear_button_ = smear;
-    smear->set_tooltip_text("Deluxe Paint smear: the tip drags the pixels under it");
+    smear->set_tooltip_text("Smear: the tip drags the pixels under it");
+    configure_rail_check(*smear);
     smear->signal_toggled().connect([this, smear]() { smear_ = smear->get_active(); });
+    auto* size = Gtk::manage(new Gtk::Label());
+    size_label_ = size;
+    size->set_halign(Gtk::ALIGN_START);
+    size->set_tooltip_text("Brush size. [ and ] step it.");
+    const int px = host_ != nullptr && host_->brush_tip_px() > 0
+                       ? host_->brush_tip_px()
+                       : brush_tip_at(host_ != nullptr ? host_->brush_tip() : 3).size;
+    size->set_text(std::to_string(px) + " px");
+    options_->pack_start(*size, Gtk::PACK_SHRINK);
     options_->pack_start(*smear, Gtk::PACK_SHRINK);
     options_->show_all();
   }
@@ -92,6 +109,13 @@ Gtk::Widget* BrushTool::options_widget() {
     smear_button_->set_active(smear_);
   }
   return options_.get();
+}
+
+void BrushTool::set_size_readout(int px) {
+  if (size_label_ == nullptr || px < 1) {
+    return;
+  }
+  size_label_->set_text(std::to_string(px) + " px");
 }
 
 double BrushTool::snapped(double v) const {

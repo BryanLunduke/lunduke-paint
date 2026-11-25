@@ -147,7 +147,8 @@ void custom_brush_scale(CustomBrush& brush, int numerator, int denominator) {
 }
 
 void custom_brush_remap(CustomBrush& brush, Color ink) {
-  if (brush.empty()) {
+  // A clear foreground would punch every opaque stamp out of the brush.
+  if (brush.empty() || ink.a == 0) {
     return;
   }
   for (int i = 0; i < brush.width * brush.height; ++i) {

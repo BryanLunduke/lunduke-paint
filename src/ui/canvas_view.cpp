@@ -922,6 +922,22 @@ void CanvasView::set_scanlines(bool enabled) {
 
 void CanvasView::draw_scanlines(const Cairo::RefPtr<Cairo::Context>& cr, int ox, int oy, int canvas_w,
                                 int canvas_h) {
+  cr->save();
+  cr->translate(ox, oy);
+  // At 100% and below, one screen row is one image row (or less). A 1×2
+  // device-pixel tile matches the bake and stays a scanline when zoomed out.
+  // Above 100% each image row covers several screen rows. Darken the whole
+  // odd image row, or the overlay becomes a 1px mesh through every pixel.
+  if (zoom_ > 1.0 + 1e-6) {
+    cr->set_antialias(Cairo::ANTIALIAS_NONE);
+    cr->set_source_rgba(0, 0, 0, 110.0 / 255.0);
+    for (int y = 1; y < canvas_h; y += 2) {
+      cr->rectangle(0, y * zoom_, canvas_w * zoom_, zoom_);
+    }
+    cr->fill();
+    cr->restore();
+    return;
+  }
   if (!scanline_pattern_) {
     auto tile = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, 1, 2);
     unsigned char* pixels = tile->get_data();
@@ -937,10 +953,6 @@ void CanvasView::draw_scanlines(const Cairo::RefPtr<Cairo::Context>& cr, int ox,
     scanline_pattern_->set_extend(Cairo::EXTEND_REPEAT);
     cairo_pattern_set_filter(scanline_pattern_->cobj(), CAIRO_FILTER_NEAREST);
   }
-  cr->save();
-  cr->translate(ox, oy);
-  // Screen pixels, not canvas pixels. Scaling the 1×2 tile with the zoom
-  // makes the lines vanish at 50% and turn into a flat tint at 25%.
   cr->set_source(scanline_pattern_);
   cr->rectangle(0, 0, canvas_w * zoom_, canvas_h * zoom_);
   cr->fill();
